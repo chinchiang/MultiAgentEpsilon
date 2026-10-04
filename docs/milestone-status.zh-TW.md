@@ -1,5 +1,9 @@
 # 第一個里程碑：實作狀態與驗收方式
 
+## 2026-10-04 模型 gateway 更新
+
+已加入共用 gateway、離線 mock、Gemini／Bedrock／GLM adapter，以及 56 項離線契約／安全回歸。Gemini 實際合成 ACK 推論成功；GLM 的 proxy CONNECT 403 與 Bedrock 的 AWS profile／模型設定仍阻擋真實推論。模型輸出僅供參考，不改變既有安全 gate 或候選容器權限。操作、證據及後續盲測界線見 [模型 gateway 文件](model-gateway.zh-TW.md)。下方多模型尚未實作的敘述為先前批次的歷史狀態。
+
 ## 2026-10-04 掃描覆蓋與生命週期更新
 
 本輪本地回歸為 **125 passed、0 failed、0 skipped**，含真實取消與孤兒容器回收。G2 支援限額 gzip／zip／tar 展開及 HEAD 可達歷史 blobs；未知內容、超限或覆蓋不完整均 BLOCK。管線由 supervisor 管理總期限與每程序資源限制，清理成功後才允許 ALLOW。完整界線與遠端尚缺條件見 [覆蓋與生命週期驗收](coverage-lifecycle-acceptance.zh-TW.md)。下方為先前批次的歷史驗收。

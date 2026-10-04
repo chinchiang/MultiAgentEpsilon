@@ -46,7 +46,7 @@ python3 scripts/dev_db.py stop
 | 授權回歸 | 登入負例、同角色、跨租戶、管理者、欄位限制、登出及完整 fixture 狀態；16 個案例 | 完整 G5／Web/API 黑箱掃描、TLS／CSRF／JWT／SSRF |
 | 政策 | 嚴格結果格式、故障阻擋、subject／policy digest、基準變更檢查 | 簽章／可信發布、例外生命週期、不可繞過的遠端設定 |
 | CI | 遠端 main／PR 正反例、固定 actions SHA、最小權限、早期拒絕證據與清理 | ruleset 管理寫入遭拒；合併保護及普通開發者繞過驗收仍未完成 |
-| 多模型 | [端點盤點範本](security/models.example.json)，所有端點 UNVERIFIED | 雲地串接、mock gateway、G6、家族獨立審查及偏誤實驗 |
+| 多模型 | [受限 gateway、mock、Gemini／Bedrock／GLM adapter](docs/model-gateway.zh-TW.md)；Gemini 合成推論已驗證 | Bedrock／GLM 真實推論、G6、家族獨立審查及偏誤實驗 |
 
 G2 與 subject digest 共用輸入清冊：生成物名稱只在 repository 根目錄排除，巢狀同名來源仍納入；Python／pytest 快取另行排除，任何已追蹤的保留生成路徑會拒絕執行。來源 symlink、不可讀目錄、輸入超限及雜湊時檔案變動會拒絕。Gitleaks 的掃描快照重新命名並映射回原路徑，避免工具的隱含目錄排除縮減範圍，且不接受候選的 inline allow 註解。Git 歷史以候選 HEAD 可達的全部 blobs 為範圍，淺層 clone 會失敗。gzip／zip／tar 依限額展開；不支援、損壞、加密或超限內容會阻擋。排除的依賴／暫存內容與其他 refs 不宣稱已掃描。
 
