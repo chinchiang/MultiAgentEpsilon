@@ -14,7 +14,9 @@ gateway 提供共用 `Request`／`Reply`、離線 mock、Gemini `generateContent
 .venv/bin/python -I scripts/model_smoke.py --live --provider bedrock --provider glm
 ```
 
-每個供應商只收到同一個固定 ACK fixture，不接受 repository 路徑、附件或任意 prompt 參數。每個供應商最多 1 次呼叫、要求最多 256 output tokens、總期限 30 秒；不重試、不自動切換付費供應商。每個 HTTP 操作另有 10 秒 I/O timeout。預設結果寫入新的 `artifacts/model-smoke-<uuid>.json`，已有的結果檔不能覆寫。退出碼 0 代表選定的所有供應商都完成固定回應驗證；任一失敗、缺設定或取消為 1。
+每個供應商只收到同一個固定 ACK fixture，不接受 repository 路徑、附件或任意 prompt 參數。每個供應商最多 1 次呼叫、要求最多 256 output tokens、單次期限 30 秒；不重試、不自動切換付費供應商。每個 HTTP 操作另有 10 秒 I/O timeout。supervisor 的工作期限為供應商數 × 30＋10 秒，最多 130 秒，期限後進行程序清理。退出碼 0 必須同時滿足全部固定回應驗證及清理完成；任一失敗、缺設定或取消為 1。
+
+從報告 schema 2 起，正式證據位於 `artifacts/<run-id>/report.json`，開始執行前即建立 INCOMPLETE，逐供應商原子更新進度。`--output` 保留為額外匯出，必須使用新路徑；若 supervisor 被 SIGKILL，匯出檔可能停留在初始 INCOMPLETE，應依其 `canonical_report` 回查正式報告。janitor 不依任意匯出路徑寫檔。
 
 環境設定：
 
@@ -45,6 +47,20 @@ synthetic 標籤是可信呼叫者的分類聲明，並不是 DLP 或機密偵�
 
 結果皆為 `advisory_only`，不輸出安全閘門 ALLOW，也不改變 `security/roe.json` 中既有試點的 `llm_calls:false`。多 provider smoke 只證明各協定能完成固定 fixture，尚不構成獨立安全審查或降低 bias 的實驗證據。
 
-這個獨立 smoke runner 支援 SIGTERM／SIGINT 取消；SIGKILL 或主機中斷無法保證寫出最終報告或回收 AWS 子程序，尚未接入 security supervisor 的孤兒回收清冊。缺報告不能視為成功。正式長時間執行前仍需補足這段生命週期整合。
+## 2026-10-05 模型 runner 生命週期
+
+smoke runner 現在由獨立 supervisor 管理，使用既有 `.state/runs/<run-id>` 登記及同一支 janitor。模型回收不需要 Docker。worker 及每個 AWS CLI process group 都先以 PID、start ticks、boot ID、UID 持久化登記，再透過 stdin 放行執行；登記前 owner 消失會使 pipe EOF，子程序不會執行模型請求。AWS JSON payload 接在放行字元之後，wrapper 不讀取或記錄其內容。
+
+worker 最多只能寫 AWAITING_CLEANUP，最後的 COMPLETE 由 parent 在驗證所有供應商結果、退出碼及清理成功後寫入。worker／CLI 受到 2 GiB address-space、512 MiB data、30／35 秒 CPU、1 MiB 檔案、128 FD 及禁用 core dump 的限制。SIGTERM／SIGINT、總期限、worker 異常退出均終止登記的程序群組並清理專屬 TMPDIR。
+
+supervisor 遭 SIGKILL 或主機重啟後，執行：
+
+```bash
+.venv/bin/python -I scripts/cleanup_runs.py
+```
+
+janitor 只處理已死亡的 owner；先停止 worker，再重新盤點 AWS 子程序，避免清理時仍新增程序。以 flock 避免同一 run 被並行回收；PID start ticks 不同或不同 boot 的程序不會被發送訊號。清理失敗保留登記、標記 ERROR，後續可重試。孤兒報告一律為 CANCELLED，即使 worker 曾回報成功也不補升 COMPLETE。缺失／損壞報告會重建不成功的最小證據，不複製原始錯誤文字。
+
+新增 29 項離線生命週期回歸涵蓋 parent SIGTERM／SIGINT／SIGKILL、worker SIGKILL、忽略 SIGTERM 的 CLI 子程序、登記前中斷、成功待清理時中斷、清理途中取消、缺失／損壞／重複 key 證據、清理重試、PID／boot 身分保護及並行 janitor。既有 CI 的 always 清理步驟會執行相同 janitor；主機中斷需在恢復後、保留原 workspace 的環境執行。若整個 workspace／登記遺失，就無法由本地 janitor 重建證據；已送到供應商的遠端推論也不能保證停止或不計費。直接呼叫未綁定 run directory 的 adapter 不具有此 runner 的孤兒回收契約。
 
 下一批依序完成：Bedrock／GLM 真實推論驗收；使用已知缺陷及乾淨案例做盲測，分開保存不同模型家族的意見與分歧；建立可重現的人工裁決及誤報／漏報指標。其後再擴充 SCA／SBOM／G3、完整 G5 與 G6 的安全案例。不得用多數模型同意替代確定性 oracle 或獨立合併核准。

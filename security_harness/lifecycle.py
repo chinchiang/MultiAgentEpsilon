@@ -28,17 +28,18 @@ def temporary_directory(run_id):
     return Path('/tmp') / f'epsilon-run-{os.getuid()}-{run_id}'
 
 
-def prepare_run(root, run_id):
+def prepare_run(root, run_id, operation='security'):
     work = run_directory(root, run_id)
+    marker = {'run_id': run_id, 'operation': operation, 'pid': os.getpid(), 'start': identity(os.getpid()),
+              'uid': os.getuid(), 'boot': Path('/proc/sys/kernel/random/boot_id').read_text().strip()}
     work.mkdir(parents=True, mode=0o700)
     try:
+        # A recoverable owner precedes external temporary resource allocation.
+        write_json(work / 'owner.json', marker)
         temporary_directory(run_id).mkdir(mode=0o700)
     except Exception:
-        work.rmdir()
+        shutil.rmtree(work)
         raise
-    marker = {'run_id': run_id, 'pid': os.getpid(), 'start': identity(os.getpid()),
-              'uid': os.getuid(), 'boot': Path('/proc/sys/kernel/random/boot_id').read_text().strip()}
-    write_json(work / 'owner.json', marker)
     return work
 
 
@@ -46,7 +47,8 @@ def owner_alive(marker):
     if marker['boot'] != Path('/proc/sys/kernel/random/boot_id').read_text().strip():
         return False
     try:
-        return identity(marker['pid']) == marker['start']
+        raw = Path(f"/proc/{marker['pid']}/stat").read_text().rsplit(')', 1)[1].split()
+        return raw[0] != 'Z' and raw[19] == marker['start']
     except FileNotFoundError:
         return False
 
@@ -93,10 +95,20 @@ def sweep_stale(root):
     for work in sorted((root / '.state' / 'runs').glob('*')):
         if work.is_symlink():
             raise ValueError('invalid run directory')
-        marker = json.loads((work / 'owner.json').read_text())
+        try:
+            marker = json.loads((work / 'owner.json').read_text())
+        except FileNotFoundError:
+            # Another janitor removed it, or initialization has not published
+            # ownership yet. No external resources exist before that marker.
+            continue
         if marker['run_id'] != work.name or marker['uid'] != os.getuid():
             raise ValueError('invalid run owner')
         if not owner_alive(marker):
+            if marker.get('operation') == 'model-smoke':
+                from .llm.lifecycle import recover
+                if recover(root, work.name):
+                    cleaned.append(work.name)
+                continue
             if 'worker_pid' in marker:
                 try:
                     same_worker = identity(marker['worker_pid']) == marker['worker_start']

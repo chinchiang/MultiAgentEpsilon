@@ -1,5 +1,9 @@
 # 第一個里程碑：實作狀態與驗收方式
 
+## 2026-10-05 模型取消與孤兒回收
+
+模型 runner 已接入 supervisor 與共用 janitor，登記後才啟動 worker／AWS CLI，成功結果須待清理完成才發布。新增 29 項離線生命週期回歸；報告 schema 2 與中斷恢復方式見 [模型 gateway 文件](model-gateway.zh-TW.md)。本輪只處理生命週期，不新增付費模型呼叫；Bedrock／GLM 真實串接及合併保護仍分別待驗收。
+
 ## 2026-10-04 模型 gateway 更新
 
 已加入共用 gateway、離線 mock、Gemini／Bedrock／GLM adapter，以及 56 項離線契約／安全回歸。Gemini 實際合成 ACK 推論成功；GLM 的 proxy CONNECT 403 與 Bedrock 的 AWS profile／模型設定仍阻擋真實推論。模型輸出僅供參考，不改變既有安全 gate 或候選容器權限。操作、證據及後續盲測界線見 [模型 gateway 文件](model-gateway.zh-TW.md)。下方多模型尚未實作的敘述為先前批次的歷史狀態。

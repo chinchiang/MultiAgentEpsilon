@@ -101,8 +101,9 @@ class AwsCLI:
     Kill the dedicated process group and reap the CLI on cancellation/timeout.
     """
 
-    def __init__(self, executable="aws"):
+    def __init__(self, executable="aws", run_directory=None):
         self.executable = executable
+        self.run_directory = run_directory
 
     async def converse(self, region, payload):
         # Prevent configured endpoint overrides from redirecting signed requests.
@@ -110,13 +111,19 @@ class AwsCLI:
                and k not in {"GEMINI_API_KEY", "GLM_API_KEY"}}
         env.update(AWS_EC2_METADATA_DISABLED="true", AWS_MAX_ATTEMPTS="1", AWS_PAGER="",
                    AWS_IGNORE_CONFIGURED_ENDPOINT_URLS="true", AWS_CLI_AUTO_PROMPT="off")
-        process = await asyncio.create_subprocess_exec(
-            self.executable, "bedrock-runtime", "converse", "--region", region,
+        command = [self.executable, "bedrock-runtime", "converse", "--region", region,
             "--cli-input-json", "file:///dev/stdin", "--output", "json", "--no-cli-pager",
-            "--cli-connect-timeout", "10", "--cli-read-timeout", "20",
+            "--cli-connect-timeout", "10", "--cli-read-timeout", "20"]
+        if self.run_directory is not None:
+            from .lifecycle import gated_command, register_group
+            command = gated_command(command)
+        process = await asyncio.create_subprocess_exec(*command,
             stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.DEVNULL, env=env, start_new_session=True)
         try:
+            if self.run_directory is not None:
+                register_group(self.run_directory, process.pid)
+                process.stdin.write(b'G')
             process.stdin.write(json.dumps(payload).encode())
             await process.stdin.drain()
             process.stdin.close()
