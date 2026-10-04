@@ -122,7 +122,7 @@ def create_app(dsn: str, schema: str, *, variant: str = "fixed") -> FastAPI:
     def get_item(item_id: int, user=Depends(principal)):
         with connect(dsn, schema) as conn:
             row = conn.execute("SELECT * FROM items WHERE id=%s", (item_id,)).fetchone()
-        if row is None or (variant == "fixed" and not permitted(row, user)):
+        if row is None:  # Deliberate negative-control regression; never merge.
             raise HTTPException(404, "item not found")
         return row
 
