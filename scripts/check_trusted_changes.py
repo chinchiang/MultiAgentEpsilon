@@ -42,9 +42,11 @@ def live_approval(number, head, base):
     def api(path, pages=False):
         args = ["gh", "api", f"repos/{repo}/{path}"]
         if pages:
-            args += ["--paginate", "--slurp"]
-        value = json.loads(subprocess.check_output(args, text=True, timeout=30, stderr=subprocess.DEVNULL))
-        return [row for page in value for row in page] if pages else value
+            # gh 2.46 (the cloud runtime) predates --slurp. Stream one JSON
+            # object per line across all pages; review text remains JSON-escaped.
+            args += ["--paginate", "--jq", ".[] | @json"]
+        output = subprocess.check_output(args, text=True, timeout=30, stderr=subprocess.DEVNULL)
+        return [json.loads(line) for line in output.splitlines() if line] if pages else json.loads(output)
     pr = api(f"pulls/{number}")
     reviews = api(f"pulls/{number}/reviews?per_page=100", pages=True)
     return approved_review(pr, reviews, head, base, policy["baseline_reviewers"])

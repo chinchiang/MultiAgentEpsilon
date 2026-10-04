@@ -4,7 +4,9 @@
 
 此版本已修正必要案例集合與 run 綁定、掃描／雜湊範圍、初始化錯誤證據，並以無網路容器隔離候選程式，改由外部 HTTP／資料庫 oracle 評分。完整本地回歸為 **81 passed、0 failed、0 skipped**；缺陷版 14 案例／5 findings／BLOCK，修正版 14 案例／0 findings／ALLOW；真實 HTTP smoke 通過。保留 1 項既有 Starlette 開發用 TestClient 棄用警告。
 
-已加入精確 head SHA 的獨立基準核准流程及 base evaluator 的 `pull_request_target` workflow。這些變更尚需透過 PR 採納；遠端分支執行結果以 PR／Actions 當次證據為準。ruleset 管理 API 再次回覆 HTTP 403，main 仍未受保護；獨立可信檢查來源與一般開發者繞過驗收未完成。操作及基準遷移見 [可信執行文件](trusted-execution.zh-TW.md)。下文保留先前 main 基線的歷史紀錄。
+已加入精確 head SHA 的獨立基準核准流程及 base evaluator 的 `pull_request_target` workflow。[PR #5](https://github.com/chinchiang/MultiAgentEpsilon/pull/5) 尚待採納；首輪手動遠端 [run 37184958648](https://github.com/chinchiang/MultiAgentEpsilon/actions/runs/37184958648) 已成功，測試與隔離安全閘門均通過。手動 run 不會執行 PR 審核 guard；另外已對真實 PR 查詢審核資料，確認未核准基準變更為 BLOCK。最後 head 的驗證結果見 PR 說明。
+
+ruleset 管理 API 再次回覆 HTTP 403，main 仍未受保護；獨立可信檢查來源與一般開發者繞過驗收未完成。PR 作者目前也是唯一基準 reviewer，仍需有合格的獨立 reviewer，不能自我核准。操作及基準遷移見 [可信執行文件](trusted-execution.zh-TW.md)。下文保留先前 main 基線的歷史紀錄。
 
 本文件記錄公開程式碼試點的實作狀態。使用者原始參考文件與內部規劃留在本地。首版已建立可在本地執行的 Python harness、PyPI 安裝前預檢、真實 Gitleaks、PostgreSQL fixture、14 個授權案例、政策負例與 GitHub Actions 工作流程。
 
