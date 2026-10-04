@@ -33,5 +33,32 @@
     "typing-extensions",
     "typing-inspection",
     "uvicorn"
-  ]
+  ],
+  "gate_contracts": {
+    "G1": {
+      "kind": "scan"
+    },
+    "G2": {
+      "kind": "scan"
+    },
+    "AUTH": {
+      "kind": "test",
+      "case_ids": [
+        "anonymous denied",
+        "forged bearer denied",
+        "owner reads own data",
+        "owner updates own data",
+        "bob: unauthorized read denied without data",
+        "bob: unauthorized write denied without side effect",
+        "carol: unauthorized read denied without data",
+        "carol: unauthorized write denied without side effect",
+        "same-tenant admin delegation allowed",
+        "admin cross-tenant denied",
+        "member export denied",
+        "admin export tenant-scoped",
+        "owner field cannot be reassigned",
+        "logout revokes session"
+      ]
+    }
+  }
 }

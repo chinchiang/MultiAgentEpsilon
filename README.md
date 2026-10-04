@@ -10,6 +10,7 @@ Vibe Coding 資安測試框架的第一個可執行試點：Python 3.12、FastAP
 
 ```bash
 python3 scripts/bootstrap.py
+python3 scripts/build_runtime.py
 python3 scripts/dev_db.py start
 .venv/bin/python -m pytest --junitxml=artifacts/pytest.xml
 .venv/bin/python scripts/smoke_http.py
@@ -19,11 +20,15 @@ python3 scripts/dev_db.py start
 
 `bootstrap.py` 先核對 PyPI 套件、固定版本、所有 lock 雜湊、7 天冷卻期與 wheel 可用性；驗證 Gitleaks 官方 release checksum 及固定 binary digest，再跑 G2。成功後才下載與安裝 hash-verified wheels，禁用 source builds、額外 index 與隱含依賴解析。首版使用明確核准的 23 個套件；依賴更新需重新審查，不自動擴充 allowlist。
 
-`dev_db.py` 只管理帶本專案 label 的容器。資料庫以非 root、唯讀根檔案系統、tmpfs、資源限制及 loopback port 55432 執行；密碼每次新建時產生，保存在忽略版控的 `.state/db.json`。這是本地 fixture 的隔離設定，尚非惡意程式碼／多租戶 runner 的安全認證；bridge 網路也未提供全面出向封鎖。
+`build_runtime.py` 以固定 digest 的 Python 映像及已核對 hash 的 wheels 離線建立容器 runtime。`run_security.py` 在無網路、非 root、唯讀根檔案系統的容器執行候選程式，經 Unix socket 提供 HTTP；可信評分器在容器外驗證回應與資料庫副作用。只掛載來源快照、合成設定與必要 socket，不掛載評分器、證據或 Docker socket。詳見 [可信執行與合併保護](docs/trusted-execution.zh-TW.md)。
+
+`dev_db.py` 的 loopback 資料庫供本地開發與可信基準測試使用；隔離評分會另外建立無網路資料庫與最低所需權限的應用帳號，完成後移除。所有資料均為合成資料。
 
 `expect_block.py` 會確認缺陷版的 **5 個授權違規**被觀測到；任意工具錯誤並不算成功。`run_security.py` 預設跑修正版，回傳碼 0 表示這次有限試點 ALLOW，1 表示 BLOCK。`ERROR`、`TIMEOUT`、必要零目標、缺 gate、過期或不同 subject／policy 的證據都不能 ALLOW。正向操作及資料庫副作用也會一起驗證。
 
-每次執行寫入新的 `artifacts/<run-id>/report.json`；`artifacts/latest.txt` 只供尋找最新 run，不是可信 attestation。報告記錄 subject／policy digest、案例及工具版本，沒有真實模型呼叫或生產資料。停止並刪除自己建立的測試資料：
+結果 schema 為第 2 版：每筆 gate 綁定相同 run ID、subject 與 policy digest，AUTH 必須包含政策指定的唯一案例集合；缺漏、重複、未知 ID 或彙總不一致均 BLOCK。
+
+每次執行在解析設定前建立 `artifacts/<run-id>/report.json`；錯誤只保存階段與例外類型，不記錄敏感例外文字。`artifacts/latest.txt` 是 security run 索引；bootstrap、preflight 與 runtime-build 使用各自的索引。這些是未簽章的執行證據，不是可信 attestation。停止並刪除本地開發資料庫：
 
 ```bash
 python3 scripts/dev_db.py stop
@@ -41,15 +46,15 @@ python3 scripts/dev_db.py stop
 | CI | 遠端 main／PR 正反例、固定 actions SHA、最小權限、早期拒絕證據與清理 | ruleset 管理寫入遭拒；合併保護及普通開發者繞過驗收仍未完成 |
 | 多模型 | [端點盤點範本](security/models.example.json)，所有端點 UNVERIFIED | 雲地串接、mock gateway、G6、家族獨立審查及偏誤實驗 |
 
-G2 掃描排除 `.git` 的原始檔、`.venv`、`.tools`、`.state`、`artifacts` 與快取；Git 歷史由 `gitleaks git --log-opts=--all` 另處理。淺層 clone 會失敗；未有第一個 commit 時明列 history NOT_AVAILABLE。排除的依賴／暫存內容不宣稱已掃描，fixture 密碼及未遮罩診斷不能提交或上傳。
+G2 與 subject digest 共用輸入清冊：生成物名稱只在 repository 根目錄排除，巢狀同名來源仍納入；Python／pytest 快取另行排除，任何已追蹤的保留生成路徑會拒絕執行。來源 symlink 也會拒絕。Gitleaks 的掃描快照重新命名並映射回原路徑，避免工具的隱含目錄排除縮減範圍，且不接受候選的 inline allow 註解。Git 歷史另行掃描，淺層 clone 會失敗。排除的依賴／暫存內容不宣稱已掃描。
 
 ## CI 啟用界線
 
-[security.yml](.github/workflows/security.yml) 可在 main push、PR 或手動觸發。PR 使用 base SHA 的檢查程式，對 workflow、policy、harness、測試、bootstrap 及 lock 等敏感變更先阻擋，等候獨立審查。首次空分支沒有基準，應先由維護者建立可信基線。
+[security.yml](.github/workflows/security.yml) 改用 `pull_request_target`，只執行 base SHA 的 evaluator、安裝程序與測試；候選 checkout 僅作資料，只有限定的 `fixture_app` 來源會送入無網路容器。token 權限為 contents/read 與 pull-requests/read，不提供模型或部署金鑰。main push 與手動執行亦使用同一評分路徑；手動選取的 workflow ref 代表維護者選定的 evaluator，不能自動當成已核准基準。
 
-**PR 自己可以修改 YAML，因此 YAML 內的檢查不足以保護該工作流程。** 必須在 GitHub 設定外部可信 required workflow／ruleset（依方案可用性），限制 bypass、直接 push 及保護檔案變更，並實際嘗試繞過。一般 required status 的名稱相同也不保證來自可信 evaluator。敏感變更須經獨立可信流程審查後更新基準，不能刪掉 guard 讓 PR 自行通過。
+新執行入口預設受保護。基準更新需由可信 reviewer 對目前 head SHA 獨立核准；guard 即時查核 GitHub PR／reviews，撤回核准、換版或作者自行核准皆不放行。此 run 仍以舊基準判定，合併後才成為下一輪基準。
 
-已部署遠端 CI，最新基線 51 項測試通過；正常 PR 成功，授權退化與政策降級 PR 均如預期失敗，測試 PR 已關閉且未合併。**main 尚未受合併保護**：建立 ruleset 的 API 被整合權限拒絕。具體規則、執行證據與來源信任限制見 [遠端驗收紀錄](docs/remote-ci-validation.zh-TW.md)。正式啟用前仍須評估不受信 PR 的 runner／網路／憑證隔離；本試點不使用 `pull_request_target`、部署憑證或模型金鑰。
+**main 的合併保護仍需管理權限啟用。** Required status 名稱與 GitHub Actions app ID 無法唯一識別可信 workflow；要保證檢查不可偽造，仍需方案支援的 required workflow 或獨立 GitHub App 驗證來源並回報檢查。規則檔只能作候選設定，不能把它的存在當作已生效。啟用與基準遷移程序見 [操作文件](docs/trusted-execution.zh-TW.md)，先前遠端基線見 [驗收紀錄](docs/remote-ci-validation.zh-TW.md)。
 
 ## 文件與來源
 

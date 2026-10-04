@@ -8,24 +8,15 @@ import tempfile
 from pathlib import Path
 
 from .results import digest_file
-
-EXCLUDED = {".git", ".venv", ".tools", ".state", "artifacts", "__pycache__", ".pytest_cache"}
+from .inputs import input_files
 
 
 def scan(root: Path, binary: Path, config: Path, expected_hash: str, *, history=True) -> dict:
     if digest_file(binary) != expected_hash:
         raise ValueError("scanner integrity mismatch")
-    paths = []
-    for path in root.rglob("*"):
-        relative = path.relative_to(root)
-        if EXCLUDED.intersection(relative.parts):
-            continue
-        if path.is_symlink():
-            raise ValueError("symlink scan scope needs explicit review")
-        if path.is_file():
-            if path.stat().st_size > 20 * 1024 * 1024:
-                raise ValueError("oversize file would leave incomplete coverage")
-            paths.append(path)
+    paths = input_files(root)
+    if any(path.stat().st_size > 20 * 1024 * 1024 for path in paths):
+        raise ValueError("oversize file would leave incomplete coverage")
     if not paths or len(paths) > 20_000:
         raise ValueError("empty or excessive scan scope")
     findings = []
@@ -34,9 +25,11 @@ def scan(root: Path, binary: Path, config: Path, expected_hash: str, *, history=
         temp = Path(temp)
         snapshot = temp / "snapshot"
         snapshot.mkdir()
-        for path in paths:
-            target = snapshot / path.relative_to(root)
-            target.parent.mkdir(parents=True, exist_ok=True)
+        names = {}
+        for index, path in enumerate(paths):
+            # Scanner-internal .git / ignore-file rules must not shrink our scope.
+            target = snapshot / f"input-{index:06d}.txt"
+            names[target.name] = path.relative_to(root).as_posix()
             shutil.copyfile(path, target)
         commands = [["dir", str(snapshot)]]
         if history:
@@ -54,6 +47,8 @@ def scan(root: Path, binary: Path, config: Path, expected_hash: str, *, history=
         for i, command in enumerate(commands):
             report = temp / f"scan-{i}.json"
             run = subprocess.run([str(binary), *command, "--config", str(config), "--redact=100",
+                                  "--ignore-gitleaks-allow",
+                                  "--gitleaks-ignore-path", str(temp),
                                   "--no-banner", "--report-format=json", "--report-path", str(report)],
                                  capture_output=True, timeout=90)
             if run.returncode not in (0, 1) or not report.exists():
@@ -65,6 +60,8 @@ def scan(root: Path, binary: Path, config: Path, expected_hash: str, *, history=
                 if not isinstance(item, dict) or not item.get("RuleID") or not item.get("File"):
                     raise ValueError("malformed scanner finding")
                 name = item["File"].removeprefix(str(snapshot) + "/")
+                if i == 0:
+                    name = names[Path(name).name]
                 findings.append({"rule": item["RuleID"], "file": name,
                                  "line": item.get("StartLine"), "scope": "worktree" if i == 0 else "history"})
     return {"targets": len(paths), "findings": findings, "scopes": scopes,

@@ -3,8 +3,11 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
+import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
+from .inputs import input_files
 
 
 def digest_file(path: Path) -> str:
@@ -17,41 +20,69 @@ def subject_digest(root: Path) -> str:
     Generated environments/state/run evidence are explicitly outside this subject.
     This content digest does not establish signer identity or immutable storage.
     """
-    excluded = {".git", ".venv", ".tools", ".state", "artifacts", "__pycache__", ".pytest_cache"}
-    selected = [p for p in root.rglob("*")
-                if not excluded.intersection(p.relative_to(root).parts) and p.is_file()]
     digest = hashlib.sha256()
-    for p in sorted(set(selected)):
-        if p.is_symlink():
-            raise ValueError("symlink subject requires explicit review")
+    for p in input_files(root):
         digest.update(p.relative_to(root).as_posix().encode() + b"\0")
+        digest.update(str(p.stat().st_mode & 0o111).encode() + b"\0")
         digest.update(p.read_bytes() + b"\0")
     return digest.hexdigest()
 
 
 def result(gate: str, status: str, kind: str, count: int, findings: int,
-           subject: str, policy: str, detail: str, **extra) -> dict:
+           subject: str | None, policy: str | None, detail: str, *, run_id: str, **extra) -> dict:
     return {
-        "schema_version": 1, "gate": gate, "execution": status,
+        **extra, "schema_version": 2, "run_id": run_id, "gate": gate, "execution": status,
         "kind": kind, "coverage_count": count, "findings": findings,
         "subject_digest": subject, "policy_digest": policy,
         "created_at": datetime.now(timezone.utc).isoformat(),
-        "detail": detail, **extra,
+        "detail": detail,
     }
 
 
-def decide(records: list[dict], policy: dict, subject: str, policy_digest: str,
-           now: datetime | None = None) -> dict:
-    now = now or datetime.now(timezone.utc)
-    reasons = []
-    seen = set()
+def validate_policy(policy: dict) -> None:
     required = policy.get("required_gates")
+    contracts = policy.get("gate_contracts")
     if (not isinstance(required, list) or not required or
             any(not isinstance(g, str) or not g for g in required) or
             len(set(required)) != len(required) or
             type(policy.get("max_evidence_age_seconds")) is not int or
-            policy["max_evidence_age_seconds"] <= 0):
+            policy["max_evidence_age_seconds"] <= 0 or not isinstance(contracts, dict) or
+            set(contracts) != set(required)):
+        raise ValueError("invalid trusted policy")
+    for contract in contracts.values():
+        if not isinstance(contract, dict) or contract.get("kind") not in ("scan", "test"):
+            raise ValueError("invalid gate contract")
+        if contract["kind"] == "test":
+            validate_cases([{"case": c, "passed": True} for c in contract.get("case_ids", [])], contract)
+
+
+def validate_cases(cases: list[dict], contract: dict) -> None:
+    expected = contract.get("case_ids")
+    if (not isinstance(expected, list) or not expected or
+            any(not isinstance(x, str) or not x for x in expected) or
+            len(set(expected)) != len(expected)):
+        raise ValueError("invalid required case manifest")
+    if (not isinstance(cases, list) or len(cases) != len(expected) or
+            any(not isinstance(c, dict) or not isinstance(c.get("case"), str) or
+                type(c.get("passed")) is not bool for c in cases)):
+        raise ValueError("invalid case coverage")
+    names = [c["case"] for c in cases]
+    if len(set(names)) != len(names) or set(names) != set(expected):
+        raise ValueError("missing, duplicate or unknown case ID")
+
+
+def decide(records: list[dict], policy: dict, subject: str, policy_digest: str,
+           now: datetime | None = None, *, run_id: str) -> dict:
+    now = now or datetime.now(timezone.utc)
+    reasons = []
+    seen = set()
+    try:
+        validate_policy(policy)
+    except (ValueError, TypeError, AttributeError):
         return {"decision": "BLOCK", "reasons": ["invalid trusted policy"]}
+    required = policy["required_gates"]
+    if not subject or not policy_digest or not isinstance(run_id, str) or not run_id:
+        return {"decision": "BLOCK", "reasons": ["missing run or subject binding"]}
     for record in records:
         if not isinstance(record, dict):
             reasons.append("malformed evidence")
@@ -64,15 +95,21 @@ def decide(records: list[dict], policy: dict, subject: str, policy_digest: str,
             reasons.append(f"{gate}: duplicate evidence")
         seen.add(gate)
         try:
-            valid = (type(record["schema_version"]) is int and record["schema_version"] == 1
+            valid = (type(record["schema_version"]) is int and record["schema_version"] == 2
+                     and record["run_id"] == run_id
                      and record["subject_digest"] == subject
                      and record["policy_digest"] == policy_digest
-                     and record["kind"] in ("scan", "test")
+                     and record["kind"] == policy["gate_contracts"][gate]["kind"]
                      and record["execution"] in ("COMPLETED", "ERROR", "TIMEOUT", "NOT_RUN")
                      and type(record["coverage_count"]) is int and record["coverage_count"] > 0
                      and type(record["findings"]) is int and record["findings"] >= 0)
             if not valid:
                 raise ValueError("invalid contract")
+            if record["kind"] == "test":
+                validate_cases(record["cases"], policy["gate_contracts"][gate])
+                if (record["coverage_count"] != len(record["cases"]) or
+                        record["findings"] != sum(not c["passed"] for c in record["cases"])):
+                    raise ValueError("case summary mismatch")
             when = datetime.fromisoformat(record["created_at"])
             age = (now - when).total_seconds()
             if not 0 <= age <= policy["max_evidence_age_seconds"]:
@@ -93,4 +130,10 @@ def decide(records: list[dict], policy: dict, subject: str, policy_digest: str,
 
 def write_json(path: Path, data: dict) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n")
+    fd, temporary = tempfile.mkstemp(prefix=".report-", dir=path.parent)
+    try:
+        with os.fdopen(fd, "w") as stream:
+            stream.write(json.dumps(data, ensure_ascii=False, indent=2) + "\n")
+        os.replace(temporary, path)
+    finally:
+        Path(temporary).unlink(missing_ok=True)

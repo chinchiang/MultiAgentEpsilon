@@ -24,8 +24,10 @@ def database_url() -> str:
 
 def connect(dsn: str, schema: str):
     url = urlsplit(dsn)
-    if (url.scheme != "postgresql" or url.hostname != "127.0.0.1"
-            or url.path != "/epsilon_fixture" or url.query or url.fragment):
+    local_tcp = url.hostname == "127.0.0.1" and not url.query
+    isolated_socket = url.hostname is None and url.query == "host=/run/epsilon-db"
+    if (url.scheme != "postgresql" or not (local_tcp or isolated_socket)
+            or url.path != "/epsilon_fixture" or url.fragment):
         raise ValueError("only the disposable loopback fixture database is allowed")
     if not re.fullmatch(r"epsilon_[a-f0-9]{16}", schema):
         raise ValueError("invalid fixture schema")

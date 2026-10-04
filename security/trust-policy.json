@@ -1,0 +1,6 @@
+{
+  "schema_version": 1,
+  "repository": "chinchiang/MultiAgentEpsilon",
+  "baseline_reviewers": ["chinchiang"],
+  "require_independent_author": true
+}
