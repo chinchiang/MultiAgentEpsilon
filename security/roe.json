@@ -5,6 +5,7 @@
   "database_name": "epsilon_fixture",
   "max_cases": 50,
   "max_seconds": 120,
+  "max_total_seconds": 600,
   "allow_redirects": false,
   "external_callback": false,
   "llm_calls": false,

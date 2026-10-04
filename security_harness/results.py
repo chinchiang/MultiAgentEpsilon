@@ -4,14 +4,35 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import stat
 import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 from .inputs import input_files
 
+EVIDENCE_VERSION = 3
+SUBJECT_FORMAT = "worktree-manifest-v1"
+
+
+def file_identity(path: Path) -> tuple[os.stat_result, str]:
+    """Stream regular files without following a final symlink; detect read-time changes."""
+    fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+    with os.fdopen(fd, "rb") as stream:
+        before = os.fstat(stream.fileno())
+        if not stat.S_ISREG(before.st_mode):
+            raise ValueError("non-regular input")
+        digest = hashlib.file_digest(stream, "sha256").hexdigest()
+        after = os.fstat(stream.fileno())
+    current = path.lstat()
+    def identity(info):
+        return (info.st_dev, info.st_ino, info.st_mode, info.st_size, info.st_mtime_ns, info.st_ctime_ns)
+    if identity(before) != identity(after) or identity(after) != identity(current):
+        raise ValueError("input changed while hashing")
+    return before, digest
+
 
 def digest_file(path: Path) -> str:
-    return hashlib.sha256(path.read_bytes()).hexdigest()
+    return file_identity(path)[1]
 
 
 def subject_digest(root: Path) -> str:
@@ -20,18 +41,25 @@ def subject_digest(root: Path) -> str:
     Generated environments/state/run evidence are explicitly outside this subject.
     This content digest does not establish signer identity or immutable storage.
     """
-    digest = hashlib.sha256()
-    for p in input_files(root):
-        digest.update(p.relative_to(root).as_posix().encode() + b"\0")
-        digest.update(str(p.stat().st_mode & 0o111).encode() + b"\0")
-        digest.update(p.read_bytes() + b"\0")
-    return digest.hexdigest()
+    paths = input_files(root)
+    files = []
+    for p in paths:
+        info, content = file_identity(p)
+        files.append({"path": p.relative_to(root).as_posix(), "type": "file",
+                      "executable_bits": info.st_mode & 0o111, "size": info.st_size,
+                      "sha256": content})
+    if paths != input_files(root):
+        raise ValueError("input inventory changed while hashing")
+    encoded = json.dumps({"format": SUBJECT_FORMAT, "files": files},
+                         sort_keys=True, ensure_ascii=True, separators=(",", ":")).encode()
+    return SUBJECT_FORMAT + ":sha256:" + hashlib.sha256(encoded).hexdigest()
 
 
 def result(gate: str, status: str, kind: str, count: int, findings: int,
            subject: str | None, policy: str | None, detail: str, *, run_id: str, **extra) -> dict:
     return {
-        **extra, "schema_version": 2, "run_id": run_id, "gate": gate, "execution": status,
+        **extra, "schema_version": EVIDENCE_VERSION, "subject_digest_format": SUBJECT_FORMAT,
+        "run_id": run_id, "gate": gate, "execution": status,
         "kind": kind, "coverage_count": count, "findings": findings,
         "subject_digest": subject, "policy_digest": policy,
         "created_at": datetime.now(timezone.utc).isoformat(),
@@ -95,16 +123,25 @@ def decide(records: list[dict], policy: dict, subject: str, policy_digest: str,
             reasons.append(f"{gate}: duplicate evidence")
         seen.add(gate)
         try:
-            valid = (type(record["schema_version"]) is int and record["schema_version"] == 2
+            valid = (type(record["schema_version"]) is int and record["schema_version"] == EVIDENCE_VERSION
+                     and record["subject_digest_format"] == SUBJECT_FORMAT
                      and record["run_id"] == run_id
                      and record["subject_digest"] == subject
                      and record["policy_digest"] == policy_digest
                      and record["kind"] == policy["gate_contracts"][gate]["kind"]
-                     and record["execution"] in ("COMPLETED", "ERROR", "TIMEOUT", "NOT_RUN")
+                     and record["execution"] in ("COMPLETED", "ERROR", "TIMEOUT", "CANCELLED", "NOT_RUN")
                      and type(record["coverage_count"]) is int and record["coverage_count"] > 0
                      and type(record["findings"]) is int and record["findings"] >= 0)
             if not valid:
                 raise ValueError("invalid contract")
+            if policy['gate_contracts'][gate].get('coverage_required'):
+                coverage = record['evidence']['coverage']
+                counts = ('selected_files', 'selected_bytes', 'scanned_leaves', 'scanned_bytes',
+                          'expanded_bytes', 'archives', 'history_blobs', 'unsupported_files')
+                if (coverage['status'] != 'COMPLETE' or
+                        any(type(coverage[key]) is not int or coverage[key] < 0 for key in counts) or
+                        coverage['selected_files'] != record['coverage_count'] or coverage['unsupported_files'] != 0):
+                    raise ValueError('incomplete scan coverage')
             if record["kind"] == "test":
                 validate_cases(record["cases"], policy["gate_contracts"][gate])
                 if (record["coverage_count"] != len(record["cases"]) or

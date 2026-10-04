@@ -16,6 +16,6 @@ if __name__ == "__main__":
     if (run.returncode != 1 or current == previous or report["decision"] != "BLOCK"
             or any(r["execution"] != "COMPLETED" for r in report["records"])
             or any(r["findings"] for r in report["records"] if r["gate"] != "AUTH")
-            or auth["coverage_count"] != 14 or auth["findings"] != 5):
+            or auth["coverage_count"] != 16 or auth["findings"] != 5):
         raise SystemExit("Seeded defect acceptance FAILED: need five observed authorization failures")
     print("Expected BLOCK verified: five real authorization failures, no adapter errors")

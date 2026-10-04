@@ -2,13 +2,14 @@
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
-from .results import result, write_json
+from .results import EVIDENCE_VERSION, SUBJECT_FORMAT, result, write_json
 
 
 class AuditRun:
     def __init__(self, root: Path, operation: str):
         self.output = root / "artifacts" / str(uuid.uuid4())
-        self.data = {"schema_version": 2, "run_id": self.output.name,
+        self.data = {"schema_version": EVIDENCE_VERSION, "subject_digest_format": SUBJECT_FORMAT,
+                     "run_id": self.output.name,
                      "operation": operation, "created_at": datetime.now(timezone.utc).isoformat(),
                      "subject_digest": None, "policy_digest": None, "records": [],
                      "execution": "RUNNING", "decision": "BLOCK", "reasons": ["run incomplete"],
@@ -17,6 +18,10 @@ class AuditRun:
 
     def save(self):
         write_json(self.output / "report.json", self.data)
+
+    def stage(self, name):
+        self.data['stage'] = name
+        self.save()
 
     def add(self, gate, status, kind, count, findings, detail, **extra):
         self.data["records"].append(result(gate, status, kind, count, findings,

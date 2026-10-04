@@ -8,4 +8,4 @@ sys.path.insert(0, '/candidate')
 from fixture_app.app import create_app
 
 uvicorn.run(create_app(settings['dsn'], settings['schema'], variant=settings['variant']),
-            uds='/run/http/app.sock', access_log=False, log_level='error')
+            uds='/tmp/epsilon-http.sock', access_log=False, log_level='error')

@@ -73,6 +73,13 @@ jobs:
         if: always()
         working-directory: trusted
         run: python -I scripts/dev_db.py stop
+      - name: Reap cancelled security runs
+        if: always()
+        working-directory: trusted
+        run: |
+          if [ -x .venv/bin/python ]; then
+            .venv/bin/python -I scripts/cleanup_runs.py
+          fi
       - name: Retain evaluator-owned evidence
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02

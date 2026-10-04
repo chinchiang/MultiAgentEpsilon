@@ -16,6 +16,9 @@ def records():
               for g in POLICY["required_gates"]]
     output[-1]["cases"] = [{"case": c, "passed": True} for c in POLICY["gate_contracts"]["AUTH"]["case_ids"]]
     output[-1]["coverage_count"] = len(output[-1]["cases"])
+    output[1]['evidence'] = {'coverage': {'status': 'COMPLETE', 'selected_files': 3,
+        'selected_bytes': 30, 'scanned_leaves': 3, 'scanned_bytes': 30, 'expanded_bytes': 30,
+        'archives': 0, 'history_blobs': 0, 'unsupported_files': 0}}
     for row in output:
         row["created_at"] = NOW.isoformat()
     return output
@@ -29,6 +32,14 @@ def test_zero_findings_with_coverage_is_allowed():
     assert judge(records()) == "ALLOW"
 
 
+@pytest.mark.parametrize('field,value', [('status','INCOMPLETE'), ('selected_files',1),
+                                       ('unsupported_files',1), ('scanned_bytes',True)])
+def test_scan_coverage_cannot_be_replaced_with_positive_target_count(field, value):
+    rows = records()
+    rows[1]['evidence']['coverage'][field] = value
+    assert judge(rows) == 'BLOCK'
+
+
 @pytest.mark.parametrize("field,value", [
     ("execution", "ERROR"), ("execution", "TIMEOUT"), ("execution", "NOT_RUN"),
     ("execution", "invented"), ("coverage_count", 0), ("coverage_count", -1),
@@ -38,6 +49,7 @@ def test_zero_findings_with_coverage_is_allowed():
     ("created_at", (NOW+timedelta(seconds=1)).isoformat()),
     ("created_at", "2026-01-01"), ("kind", "unknown"), ("schema_version", True),
     ("run_id", "another-run"), ("kind", "test"), ("schema_version", 1),
+    ("schema_version", 2), ("subject_digest_format", "legacy"),
 ])
 def test_bad_evidence_blocks(field, value):
     rows = records()

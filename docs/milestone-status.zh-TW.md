@@ -1,5 +1,19 @@
 # 第一個里程碑：實作狀態與驗收方式
 
+## 2026-10-04 掃描覆蓋與生命週期更新
+
+本輪本地回歸為 **125 passed、0 failed、0 skipped**，含真實取消與孤兒容器回收。G2 支援限額 gzip／zip／tar 展開及 HEAD 可達歷史 blobs；未知內容、超限或覆蓋不完整均 BLOCK。管線由 supervisor 管理總期限與每程序資源限制，清理成功後才允許 ALLOW。完整界線與遠端尚缺條件見 [覆蓋與生命週期驗收](coverage-lifecycle-acceptance.zh-TW.md)。下方為先前批次的歷史驗收。
+
+## 2026-10-04 核心判定與隔離修正（目前工作目錄）
+
+本輪本地回歸為 **103 passed、0 failed、0 skipped**，保留 1 項既有 Starlette TestClient 棄用警告。新增四種真實容器缺陷變體，確認錯誤密碼登入、404 洩漏、匯出夾帶跨租戶資料、拒絕寫入卻修改其他資料列皆產生指定 findings。
+
+AUTH 更新為 16 案例，核對完整合成 JSON 契約及 users／items／sessions 狀態；subject 改為 `worktree-manifest-v1`、gate 證據 schema 3，拒絕舊版。已補受保護路徑改名兩端判定、不可讀目錄阻擋及 candidate lock／runtime lock 一致性檢查。
+
+HTTP socket 移入容器限額 tmpfs，host 透過限時限量 Docker exec bridge 接收不可信 HTTP 回應；不再使用候選可寫的 host HTTP 目錄。socket 改指向 host 端點的回歸確認沒有連線到該端點。依賴差異尚採拒絕策略，未實作任意候選 lock 的可信映像建置。
+
+驗收標準：完整管線正常版本為 16 cases／0 findings／ALLOW，原始缺陷版本為 16 cases／5 findings／BLOCK。每次實際結果應讀取當次 `artifacts/<run-id>/report.json`，不沿用下方歷史 digest 或遠端 run 作為本輪證明。本輪尚未更新遠端 PR／CI；合併保護、多模型及完整 ASVS 範圍仍未完成。
+
 ## 2026-10-04 修正分支更新
 
 此版本已修正必要案例集合與 run 綁定、掃描／雜湊範圍、初始化錯誤證據，並以無網路容器隔離候選程式，改由外部 HTTP／資料庫 oracle 評分。完整本地回歸為 **81 passed、0 failed、0 skipped**；缺陷版 14 案例／5 findings／BLOCK，修正版 14 案例／0 findings／ALLOW；真實 HTTP smoke 通過。保留 1 項既有 Starlette 開發用 TestClient 棄用警告。

@@ -7,8 +7,8 @@
 1. PR 工作流程由 `pull_request_target` 觸發，從 base SHA checkout evaluator。候選 head SHA checkout 到另一目錄，僅由可信工具讀取，不能在 runner 上直接執行候選 bootstrap、pytest、conftest、Dockerfile 或程式。
 2. 可信 bootstrap 安裝基準 lock 的 wheels；runtime 以固定 Python image digest、離線網路及 `--require-hashes` 建置。候選來源不能提供建置指令。runtime 記錄 image ID 及 lock／entrypoint／builder 的 hash；修改後須重建。
 3. AUTH 將限定的 Python fixture 來源複製成唯讀快照，容器使用非 root UID、唯讀 root filesystem、cap-drop、no-new-privileges、CPU／記憶體／PID 限制與 `--network=none`。
-4. 候選只能讀取合成 app 設定、使用唯讀掛載的 PostgreSQL Unix socket，及在獨立目錄建立 HTTP Unix socket。它不取得 DB 管理員密碼、評分器、報告、GitHub token、模型憑證或 Docker socket。
-5. PostgreSQL 在另一個無網路容器中使用 SCRAM 認證；app 帳號僅有指定 schema/table 所需權限。可信 host oracle 獨立建置資料與查詢副作用，透過 Unix socket 發送真實 HTTP 請求；拒絕重新導向與壓縮回應，限制回應大小及 timeout。
+4. 候選只能讀取合成 app 設定、使用唯讀掛載的 PostgreSQL Unix socket，及在容器的限額 tmpfs 建立 HTTP socket；沒有可寫的 host HTTP 目錄。它不取得 DB 管理員密碼、評分器、報告、GitHub token、模型憑證或 Docker socket。
+5. PostgreSQL 在另一個無網路容器中使用 SCRAM 認證；app 帳號僅有指定 schema/table 所需權限。host oracle 獨立建置資料與查詢完整 fixture 狀態。唯讀 runtime bridge 在候選容器內發送 HTTP，不跟隨重新導向，拒絕壓縮及超大回應；host 使用限時、限量 Docker exec 串流接收不可信回應，不連接候選控制的 host socket 路徑。bridge 不負責評分。
 6. AUTH 超時／取消後，父程序依唯一 run label 清除本次容器；普通結束亦在 finally 清除。錯誤及未完成 gate 保存為 BLOCK。來源或 evaluator 在執行期間持續變動也會 BLOCK。
 
 這是 Linux 容器邊界，仍共用 host kernel，不能宣稱抵抗 kernel／runtime 漏洞。正式敵意多租戶使用仍應採專用短生命週期 VM／microVM、受控 worker 身分與平台隔離。候選合成 app 可以破壞自己的資料或服務，這會導致測試失敗，不可把 app 自報結果當 oracle。
@@ -56,4 +56,6 @@ python scripts/dev_db.py start
 python scripts/dev_db.py stop
 ```
 
-隔離回歸會執行缺陷版、修正版，以及在候選匯入時嘗試寫入唯讀來源／入口、讀取 evaluator／Docker socket／token、建立 IP 出向連線的探測。必要結果為：完整 14 案例、缺陷版 5 findings／BLOCK、修正版 0 findings／ALLOW，以及邊界探測符合限制。
+隔離回歸會執行缺陷版、修正版，以及在候選匯入時嘗試寫入唯讀來源／入口、讀取 evaluator／Docker socket／token、建立 IP 出向連線的探測。必要結果為：完整 16 案例、缺陷版 5 findings／BLOCK、修正版 0 findings／ALLOW。另有錯誤密碼登入、404 洩漏、匯出夾帶跨租戶資料及其他資料列被非法修改四種變體，必須產生指定 AUTH findings；socket 改指向 host 測試端點必須失敗且端點不得收到連線。
+
+候選 lock digest 必須等於已驗證 runtime lock digest；尚不支援任意候選依賴映像建置。受保護變更使用禁用 rename 折疊的 diff，同時判斷刪除與新增路徑。結果 schema 3 使用版本化逐檔 manifest，不能沿用 schema 2 的 gate 證據。

@@ -39,11 +39,14 @@
       "kind": "scan"
     },
     "G2": {
-      "kind": "scan"
+      "kind": "scan",
+      "coverage_required": true
     },
     "AUTH": {
       "kind": "test",
       "case_ids": [
+        "wrong password denied without session",
+        "unknown user denied without session",
         "anonymous denied",
         "forged bearer denied",
         "owner reads own data",

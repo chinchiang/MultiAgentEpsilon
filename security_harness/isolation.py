@@ -1,6 +1,6 @@
 """Networkless candidate and DB containers; oracle and evidence stay on the host.
 
-Only synthetic DB credentials and two Unix socket directories cross the boundary.
+Only synthetic DB credentials and a read-only DB socket directory cross the boundary.
 This is Linux container isolation, not protection against host-kernel exploits.
 """
 import hashlib
@@ -14,23 +14,23 @@ import tempfile
 import time
 from pathlib import Path
 
-import httpx
 import psycopg
 from psycopg import sql
 
 from .authorization import evaluate
 from .fixture_database import connect, seed
 from .inputs import input_files
+from .container_http import BoundedClient, docker_environment
+from .results import digest_file
 
 ROOT = Path(__file__).resolve().parents[1]
 PROXY_NAMES = ("HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "NO_PROXY", "http_proxy", "https_proxy", "all_proxy", "no_proxy")
 
 
-def docker(*args, check=True):
-    env = {k: v for k, v in os.environ.items() if k not in
-           ("DOCKER_HOST", "DOCKER_CONTEXT", "DOCKER_TLS", "DOCKER_TLS_VERIFY", "DOCKER_CERT_PATH")}
+def docker(*args, check=True, timeout=45):
+    env = docker_environment()
     return subprocess.run(["docker", "--host=unix:///var/run/docker.sock", *args],
-                          capture_output=True, text=True, check=check, timeout=45, env=env)
+                          capture_output=True, text=True, check=check, timeout=timeout, env=env)
 
 
 def run_flags(name, run_id):
@@ -43,41 +43,12 @@ def run_flags(name, run_id):
     return flags
 
 
-class BoundedClient:
-    def __init__(self, socket):
-        self.client = httpx.Client(transport=httpx.HTTPTransport(uds=str(socket)),
-                                  base_url="http://localhost", trust_env=False,
-                                  follow_redirects=False, timeout=3)
-
-    def request(self, method, path, **kwargs):
-        with self.client.stream(method, path, **kwargs) as response:
-            if response.headers.get("content-encoding", "identity") != "identity":
-                raise ValueError("compressed candidate responses are outside the pilot contract")
-            chunks = []
-            length = 0
-            for chunk in response.iter_bytes(chunk_size=4096):
-                length += len(chunk)
-                if length > 65536:
-                    raise ValueError("candidate response exceeds oracle limit")
-                chunks.append(chunk)
-            return httpx.Response(response.status_code, content=b"".join(chunks), request=response.request)
-
-    def get(self, path, **kwargs):
-        return self.request("GET", path, **kwargs)
-
-    def post(self, path, **kwargs):
-        return self.request("POST", path, **kwargs)
-
-    def patch(self, path, **kwargs):
-        return self.request("PATCH", path, **kwargs)
-
-
 def cleanup_run(run_id):
     if not re.fullmatch(r"[a-f0-9-]{32,36}", run_id):
         raise ValueError("invalid isolation run ID")
-    ids = docker("ps", "-aq", "--filter", "label=epsilon.isolated=true", "--filter", "label=epsilon.run=" + run_id).stdout.split()
+    ids = docker("ps", "-aq", "--filter", "label=epsilon.isolated=true", "--filter", "label=epsilon.run=" + run_id, timeout=5).stdout.split()
     if ids:
-        docker("rm", "--force", *ids)
+        docker("rm", "--force", *ids, timeout=5)
 
 
 def run_isolated(candidate: Path, variant="fixed", run_id=None) -> dict:
@@ -85,9 +56,13 @@ def run_isolated(candidate: Path, variant="fixed", run_id=None) -> dict:
         raise ValueError("invalid fixture variant")
     runtime = json.loads((ROOT / ".state/runtime-image.json").read_text())
     for path, key in (("requirements.lock", "lock_sha256"), ("security/runtime/server.py", "server_sha256"),
-                      ("scripts/build_runtime.py", "builder_sha256")):
+                      ("scripts/build_runtime.py", "builder_sha256"),
+                      ("security/runtime/request.py", "request_sha256")):
         if hashlib.sha256((ROOT / path).read_bytes()).hexdigest() != runtime[key]:
             raise ValueError("trusted runtime is stale; rebuild it")
+    candidate_lock = digest_file(candidate / "requirements.lock")
+    if candidate_lock != runtime["lock_sha256"]:
+        raise ValueError("candidate lock differs from tested runtime")
     # Enumerate the actual source subtree, so reserved names cannot hide payloads.
     source = candidate / "fixture_app"
     if source.is_symlink():
@@ -102,7 +77,7 @@ def run_isolated(candidate: Path, variant="fixed", run_id=None) -> dict:
     with tempfile.TemporaryDirectory(prefix="epsilon-iso-") as directory:
         work = Path(directory)
         work.chmod(0o755)
-        for name in ("db", "http"):
+        for name in ("db",):
             (work / name).mkdir(mode=0o777)
             (work / name).chmod(0o777)
         (work / "candidate/fixture_app").mkdir(parents=True)
@@ -122,7 +97,6 @@ def run_isolated(candidate: Path, variant="fixed", run_id=None) -> dict:
         hba.write_text("local all all scram-sha-256\n")
         hba.chmod(0o444)
         dsn = f"postgresql://epsilon:{password}@/epsilon_fixture?host={work / 'db'}"
-        client = None
         cleanup_errors = []
         try:
             db_image = json.loads((ROOT / "security/tools.lock.json").read_text())["postgres"]["image"]
@@ -159,15 +133,15 @@ def run_isolated(candidate: Path, variant="fixed", run_id=None) -> dict:
             docker(*run_flags(names[1], run_id), "--user", "10001:10001", "--tmpfs", "/tmp:rw,uid=10001,gid=10001,size=16m",
                    "--mount", f"type=bind,src={work / 'candidate'},dst=/candidate,readonly",
                    "--mount", f"type=bind,src={work / 'db'},dst=/run/epsilon-db,readonly",
-                   "--mount", f"type=bind,src={work / 'http'},dst=/run/http",
                    "--mount", f"type=bind,src={settings},dst=/run/fixture.json,readonly", runtime["image_id"])
-            client = BoundedClient(work / "http/app.sock")
-            for _ in range(80):
+            client = BoundedClient(names[1])
+            health_deadline = time.monotonic() + 20
+            while time.monotonic() < health_deadline:
                 try:
                     health = client.get("/health")
                     if health.status_code == 200 and health.json().get("fixture_id") == schema and health.json().get("ready"):
                         break
-                except (httpx.TransportError, ValueError):
+                except (RuntimeError, ValueError, TimeoutError):
                     pass
                 time.sleep(0.1)
             else:
@@ -178,13 +152,14 @@ def run_isolated(candidate: Path, variant="fixed", run_id=None) -> dict:
                         "readonly_root": data["HostConfig"]["ReadonlyRootfs"],
                         "user": data["Config"]["User"], "image_id": data["Image"],
                         "mount_destinations": [m["Destination"] for m in data["Mounts"]],
-                        "oracle": "external HTTP over Unix socket + independent database queries"}
+                        "oracle": "host oracle; bounded container HTTP bridge + independent database queries",
+                        "candidate_lock_sha256": candidate_lock,
+                        "runtime_lock_sha256": runtime["lock_sha256"],
+                        "http_socket_namespace": "candidate container only"}
             if evidence["network"] != "none" or not evidence["readonly_root"]:
                 raise RuntimeError("isolation configuration mismatch")
             return {"cases": cases, "isolation": evidence}
         finally:
-            if client:
-                client.client.close()
             for name in reversed(names):
                 removed = docker("rm", "--force", name, check=False)
                 if removed.returncode and docker("inspect", name, check=False).returncode == 0:

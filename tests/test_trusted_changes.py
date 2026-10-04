@@ -3,6 +3,7 @@ from scripts.check_trusted_changes import approved_review
 import json
 import subprocess
 import sys
+import pytest
 from pathlib import Path
 
 
@@ -58,3 +59,31 @@ def test_guard_retains_sha_bound_evidence_even_when_it_blocks(tmp_path):
     assert evidence["base_sha"] == base
     assert evidence["candidate_sha"] == git("rev-parse", "HEAD")
     assert evidence["protected_changes"] == ["security/policy.json"]
+
+
+@pytest.mark.parametrize("old,new,blocked", [
+    ("scripts/evaluator.py", "fixture_app/moved.py", True),
+    ("fixture_app/app.py", "scripts/evaluator.py", True),
+    ("fixture_app/app.py", "fixture_app/moved.py", False),
+])
+def test_git_rename_checks_both_sides(tmp_path, old, new, blocked):
+    def git(*args):
+        return subprocess.check_output(["git", "-C", str(tmp_path), *args], text=True).strip()
+    git("init", "-q"); git("config", "user.name", "Synthetic")
+    git("config", "user.email", "fixture@example.invalid")
+    git("config", "diff.renames", "true")
+    source, target = tmp_path / old, tmp_path / new
+    source.parent.mkdir(parents=True, exist_ok=True)
+    source.write_text("unchanged content\n")
+    git("add", "."); git("commit", "-qm", "base")
+    base = git("rev-parse", "HEAD")
+    target.parent.mkdir(parents=True, exist_ok=True)
+    git("mv", old, new); git("commit", "-qm", "rename")
+    assert git("diff", "--name-status", base, "HEAD").startswith("R100")
+    script = Path(__file__).resolve().parents[1] / "scripts/check_trusted_changes.py"
+    process = subprocess.run([sys.executable, str(script), "--base", base, "--candidate", str(tmp_path)],
+                             capture_output=True, text=True)
+    data = json.loads(process.stdout)
+    assert process.returncode == int(blocked)
+    assert data["decision"] == ("BLOCK" if blocked else "ALLOW")
+    assert data["protected_changes"] == protected_changes(sorted([old, new]))

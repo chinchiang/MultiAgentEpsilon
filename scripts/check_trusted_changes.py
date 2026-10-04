@@ -61,7 +61,7 @@ def main():
     args = parser.parse_args()
     if not re.fullmatch(r"[0-9a-f]{40}", args.base):
         raise ValueError("base must be an immutable commit SHA")
-    run = subprocess.run(["git", "-C", str(args.candidate), "diff", "--name-only", "-z", args.base, "HEAD"],
+    run = subprocess.run(["git", "-C", str(args.candidate), "diff", "--no-renames", "--name-only", "-z", args.base, "HEAD"],
                          capture_output=True, check=True, timeout=20)
     changed = protected_changes([name for name in run.stdout.decode().split("\0") if name])
     head = subprocess.check_output(["git", "-C", str(args.candidate), "rev-parse", "HEAD"], text=True, timeout=10).strip()

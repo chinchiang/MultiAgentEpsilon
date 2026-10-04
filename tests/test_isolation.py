@@ -1,8 +1,12 @@
 import shutil
+import json
+import hashlib
+import socket
 from pathlib import Path
 
 import pytest
 from security_harness.isolation import run_isolated
+from security_harness import isolation
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -11,16 +15,19 @@ ROOT = Path(__file__).resolve().parents[1]
 def test_external_oracle_rejects_defect_and_accepts_fixed():
     vulnerable = run_isolated(ROOT, "vulnerable")
     fixed = run_isolated(ROOT, "fixed")
-    assert len(vulnerable["cases"]) == len(fixed["cases"]) == 14
+    assert len(vulnerable["cases"]) == len(fixed["cases"]) == 16
     assert sum(not c["passed"] for c in vulnerable["cases"]) == 5
     assert all(c["passed"] for c in fixed["cases"])
     assert fixed["isolation"]["network"] == "none"
     assert fixed["isolation"]["user"] == "10001:10001"
+    assert "/run/http" not in fixed["isolation"]["mount_destinations"]
+    assert fixed["isolation"]["candidate_lock_sha256"] == fixed["isolation"]["runtime_lock_sha256"]
 
 
 @pytest.mark.integration
 def test_candidate_cannot_access_oracle_socket_credentials_or_egress(tmp_path):
     shutil.copytree(ROOT / "fixture_app", tmp_path / "fixture_app", ignore=shutil.ignore_patterns("__pycache__"))
+    shutil.copyfile(ROOT / "requirements.lock", tmp_path / "requirements.lock")
     # These assertions run in the actual candidate container during import.
     (tmp_path / "fixture_app/__init__.py").write_text('''
 import importlib.util
@@ -49,3 +56,52 @@ else:
 ''')
     result = run_isolated(tmp_path)
     assert all(c["passed"] for c in result["cases"])
+
+
+def test_candidate_dependency_change_refused_before_container_start(tmp_path, monkeypatch):
+    baseline = tmp_path / "baseline"
+    baseline.mkdir()
+    paths = {"requirements.lock": "lock_sha256", "security/runtime/server.py": "server_sha256",
+             "scripts/build_runtime.py": "builder_sha256", "security/runtime/request.py": "request_sha256"}
+    runtime = {"image_id": "unused"}
+    for name, key in paths.items():
+        target = baseline / name
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes((ROOT / name).read_bytes())
+        runtime[key] = hashlib.sha256(target.read_bytes()).hexdigest()
+    (baseline / ".state").mkdir()
+    (baseline / ".state/runtime-image.json").write_text(json.dumps(runtime))
+    candidate = tmp_path / "candidate"
+    candidate.mkdir()
+    (candidate / "requirements.lock").write_text("changed dependency lock")
+    monkeypatch.setattr(isolation, "ROOT", baseline)
+    def forbidden(*a, **kw):
+        pytest.fail("mismatched dependency must not start a container")
+    monkeypatch.setattr(isolation, "docker", forbidden)
+    with pytest.raises(ValueError, match="candidate lock differs"):
+        run_isolated(candidate)
+
+
+@pytest.mark.integration
+def test_candidate_socket_symlink_never_connects_host_endpoint(tmp_path):
+    candidate = tmp_path / "candidate"
+    shutil.copytree(ROOT / "fixture_app", candidate / "fixture_app", ignore=shutil.ignore_patterns("__pycache__"))
+    shutil.copyfile(ROOT / "requirements.lock", candidate / "requirements.lock")
+    # This path is present only on the host, never mounted into the candidate.
+    target = tmp_path / "host.sock"
+    with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as listener:
+        listener.bind(str(target))
+        listener.listen(1)
+        listener.settimeout(0.1)
+        app = candidate / "fixture_app/app.py"
+        source = app.read_text()
+        source = source.replace('    def health():\n',
+            '    def health():\n'
+            '        endpoint = Path("/tmp/epsilon-http.sock")\n'
+            '        endpoint.unlink()\n'
+            f'        endpoint.symlink_to({str(target)!r})\n')
+        app.write_text(source)
+        with pytest.raises(RuntimeError, match="container HTTP request failed"):
+            run_isolated(candidate)
+        with pytest.raises(socket.timeout):
+            listener.accept()
