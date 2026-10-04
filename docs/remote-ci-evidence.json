@@ -1,0 +1,119 @@
+{
+  "recorded_at": "2026-10-04T10:28:37.067724+08:00",
+  "repository": "chinchiang/MultiAgentEpsilon",
+  "main_sha": "b8e057764e06cd3a1aee0ca7603bbb4c02baabac",
+  "main_protected": false,
+  "ruleset_count": 0,
+  "ruleset_write": {
+    "status": "BLOCKED",
+    "http_status": 403,
+    "message": "Resource not accessible by integration",
+    "required_permission": "Repository administration: write"
+  },
+  "main_test_summary": {
+    "tests": 51,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "runs": [
+    {
+      "id": 37170448802,
+      "url": "https://github.com/chinchiang/MultiAgentEpsilon/actions/runs/37170448802",
+      "event": "push",
+      "branch": "main",
+      "head_sha": "e45b344c634b6fa42b6b0cf0c8c1b2d458f1de4c",
+      "status": "completed",
+      "conclusion": "success",
+      "failed_steps": []
+    },
+    {
+      "id": 37170578652,
+      "url": "https://github.com/chinchiang/MultiAgentEpsilon/actions/runs/37170578652",
+      "event": "pull_request",
+      "branch": "validation/ci-positive",
+      "head_sha": "0ddbaa203e1d322692afb398098f10145e57af76",
+      "status": "completed",
+      "conclusion": "success",
+      "failed_steps": []
+    },
+    {
+      "id": 37170653595,
+      "url": "https://github.com/chinchiang/MultiAgentEpsilon/actions/runs/37170653595",
+      "event": "pull_request",
+      "branch": "validation/authz-negative",
+      "head_sha": "97a5b15a524b40bb8f3bd806b7b43ec53d665923",
+      "status": "completed",
+      "conclusion": "failure",
+      "failed_steps": [
+        "Contract and real adapter acceptance tests"
+      ]
+    },
+    {
+      "id": 37170656488,
+      "url": "https://github.com/chinchiang/MultiAgentEpsilon/actions/runs/37170656488",
+      "event": "pull_request",
+      "branch": "validation/policy-negative",
+      "head_sha": "ba7026d07c607c30df881df7b2cd99b67a69d119",
+      "status": "completed",
+      "conclusion": "failure",
+      "failed_steps": [
+        "Block changes to evaluator and policy pending independent review",
+        "Retain redacted run evidence"
+      ]
+    },
+    {
+      "id": 37170856594,
+      "url": "https://github.com/chinchiang/MultiAgentEpsilon/actions/runs/37170856594",
+      "event": "push",
+      "branch": "main",
+      "head_sha": "b8e057764e06cd3a1aee0ca7603bbb4c02baabac",
+      "status": "completed",
+      "conclusion": "success",
+      "failed_steps": []
+    },
+    {
+      "id": 37170892081,
+      "url": "https://github.com/chinchiang/MultiAgentEpsilon/actions/runs/37170892081",
+      "event": "pull_request",
+      "branch": "validation/policy-evidence",
+      "head_sha": "a008eebf3690ce090c7e05676419c7ad8707defe",
+      "status": "completed",
+      "conclusion": "failure",
+      "failed_steps": [
+        "Block changes to evaluator and policy pending independent review"
+      ]
+    }
+  ],
+  "validation_pull_requests": [
+    {
+      "number": 1,
+      "url": "https://github.com/chinchiang/MultiAgentEpsilon/pull/1",
+      "state": "closed",
+      "merged": false
+    },
+    {
+      "number": 2,
+      "url": "https://github.com/chinchiang/MultiAgentEpsilon/pull/2",
+      "state": "closed",
+      "merged": false
+    },
+    {
+      "number": 3,
+      "url": "https://github.com/chinchiang/MultiAgentEpsilon/pull/3",
+      "state": "closed",
+      "merged": false
+    },
+    {
+      "number": 4,
+      "url": "https://github.com/chinchiang/MultiAgentEpsilon/pull/4",
+      "state": "closed",
+      "merged": false
+    }
+  ],
+  "limitations": [
+    "CI results do not enforce merge restrictions without repository rules",
+    "no ordinary-developer bypass test performed",
+    "no real LLM generation performed"
+  ]
+}

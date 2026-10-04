@@ -38,7 +38,7 @@ python3 scripts/dev_db.py stop
 | G2 | 真實 Gitleaks、遮罩、工作樹及本地可得完整 Git refs | 服務端 Push Protection、遠端不可得歷史／快取、金鑰撤銷 |
 | 授權回歸 | 同角色、跨租戶、管理者、欄位限制、登出及寫入副作用；14 個案例 | 完整 G5／Web/API 黑箱掃描、TLS／CSRF／JWT／SSRF |
 | 政策 | 嚴格結果格式、故障阻擋、subject／policy digest、基準變更檢查 | 簽章／可信發布、例外生命週期、不可繞過的遠端設定 |
-| CI | 固定 actions SHA、最小 token 權限、完整 checkout、證據保存及清理 | 遠端執行、required workflow／ruleset 與一般開發者繞過驗收 |
+| CI | 遠端 main／PR 正反例、固定 actions SHA、最小權限、早期拒絕證據與清理 | ruleset 管理寫入遭拒；合併保護及普通開發者繞過驗收仍未完成 |
 | 多模型 | [端點盤點範本](security/models.example.json)，所有端點 UNVERIFIED | 雲地串接、mock gateway、G6、家族獨立審查及偏誤實驗 |
 
 G2 掃描排除 `.git` 的原始檔、`.venv`、`.tools`、`.state`、`artifacts` 與快取；Git 歷史由 `gitleaks git --log-opts=--all` 另處理。淺層 clone 會失敗；未有第一個 commit 時明列 history NOT_AVAILABLE。排除的依賴／暫存內容不宣稱已掃描，fixture 密碼及未遮罩診斷不能提交或上傳。
@@ -49,11 +49,12 @@ G2 掃描排除 `.git` 的原始檔、`.venv`、`.tools`、`.state`、`artifacts
 
 **PR 自己可以修改 YAML，因此 YAML 內的檢查不足以保護該工作流程。** 必須在 GitHub 設定外部可信 required workflow／ruleset（依方案可用性），限制 bypass、直接 push 及保護檔案變更，並實際嘗試繞過。一般 required status 的名稱相同也不保證來自可信 evaluator。敏感變更須經獨立可信流程審查後更新基準，不能刪掉 guard 讓 PR 自行通過。
 
-目前只驗證本地流程；GitHub API 已可讀取 repo，但部分 Actions 管理操作仍回覆整合權限不足；遠端部署與保護驗收結果會另記於 milestone status。啟用前也須評估不受信 PR 的 runner／網路／憑證隔離；本試點不使用 `pull_request_target`、部署憑證或模型金鑰。
+已部署遠端 CI，最新基線 51 項測試通過；正常 PR 成功，授權退化與政策降級 PR 均如預期失敗，測試 PR 已關閉且未合併。**main 尚未受合併保護**：建立 ruleset 的 API 被整合權限拒絕。具體規則、執行證據與來源信任限制見 [遠端驗收紀錄](docs/remote-ci-validation.zh-TW.md)。正式啟用前仍須評估不受信 PR 的 runner／網路／憑證隔離；本試點不使用 `pull_request_target`、部署憑證或模型金鑰。
 
 ## 文件與來源
 
 - [試點範圍、授權矩陣與限制](docs/pilot-scope.zh-TW.md)
 - [實際執行與剩餘待辦](docs/milestone-status.zh-TW.md)
+- [遠端 CI 驗收及可套用的保護規則](docs/remote-ci-validation.zh-TW.md)
 
 公開版本只包含程式碼、合成測試及操作文件。使用者提供的附件、內部研究／治理文件及其衍生表單保留於本地，不包含於公開 Git 歷史。當前完成度以 milestone status 為準；少量示範案例不代表符合完整 [OWASP ASVS](https://owasp.org/www-project-application-security-verification-standard/)。
