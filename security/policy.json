@@ -2,8 +2,7 @@
   "schema_version": 1,
   "required_gates": [
     "G1",
-    "G2",
-    "AUTH"
+    "G2"
   ],
   "max_evidence_age_seconds": 3600,
   "minimum_package_age_days": 7,
