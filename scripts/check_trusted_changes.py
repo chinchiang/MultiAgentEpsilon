@@ -22,13 +22,20 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--base", required=True)
     parser.add_argument("--candidate", type=Path, required=True)
+    parser.add_argument("--output", type=Path, help="audit file in the trusted workflow workspace")
     args = parser.parse_args()
     if not re.fullmatch(r"[0-9a-f]{40}", args.base):
         raise ValueError("base must be an immutable commit SHA")
     run = subprocess.run(["git", "-C", str(args.candidate), "diff", "--name-only", "-z", args.base, "HEAD"],
                          capture_output=True, check=True, timeout=20)
     changed = protected_changes([name for name in run.stdout.decode().split("\0") if name])
-    print(json.dumps({"protected_changes": changed, "decision": "BLOCK" if changed else "ALLOW"}))
+    head = subprocess.check_output(["git", "-C", str(args.candidate), "rev-parse", "HEAD"], text=True, timeout=10).strip()
+    evidence = {"schema_version": 1, "base_sha": args.base, "candidate_sha": head,
+                "protected_changes": changed, "decision": "BLOCK" if changed else "ALLOW"}
+    if args.output:
+        args.output.parent.mkdir(parents=True, exist_ok=True)
+        args.output.write_text(json.dumps(evidence, indent=2) + "\n")
+    print(json.dumps(evidence))
     return 1 if changed else 0
 
 
