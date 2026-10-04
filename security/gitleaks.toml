@@ -1,0 +1,9 @@
+title = "Epsilon: default rules plus synthetic acceptance canary"
+[extend]
+useDefault = true
+
+[[rules]]
+id = "epsilon-acceptance-canary"
+description = "Synthetic secret used only to prove the adapter detects and redacts"
+regex = '''VIBE_TEST_SECRET_[A-Za-z0-9]{32}'''
+keywords = ["VIBE_TEST_SECRET_"]

@@ -1,0 +1,72 @@
+name: Security pilot
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: security-pilot-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  security-pilot:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Checkout candidate (no retained Git credential)
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          path: candidate
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Checkout trusted PR base
+        if: github.event_name == 'pull_request'
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          path: trusted
+          ref: ${{ github.event.pull_request.base.sha }}
+          persist-credentials: false
+      - name: Set Python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: '3.12'
+      - name: Block changes to evaluator and policy pending independent review
+        if: github.event_name == 'pull_request'
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: python trusted/scripts/check_trusted_changes.py --base "$BASE_SHA" --candidate candidate
+      - name: G1 and G2 before wheel-only dependency installation
+        working-directory: candidate
+        run: python scripts/bootstrap.py
+      - name: Start disposable database
+        working-directory: candidate
+        run: python scripts/dev_db.py start
+      - name: Contract and real adapter acceptance tests
+        working-directory: candidate
+        run: .venv/bin/python -m pytest --junitxml=artifacts/pytest.xml
+      - name: Real HTTP smoke
+        working-directory: candidate
+        run: .venv/bin/python scripts/smoke_http.py
+      - name: Verify seeded defect is blocked
+        working-directory: candidate
+        run: .venv/bin/python scripts/expect_block.py
+      - name: Fixed variant security gate
+        working-directory: candidate
+        run: .venv/bin/python scripts/run_security.py
+      - name: Remove owned database
+        if: always()
+        working-directory: candidate
+        run: python scripts/dev_db.py stop
+      - name: Retain redacted run evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: security-pilot-${{ github.run_id }}-${{ github.run_attempt }}
+          path: candidate/artifacts/
+          retention-days: 7
+          if-no-files-found: error

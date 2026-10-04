@@ -1,0 +1,13 @@
+{
+  "schema_version": 1,
+  "scope": "synthetic local fixture only; no third-party or production testing",
+  "http_hosts": ["127.0.0.1", "localhost", "::1"],
+  "database_name": "epsilon_fixture",
+  "max_cases": 50,
+  "max_seconds": 120,
+  "allow_redirects": false,
+  "external_callback": false,
+  "llm_calls": false,
+  "stop": "terminate the harness, then scripts/dev_db.py stop",
+  "retention": "local artifacts are ignored; CI artifacts retained for 7 days"
+}

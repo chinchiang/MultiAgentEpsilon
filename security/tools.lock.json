@@ -1,0 +1,12 @@
+{
+  "gitleaks": {
+    "version": "8.24.3",
+    "platform": "linux-x86_64",
+    "url": "https://github.com/gitleaks/gitleaks/releases/download/v8.24.3/gitleaks_8.24.3_linux_x64.tar.gz",
+    "archive_sha256": "9991e0b2903da4c8f6122b5c3186448b927a5da4deef1fe45271c3793f4ee29c",
+    "binary_sha256": "e18325d568268b6efb6cd0cc721f8bea5667f4cd1c8d03618ab61987f41269ad"
+  },
+  "postgres": {
+    "image": "postgres:17.7-bookworm@sha256:86e0b703649d7a792bd9243ee28afc9d8f7c6b2b5638077c9d6882d4d472bbfd"
+  }
+}
