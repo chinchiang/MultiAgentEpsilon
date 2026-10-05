@@ -26,13 +26,13 @@ FIXTURE = Request(
     user="Reply with exactly EPSILON_SYNTHETIC_OK and no other text.", max_output_tokens=256)
 
 
-def configured_adapter(provider, work=None):
+def configured_adapter(provider, work=None, http=None):
     if provider == "mock":
         return MockAdapter()
     if provider == "gemini":
-        return GeminiAdapter(os.environ["GEMINI_MODEL_ID"], os.environ["GEMINI_API_KEY"])
+        return GeminiAdapter(os.environ["GEMINI_MODEL_ID"], os.environ["GEMINI_API_KEY"], http=http)
     if provider == "glm":
-        return GLMAdapter(os.environ["GLM_MODEL_ID"], os.environ["GLM_CHAT_URL"], os.getenv("GLM_API_KEY"))
+        return GLMAdapter(os.environ["GLM_MODEL_ID"], os.environ["GLM_CHAT_URL"], os.getenv("GLM_API_KEY"), http=http)
     return BedrockAdapter(os.environ["BEDROCK_MODEL_ID"], os.environ["BEDROCK_REGION"],
                           AwsCLI(os.getenv("AWS_CLI_PATH", "aws"), run_directory=work))
 

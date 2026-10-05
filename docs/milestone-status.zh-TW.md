@@ -1,5 +1,9 @@
 # 第一個里程碑：實作狀態與驗收方式
 
+## 2026-10-05 多模型盲測與裁決框架
+
+已加入 6 個合成案例及獨立 oracle、盲測 payload、嚴格 JSON／引用驗證、誤報／漏報／定位／覆蓋率及分歧指標，並提供綁定 report digest 的追加人工註記流程。模型多數決不影響安全 gate；只有單一真實模型或 mock 結果不代表偏誤降低。43 項新增離線回歸及操作界線見 [盲測文件](blind-review.zh-TW.md)。
+
 ## 2026-10-05 模型取消與孤兒回收
 
 模型 runner 已接入 supervisor 與共用 janitor，登記後才啟動 worker／AWS CLI，成功結果須待清理完成才發布。新增 29 項離線生命週期回歸；報告 schema 2 與中斷恢復方式見 [模型 gateway 文件](model-gateway.zh-TW.md)。本輪只處理生命週期，不新增付費模型呼叫；Bedrock／GLM 真實串接及合併保護仍分別待驗收。

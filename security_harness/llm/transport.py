@@ -59,13 +59,16 @@ class JsonHTTP:
     The gateway supplies the overall deadline, including streaming body reads.
     """
 
-    def __init__(self, transport=None):
+    def __init__(self, transport=None, timeout_seconds=10):
+        if type(timeout_seconds) not in (int, float) or not 0 < timeout_seconds <= 30:
+            raise ValueError('invalid HTTP timeout')
         self.transport = transport
+        self.timeout_seconds = timeout_seconds
 
     async def post(self, url, headers, payload):
         validate_url(url)
         try:
-            async with httpx.AsyncClient(transport=self.transport, timeout=10,
+            async with httpx.AsyncClient(transport=self.transport, timeout=self.timeout_seconds,
                                         follow_redirects=False, trust_env=True) as client:
                 async with client.stream("POST", url, headers={**headers, "Accept-Encoding": "identity"},
                                          json=payload) as response:

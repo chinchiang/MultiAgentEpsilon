@@ -46,7 +46,7 @@ python3 scripts/dev_db.py stop
 | 授權回歸 | 登入負例、同角色、跨租戶、管理者、欄位限制、登出及完整 fixture 狀態；16 個案例 | 完整 G5／Web/API 黑箱掃描、TLS／CSRF／JWT／SSRF |
 | 政策 | 嚴格結果格式、故障阻擋、subject／policy digest、基準變更檢查 | 簽章／可信發布、例外生命週期、不可繞過的遠端設定 |
 | CI | 遠端 main／PR 正反例、固定 actions SHA、最小權限、早期拒絕證據與清理 | ruleset 管理寫入遭拒；合併保護及普通開發者繞過驗收仍未完成 |
-| 多模型 | [受限 gateway、mock、Gemini／Bedrock／GLM adapter](docs/model-gateway.zh-TW.md)；Gemini 合成推論已驗證 | Bedrock／GLM 真實推論、G6、家族獨立審查及偏誤實驗 |
+| 多模型 | [受限 gateway 與三種 adapter](docs/model-gateway.zh-TW.md)、[合成盲測與裁決試點](docs/blind-review.zh-TW.md) | Bedrock／GLM 真實推論、至少兩個真實家族的重複盲測、完整 G6／偏誤驗收 |
 
 模型 runner 也由 supervisor 管理，成功結果需待清理完成才發布；SIGKILL 後使用 `scripts/cleanup_runs.py` 回收登記的 worker／AWS 程序群組。正式證據位於 `artifacts/<run-id>/report.json`，模型結果仍僅供參考。
 

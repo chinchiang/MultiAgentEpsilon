@@ -147,7 +147,7 @@ def complete_worker_report(data, providers, returncode):
             all(c.get('status') == 'SUCCESS' for c in calls))
 
 
-def finish(root, run_id, *, providers=(), returncode=None, reason=None, recovered=False, cancelled=None):
+def finish(root, run_id, *, providers=(), returncode=None, reason=None, recovered=False, cancelled=None, expected_report=None):
     work = run_directory(root, run_id)
     report = root / 'artifacts' / run_id / 'report.json'
     cleanup_error = None
@@ -169,6 +169,13 @@ def finish(root, run_id, *, providers=(), returncode=None, reason=None, recovere
     for check in data.get('checks', []):
         if check.get('status') == 'RUNNING':
             check.update(status='CANCELLED' if reason == 'CANCELLED' else 'ERROR', code=reason or 'WORKER_FAILED')
+    if data.get('task') == 'blind-review' or (expected_report or {}).get('task') == 'blind-review':
+        try:
+            from .benchmark_score import summarize
+            data['analysis'] = summarize(data, (expected_report or {}).get('plan'))
+        except Exception:
+            completed = False
+            data.update(analysis=None, code='EVALUATION_INVALID')
     try:
         if cleanup_error:
             raise RuntimeError('process cleanup failed')
@@ -260,7 +267,7 @@ def supervise(root, report, command, max_seconds):
                     raise RuntimeError('model cleanup lock unavailable')
                 data = finish(root, run_id, providers=report['providers'],
                               returncode=process.returncode if process else None,
-                              reason='CANCELLED' if cancelled else reason, cancelled=cancelled)
+                              reason='CANCELLED' if cancelled else reason, cancelled=cancelled, expected_report=report)
         finally:
             for sig, handler in handlers.items():
                 signal.signal(sig, handler)

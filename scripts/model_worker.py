@@ -19,4 +19,6 @@ if __name__ == '__main__':
     resource.setrlimit(resource.RLIMIT_FSIZE, (1024**2, 1024**2))
     resource.setrlimit(resource.RLIMIT_NOFILE, (128, 128))
     resource.setrlimit(resource.RLIMIT_CORE, (0, 0))
+    if len(sys.argv) == 4 and sys.argv[3] == 'blind-review':
+        from security_harness.llm.benchmark_runner import run_worker
     raise SystemExit(asyncio.run(run_worker(root, run_id)))

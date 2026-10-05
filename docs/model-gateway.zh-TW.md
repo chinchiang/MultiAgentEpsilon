@@ -63,4 +63,4 @@ janitor 只處理已死亡的 owner；先停止 worker，再重新盤點 AWS 子
 
 新增 29 項離線生命週期回歸涵蓋 parent SIGTERM／SIGINT／SIGKILL、worker SIGKILL、忽略 SIGTERM 的 CLI 子程序、登記前中斷、成功待清理時中斷、清理途中取消、缺失／損壞／重複 key 證據、清理重試、PID／boot 身分保護及並行 janitor。既有 CI 的 always 清理步驟會執行相同 janitor；主機中斷需在恢復後、保留原 workspace 的環境執行。若整個 workspace／登記遺失，就無法由本地 janitor 重建證據；已送到供應商的遠端推論也不能保證停止或不計費。直接呼叫未綁定 run directory 的 adapter 不具有此 runner 的孤兒回收契約。
 
-下一批依序完成：Bedrock／GLM 真實推論驗收；使用已知缺陷及乾淨案例做盲測，分開保存不同模型家族的意見與分歧；建立可重現的人工裁決及誤報／漏報指標。其後再擴充 SCA／SBOM／G3、完整 G5 與 G6 的安全案例。不得用多數模型同意替代確定性 oracle 或獨立合併核准。
+已加入 [固定合成案例的盲測與裁決框架](blind-review.zh-TW.md)，保存獨立意見、分歧及帶分母的品質指標。ACK smoke 預設不保留回答文字；盲測會保存經 schema 驗證的結構化 finding／reason，供人工判讀。後續仍需 Bedrock／GLM 真實推論驗收、至少兩個真實家族的重複實驗與裁決身分驗證，再擴充 SCA／SBOM／G3、完整 G5 與 G6。不得用多數模型同意替代確定性 oracle 或獨立合併核准。

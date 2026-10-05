@@ -1,0 +1,11 @@
+{
+  "version": "synthetic-review-v1",
+  "cases": {
+    "B01": {"verdict": "VULNERABLE", "findings": [{"cwe": "CWE-89", "line": 2}]},
+    "B02": {"verdict": "CLEAN", "findings": []},
+    "B03": {"verdict": "VULNERABLE", "findings": [{"cwe": "CWE-78", "line": 3}]},
+    "B04": {"verdict": "CLEAN", "findings": []},
+    "B05": {"verdict": "VULNERABLE", "findings": [{"cwe": "CWE-89", "line": 3}]},
+    "B06": {"verdict": "CLEAN", "findings": []}
+  }
+}
