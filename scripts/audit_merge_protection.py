@@ -23,7 +23,8 @@ def inspect_configuration(branch, rulesets, pr, collaborators, reviewers):
               for check in r.get('parameters', {}).get('required_status_checks', [])]
     required = [c for c in checks if c.get('context') == 'trusted-security-pilot']
     identities = {c['login']: c.get('role_name') for c in collaborators}
-    independent = [name for name in reviewers if name != pr['user']['login'] and name in identities]
+    independent = [name for name in reviewers if name != pr['user']['login']
+                   and identities.get(name) in ('write', 'maintain', 'admin')]
     developer = [name for name, role in identities.items() if role in ('write', 'maintain') and name != pr['user']['login']]
     configuration = {
         'main_protected': bool(branch.get('protected')),

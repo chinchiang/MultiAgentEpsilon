@@ -59,3 +59,5 @@ python scripts/dev_db.py stop
 隔離回歸會執行缺陷版、修正版，以及在候選匯入時嘗試寫入唯讀來源／入口、讀取 evaluator／Docker socket／token、建立 IP 出向連線的探測。必要結果為：完整 16 案例、缺陷版 5 findings／BLOCK、修正版 0 findings／ALLOW。另有錯誤密碼登入、404 洩漏、匯出夾帶跨租戶資料及其他資料列被非法修改四種變體，必須產生指定 AUTH findings；socket 改指向 host 測試端點必須失敗且端點不得收到連線。
 
 候選 lock digest 必須等於已驗證 runtime lock digest；尚不支援任意候選依賴映像建置。受保護變更使用禁用 rename 折疊的 diff，同時判斷刪除與新增路徑。結果 schema 3 使用版本化逐檔 manifest，不能沿用 schema 2 的 gate 證據。
+
+目前管理 API 的實際阻礙、獨立檢查來源需求及遠端負向驗收步驟，見[遠端合併保護設定與驗收缺口](remote-merge-protection.zh-TW.md)。
