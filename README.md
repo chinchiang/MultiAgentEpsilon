@@ -45,7 +45,7 @@ python3 scripts/dev_db.py stop
 | G2 | 真實 Gitleaks、遮罩、工作樹及候選 HEAD 可達 blobs、限額 gzip／zip／tar 展開 | 服務端 Push Protection、遠端不可得歷史／快取、金鑰撤銷 |
 | 授權回歸 | 登入負例、同角色、跨租戶、管理者、欄位限制、登出及完整 fixture 狀態；16 個案例 | 完整 G5／Web/API 黑箱掃描、TLS／CSRF／JWT／SSRF |
 | 政策 | 嚴格結果格式、故障阻擋、subject／policy digest、基準變更檢查 | 簽章／可信發布、例外生命週期、不可繞過的遠端設定 |
-| CI | 遠端 main／PR 正反例、固定 actions SHA、最小權限、早期拒絕證據與清理 | ruleset 管理寫入遭拒；合併保護及普通開發者繞過驗收仍未完成 |
+| CI | 遠端 main／PR 正反例、固定 actions SHA、最小權限、早期拒絕證據與清理；main 規則已讀回 | 專用可信來源尚未部署，普通開發者繞過驗收仍未完成 |
 | 多模型 | [受限 gateway 與三種 adapter](docs/model-gateway.zh-TW.md)、[合成盲測與裁決試點](docs/blind-review.zh-TW.md) | GLM 真實推論、兩個真實家族的多輪穩定性、完整 G6／偏誤驗收 |
 
 [結構化輸出驗收](docs/structured-output.zh-TW.md)已完成 Gemini／Claude 對 B09～B12 的一輪真實配對：八個回應有效，分類與弱點行號皆符合標準答案；這不等於多輪穩定性或偏誤改善。
@@ -60,7 +60,7 @@ G2 與 subject digest 共用輸入清冊：生成物名稱只在 repository 根�
 
 新執行入口預設受保護。基準更新需由可信 reviewer 對目前 head SHA 獨立核准；guard 即時查核 GitHub PR／reviews，撤回核准、換版或作者自行核准皆不放行。此 run 仍以舊基準判定，合併後才成為下一輪基準。
 
-**main 的合併保護仍需管理權限啟用。** Required status 名稱與 GitHub Actions app ID 無法唯一識別可信 workflow；要保證檢查不可偽造，仍需方案支援的 required workflow 或獨立 GitHub App 驗證來源並回報檢查。規則檔只能作候選設定，不能把它的存在當作已生效。啟用與基準遷移程序見 [操作文件](docs/trusted-execution.zh-TW.md)，先前遠端基線見 [驗收紀錄](docs/remote-ci-validation.zh-TW.md)。
+**main 規則集 24512048 已啟用並讀回確認。** 必要檢查仍使用共用 GitHub Actions App 15368；名稱與 App ID 無法唯一識別可信 workflow。[專用 App 發布程式與部署範本](docs/trusted-check-publisher.zh-TW.md)已準備，App 與服務尚未部署。基準遷移程序見 [操作文件](docs/trusted-execution.zh-TW.md)，先前遠端基線見 [驗收紀錄](docs/remote-ci-validation.zh-TW.md)。
 
 ## 文件與來源
 

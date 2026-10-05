@@ -1,0 +1,10 @@
+[Unit]
+Description=Reconcile trusted security check for PR %i
+
+[Timer]
+OnBootSec=30s
+OnUnitInactiveSec=30s
+Unit=epsilon-publisher@%i.service
+
+[Install]
+WantedBy=timers.target
