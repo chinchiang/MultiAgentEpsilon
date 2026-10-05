@@ -20,6 +20,8 @@ def main():
     selection.add_argument('--case', choices=tuple(load_cases()), action='append')
     selection.add_argument('--suite', choices=(*SUITES, 'all'),
                            help='default: injection; boundaries selects B07-B12; all still obeys budgets')
+    parser.add_argument('--rounds', type=int, choices=range(1, 5), default=1,
+                        help='planned repetitions share the same total call/token/time caps')
     parser.add_argument('--live', action='store_true', help='permit selected live API calls for fixed synthetic cases')
     parser.add_argument('--output-tokens', type=int, choices=(512, 1024), default=512,
                         help='per-review reservation; total must remain <=8192 tokens')
@@ -29,7 +31,7 @@ def main():
         parser.error('live providers require --live')
     cases = args.case or (list(load_cases()) if args.suite == 'all' else list(SUITES[args.suite or 'injection']))
     try:
-        report = initial_report(providers, cases, str(uuid.uuid4()), args.output_tokens)
+        report = initial_report(providers, cases, str(uuid.uuid4()), args.output_tokens, args.rounds)
     except ValueError:
         parser.error('use unique providers/cases, at most 16 reviews and at most 8192 reserved output tokens')
     path = ROOT / 'artifacts' / report['run_id'] / 'report.json'

@@ -19,27 +19,31 @@ def strict_json(raw):
         result = {}
         for key, value in items:
             if key in result:
-                raise ValueError("duplicate key")
+                raise ModelError("INVALID_RESPONSE", "JSON_DUPLICATE_KEY")
             result[key] = value
         return result
 
     def invalid(_):
-        raise ValueError("non-finite JSON")
+        raise ModelError("INVALID_RESPONSE", "JSON_NONFINITE")
 
     def finite(raw):
         value = float(raw)
         if not math.isfinite(value):
-            raise ValueError("non-finite JSON")
+            raise ModelError("INVALID_RESPONSE", "JSON_NONFINITE")
         return value
 
     try:
         value = json.loads(raw.decode("utf-8"), object_pairs_hook=pairs,
                            parse_constant=invalid, parse_float=finite)
         if not isinstance(value, dict):
-            raise ValueError("object required")
+            raise ModelError("INVALID_RESPONSE", "ENVELOPE_SCHEMA")
         return value
-    except (ValueError, UnicodeError, RecursionError):
-        raise ModelError("INVALID_RESPONSE") from None
+    except UnicodeError:
+        raise ModelError("INVALID_RESPONSE", "JSON_ENCODING") from None
+    except json.JSONDecodeError:
+        raise ModelError("INVALID_RESPONSE", "JSON_SYNTAX") from None
+    except (ValueError, RecursionError):
+        raise ModelError("INVALID_RESPONSE", "ENVELOPE_SCHEMA") from None
 
 
 def validate_url(url):
@@ -83,9 +87,9 @@ class JsonHTTP:
                     if status != 200:
                         raise ModelError("HTTP_ERROR")
                     if response.headers.get("content-encoding", "identity").lower() != "identity":
-                        raise ModelError("INVALID_RESPONSE")
+                        raise ModelError("INVALID_RESPONSE", "HTTP_CONTENT_TYPE")
                     if response.headers.get("content-type", "").split(";")[0].strip() != "application/json":
-                        raise ModelError("INVALID_RESPONSE")
+                        raise ModelError("INVALID_RESPONSE", "HTTP_CONTENT_TYPE")
                     body = bytearray()
                     async for chunk in response.aiter_raw():
                         if len(body) + len(chunk) > RESPONSE_BYTES:

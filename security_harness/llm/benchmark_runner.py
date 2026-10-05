@@ -14,10 +14,10 @@ from .transport import JsonHTTP
 from ..lifecycle import run_directory
 
 
-def initial_report(providers, case_ids, run_id, output_tokens=OUTPUT_TOKENS):
+def initial_report(providers, case_ids, run_id, output_tokens=OUTPUT_TOKENS, rounds=1):
     from .benchmark_score import file_digest
     from scripts.model_smoke import implementation_digest, ROOT
-    cases, plan = load_cases(), make_plan(providers, case_ids)
+    cases, plan = load_cases(), make_plan(providers, case_ids, rounds)
     if type(output_tokens) is not int or output_tokens not in (512, 1024):
         raise ValueError('invalid review output budget')
     limits = Limits(max_calls=len(plan), reserved_output_tokens=output_tokens * len(plan), timeout_seconds=30)
@@ -31,6 +31,7 @@ def initial_report(providers, case_ids, run_id, output_tokens=OUTPUT_TOKENS):
             'started_at': datetime.now(timezone.utc).isoformat(),
             'implementation_sha256': digest(json.dumps(implementation)),
             'case_catalog_sha256': file_digest(CASES_PATH), 'oracle_sha256': file_digest(ORACLE_PATH),
+            'rounds': rounds, 'sampling_policy': {p: ('provider-default' if p == 'bedrock' else 'temperature=0' if not p.startswith('mock-') else 'deterministic-fixture') for p in providers},
             'selected_providers': providers, 'case_ids': case_ids, 'plan': plan,
             'providers': [p['provider'] for p in plan], 'checks': checks, 'calls': [],
             'limits': asdict(limits), 'total_timeout_seconds': min(130, 20 * len(plan) + 10),
@@ -71,15 +72,17 @@ async def run_worker(root, run_id):
                 if len(gateway.evidence) > before:
                     call = gateway.evidence[-1]
                     call.update(case_id=check['case_id'], review_id=check['review_id'])
+                    if 'round_index' in check:
+                        call['round_index'] = check['round_index']
                     check['call_id'] = call['call_id']
                 save()
             if reply is None:
-                check.update(status='ERROR', code=gateway.evidence[-1]['code'])
+                check.update(status='ERROR', code=gateway.evidence[-1]['code'], diagnostic=gateway.evidence[-1].get('diagnostic'))
             else:
                 try:
                     value = parse_review(reply.text, case, check['review_id'])
                 except ModelError as exc:
-                    check.update(status='ERROR', code='REVIEW_' + exc.code)
+                    check.update(status='ERROR', code='REVIEW_' + exc.code, diagnostic=exc.detail)
                 else:
                     check.update(status='SUCCESS', review=value, review_sha256=digest(json.dumps(value, sort_keys=True)))
             save()
@@ -87,6 +90,9 @@ async def run_worker(root, run_id):
             report['pending_status'] = 'COMPLETE'
     except asyncio.CancelledError:
         report['code'] = 'CANCELLED'
+        for check in report['checks']:
+            if check['status'] == 'RUNNING':
+                check.update(status='CANCELLED', code='CANCELLED')
     finally:
         for sig in (signal.SIGTERM, signal.SIGINT):
             loop.remove_signal_handler(sig)

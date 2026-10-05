@@ -2,6 +2,8 @@
 
 這個試點比較模型對固定合成程式片段的判讀，不以投票替代確定性安全閘門。`COMPLETE` 代表選定案例都有符合格式的回答、評分成功且資源清理完成；回答全部錯誤或全部 ABSTAIN 仍可能完成流程，必須再看品質、覆蓋率與待審項目。任何結果都標示 `advisory_only`、`security_gate_effect: NONE` 及 `bias_reduction: NOT_ESTABLISHED`。
 
+多輪執行、合併分母及不含原文的錯誤分類見 [多輪盲測文件](repeated-review.zh-TW.md)。
+
 ## 使用方式
 
 ```bash

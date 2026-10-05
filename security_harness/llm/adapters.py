@@ -9,29 +9,42 @@ def usage(value, input_key, output_key):
     if value is None:
         return None, None
     if not isinstance(value, dict):
-        raise ModelError("INVALID_RESPONSE")
+        raise ModelError("INVALID_RESPONSE", "USAGE_SCHEMA")
     counts = value.get(input_key), value.get(output_key)
     if any(v is not None and (type(v) is not int or not 0 <= v <= 10000000) for v in counts):
-        raise ModelError("INVALID_RESPONSE")
+        raise ModelError("INVALID_RESPONSE", "USAGE_SCHEMA")
     return counts
 
 
 def text_parts(parts):
     if not isinstance(parts, list) or not parts:
-        raise ModelError("INVALID_RESPONSE")
+        raise ModelError("INVALID_RESPONSE", "ENVELOPE_SCHEMA")
     texts = []
     for part in parts:
         if not isinstance(part, dict):
-            raise ModelError("INVALID_RESPONSE")
+            raise ModelError("INVALID_RESPONSE", "ENVELOPE_SCHEMA")
         if any(key in part for key in ("functionCall", "toolUse", "executableCode", "codeExecutionResult")):
             raise ModelError("TOOL_REQUEST")
         if set(part) - {"text", "thought", "thoughtSignature"} or type(part.get("text")) is not str:
-            raise ModelError("INVALID_RESPONSE")
+            raise ModelError("INVALID_RESPONSE", "UNEXPECTED_CONTENT")
         if "thought" in part and type(part["thought"]) is not bool:
-            raise ModelError("INVALID_RESPONSE")
+            raise ModelError("INVALID_RESPONSE", "ENVELOPE_SCHEMA")
         if not part.get("thought", False):
             texts.append(part["text"])
-    return "".join(texts)
+    text = "".join(texts)
+    if not text.strip():
+        raise ModelError("INVALID_RESPONSE", "EMPTY_TEXT")
+    return text
+
+
+def object_field(value, key):
+    if not isinstance(value, dict):
+        raise ModelError('INVALID_RESPONSE', 'ENVELOPE_SCHEMA')
+    if key not in value:
+        raise ModelError('INVALID_RESPONSE', 'MISSING_FIELD')
+    if not isinstance(value[key], dict):
+        raise ModelError('INVALID_RESPONSE', 'ENVELOPE_SCHEMA')
+    return value[key]
 
 
 class GeminiAdapter:
@@ -54,19 +67,28 @@ class GeminiAdapter:
              "contents": [{"role": "user", "parts": [{"text": request.user}]}],
              "generationConfig": {"maxOutputTokens": request.max_output_tokens,
                                   "candidateCount": 1, "temperature": 0}})
+        if "promptFeedback" in value and not isinstance(value["promptFeedback"], dict):
+            raise ModelError("INVALID_RESPONSE", "ENVELOPE_SCHEMA")
         if value.get("promptFeedback", {}).get("blockReason"):
             raise ModelError("REFUSED")
+        if "candidates" not in value:
+            raise ModelError("INVALID_RESPONSE", "MISSING_FIELD")
         candidates = value.get("candidates")
         if not isinstance(candidates, list) or len(candidates) != 1:
-            raise ModelError("INVALID_RESPONSE")
+            raise ModelError("INVALID_RESPONSE", "ENVELOPE_SCHEMA")
         candidate = candidates[0]
+        if not isinstance(candidate, dict):
+            raise ModelError('INVALID_RESPONSE', 'ENVELOPE_SCHEMA')
         reason = candidate.get("finishReason")
         if reason == "MAX_TOKENS":
             raise ModelError("TRUNCATED")
         if reason in {"SAFETY", "RECITATION", "BLOCKLIST", "PROHIBITED_CONTENT", "SPII"}:
             raise ModelError("REFUSED")
-        if reason != "STOP" or candidate.get("content", {}).get("role") != "model":
-            raise ModelError("INVALID_RESPONSE")
+        content = object_field(candidate, "content")
+        if reason != "STOP":
+            raise ModelError("INVALID_RESPONSE", "MISSING_FIELD" if reason is None else "STOP_REASON")
+        if content.get("role") != "model":
+            raise ModelError("INVALID_RESPONSE", "ENVELOPE_SCHEMA")
         text = text_parts(candidate["content"].get("parts"))
         return Reply(text, *usage(value.get("usageMetadata"), "promptTokenCount", "candidatesTokenCount"))
 
@@ -88,20 +110,24 @@ class GLMAdapter:
             "model": self.model, "messages": [{"role": "system", "content": request.system},
                                                {"role": "user", "content": request.user}],
             "max_tokens": request.max_output_tokens, "temperature": 0, "stream": False, "n": 1})
+        if "choices" not in value:
+            raise ModelError("INVALID_RESPONSE", "MISSING_FIELD")
         choices = value.get("choices")
         if not isinstance(choices, list) or len(choices) != 1:
-            raise ModelError("INVALID_RESPONSE")
+            raise ModelError("INVALID_RESPONSE", "ENVELOPE_SCHEMA")
         choice = choices[0]
-        message = choice.get("message", {})
+        message = object_field(choice, "message")
         if message.get("tool_calls") or message.get("function_call") or choice.get("finish_reason") in {"tool_calls", "function_call"}:
             raise ModelError("TOOL_REQUEST")
         if message.get("refusal") or choice.get("finish_reason") == "content_filter":
             raise ModelError("REFUSED")
         if choice.get("finish_reason") == "length":
             raise ModelError("TRUNCATED")
-        if (choice.get("finish_reason") != "stop" or message.get("role") != "assistant" or
+        if choice.get("finish_reason") != "stop":
+            raise ModelError("INVALID_RESPONSE", "MISSING_FIELD" if choice.get("finish_reason") is None else "STOP_REASON")
+        if (message.get("role") != "assistant" or
                 type(message.get("content")) is not str):
-            raise ModelError("INVALID_RESPONSE")
+            raise ModelError("INVALID_RESPONSE", "ENVELOPE_SCHEMA")
         return Reply(message["content"], *usage(value.get("usage"), "prompt_tokens", "completion_tokens"))
 
 
@@ -129,8 +155,12 @@ class BedrockAdapter:
             raise ModelError("REFUSED")
         if reason in {"max_tokens", "model_context_window_exceeded"}:
             raise ModelError("TRUNCATED")
-        message = value.get("output", {}).get("message", {})
-        if reason != "end_turn" or message.get("role") != "assistant":
-            raise ModelError("INVALID_RESPONSE")
-        text = text_parts(message.get("content"))
+        message = object_field(object_field(value, "output"), "message")
+        if reason != "end_turn":
+            raise ModelError("INVALID_RESPONSE", "MISSING_FIELD" if reason is None else "STOP_REASON")
+        if message.get("role") != "assistant":
+            raise ModelError("INVALID_RESPONSE", "ENVELOPE_SCHEMA")
+        if 'content' not in message:
+            raise ModelError('INVALID_RESPONSE', 'MISSING_FIELD')
+        text = text_parts(message['content'])
         return Reply(text, *usage(value.get("usage"), "inputTokens", "outputTokens"))

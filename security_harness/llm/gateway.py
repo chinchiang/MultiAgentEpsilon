@@ -16,8 +16,14 @@ class ModelError(Exception):
                        "AUTHENTICATION", "REDIRECT", "RESPONSE_LIMIT", "INVALID_RESPONSE",
                        "REFUSED", "TRUNCATED", "TOOL_REQUEST", "PROVIDER_FAILURE"})
 
-    def __init__(self, code):
+    DETAILS = frozenset({'JSON_SYNTAX', 'JSON_ENCODING', 'JSON_DUPLICATE_KEY',
+        'JSON_NONFINITE', 'ENVELOPE_SCHEMA', 'MISSING_FIELD', 'UNEXPECTED_CONTENT',
+        'EMPTY_TEXT', 'USAGE_SCHEMA', 'STOP_REASON', 'REVIEW_SCHEMA', 'EVIDENCE_MISMATCH',
+        'HTTP_CONTENT_TYPE'})
+
+    def __init__(self, code, detail=None):
         self.code = code if code in self.CODES else "PROVIDER_FAILURE"
+        self.detail = detail if type(detail) is str and detail in self.DETAILS else None
         super().__init__(self.code)
 
 
@@ -83,7 +89,7 @@ class Gateway:
         evidence = {"schema_version": 1, "call_id": str(uuid.uuid4()),
                     "provider": adapter.provider, "family": adapter.family,
                     "model_sha256": digest(adapter.model), "status": "ERROR", "code": None,
-                    "request_sha256": None, "response_sha256": None,
+                    "request_sha256": None, "response_sha256": None, "diagnostic": None,
                     "input_tokens": None, "output_tokens": None, "advisory_only": True}
         self.evidence.append(evidence)
         started = time.monotonic()
@@ -111,12 +117,12 @@ class Gateway:
             async with asyncio.timeout(self.limits.timeout_seconds):
                 reply = await adapter.generate(request)
             if not isinstance(reply, Reply) or type(reply.text) is not str or not reply.text.strip():
-                raise ModelError("INVALID_RESPONSE")
+                raise ModelError("INVALID_RESPONSE", "EMPTY_TEXT")
             if len(reply.text.encode()) > self.limits.max_output_bytes:
                 raise ModelError("RESPONSE_LIMIT")
             for value in (reply.input_tokens, reply.output_tokens):
                 if value is not None and (type(value) is not int or not 0 <= value <= 10000000):
-                    raise ModelError("INVALID_RESPONSE")
+                    raise ModelError("INVALID_RESPONSE", "USAGE_SCHEMA")
             if reply.output_tokens is not None and reply.output_tokens > request.max_output_tokens:
                 raise ModelError("RESPONSE_LIMIT")
             evidence.update(status="SUCCESS", response_sha256=digest(reply.text),
@@ -129,6 +135,7 @@ class Gateway:
             evidence.update(status="TIMEOUT", code="DEADLINE")
         except ModelError as exc:
             evidence["code"] = exc.code
+            evidence["diagnostic"] = exc.detail
         except Exception:
             # Do not serialize exception messages, provider payloads or URLs.
             evidence["code"] = "PROVIDER_FAILURE"

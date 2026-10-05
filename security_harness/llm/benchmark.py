@@ -42,17 +42,22 @@ def case_digest(case):
     return digest(json.dumps({k: case[k] for k in ('language', 'source', 'context')}, sort_keys=True))
 
 
-def make_plan(providers, case_ids):
+def make_plan(providers, case_ids, rounds=1):
     cases = load_cases()
-    if (not providers or len(set(providers)) != len(providers) or
+    if (type(rounds) is not int or not 1 <= rounds <= 4 or not providers or len(set(providers)) != len(providers) or
             any(p not in PROVIDERS for p in providers) or not case_ids or
             len(set(case_ids)) != len(case_ids) or any(c not in cases for c in case_ids) or
-            len(providers) * len(case_ids) > 16):
+            len(providers) * len(case_ids) * rounds > 16):
         raise ValueError('invalid or over-budget review plan')
-    tokens = {c: str(uuid.uuid4()) for c in case_ids}
-    plan = [{'case_id': c, 'provider': p, 'review_id': tokens[c], 'case_sha256': case_digest(cases[c])}
-            for c in case_ids for p in providers]
-    random.SystemRandom().shuffle(plan)
+    plan = []
+    for round_index in range(1, rounds + 1):
+        tokens = {c: str(uuid.uuid4()) for c in case_ids}
+        batch = [{'case_id': c, 'provider': p, 'review_id': tokens[c],
+                  'case_sha256': case_digest(cases[c]),
+                  **({'round_index': round_index} if rounds > 1 else {})}
+                 for c in case_ids for p in providers]
+        random.SystemRandom().shuffle(batch)
+        plan.extend(batch)
     return plan
 
 
@@ -78,18 +83,19 @@ def validate_review(value, case, review_id):
             value['review_id'] != review_id or value['verdict'] not in ('VULNERABLE', 'CLEAN', 'ABSTAIN') or
             not bounded_text(value['reason']) or type(value['findings']) is not list or
             len(value['findings']) > 3 or bool(value['findings']) != (value['verdict'] == 'VULNERABLE')):
-        raise ModelError('INVALID_RESPONSE')
+        raise ModelError('INVALID_RESPONSE', 'REVIEW_SCHEMA')
     lines, seen = case['source'].splitlines(), set()
     for finding in value['findings']:
         if (not isinstance(finding, dict) or set(finding) != {'cwe', 'line', 'evidence', 'rationale'} or
                 finding['cwe'] not in CWES or type(finding['line']) is not int or
                 not 1 <= finding['line'] <= len(lines) or
-                finding['evidence'] != lines[finding['line'] - 1].strip() or
                 not bounded_text(finding['rationale'])):
-            raise ModelError('INVALID_RESPONSE')
+            raise ModelError('INVALID_RESPONSE', 'REVIEW_SCHEMA')
+        if finding['evidence'] != lines[finding['line'] - 1].strip():
+            raise ModelError('INVALID_RESPONSE', 'EVIDENCE_MISMATCH')
         key = finding['cwe'], finding['line']
         if key in seen:
-            raise ModelError('INVALID_RESPONSE')
+            raise ModelError('INVALID_RESPONSE', 'REVIEW_SCHEMA')
         seen.add(key)
     return value
 
