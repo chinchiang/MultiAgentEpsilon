@@ -51,7 +51,7 @@ def test_command_reference_tracks_shell_boundary_without_executing_payload(case_
 
 def collected(tmp_path, providers=None, case_ids=None):
     report = runner.initial_report(providers or ['mock-review-a', 'mock-review-b'],
-                                   case_ids or list(bench.load_cases()), str(uuid.uuid4()))
+                                   case_ids or list(bench.SUITES['injection']), str(uuid.uuid4()))
     path = tmp_path / 'artifacts' / report['run_id'] / 'report.json'
     life.persist(path, report)
     prepare_run(tmp_path, report['run_id'], operation='model-smoke')
@@ -61,7 +61,7 @@ def collected(tmp_path, providers=None, case_ids=None):
 
 
 def test_blinding_projection_and_identical_requests_for_each_provider():
-    plan = bench.make_plan(['mock-review-a', 'mock-review-b'], list(bench.load_cases()))
+    plan = bench.make_plan(['mock-review-a', 'mock-review-b'], list(bench.SUITES['injection']))
     grouped = {}
     for item in plan:
         case = bench.load_cases()[item['case_id']]
@@ -250,7 +250,7 @@ def test_larger_review_budget_is_bound_to_every_request_and_total_cap():
     with pytest.raises(ValueError, match='request binding'):
         score.validate_collection(report)
     with pytest.raises(ValueError):
-        runner.initial_report(['mock-review-a', 'mock-review-b'], list(bench.load_cases()), str(uuid.uuid4()), 1024)
+        runner.initial_report(['mock-review-a', 'mock-review-b'], list(bench.SUITES['injection']), str(uuid.uuid4()), 1024)
 
 
 def test_parent_refuses_worker_success_when_benchmark_evaluation_is_invalid(tmp_path):

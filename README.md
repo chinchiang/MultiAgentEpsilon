@@ -69,3 +69,5 @@ G2 與 subject digest 共用輸入清冊：生成物名稱只在 repository 根�
 公開版本只包含程式碼、合成測試及操作文件。使用者提供的附件、內部研究／治理文件及其衍生表單保留於本地，不包含於公開 Git 歷史。當前完成度以 milestone status 為準；少量示範案例不代表符合完整 [OWASP ASVS](https://owasp.org/www-project-application-security-verification-standard/)。
 
 掃描格式、總資源限制、SIGTERM／SIGINT／SIGKILL 清理回歸，以及遠端合併保護尚缺的前提，見 [覆蓋與生命週期驗收](docs/coverage-lifecycle-acceptance.zh-TW.md)。
+
+新增越權、路徑穿越及 SSRF 的合成配對案例可用 `scripts/model_review.py --suite boundaries` 離線執行；行為反例、ASVS 5.0.0 對照與未涵蓋範圍見 [覆蓋對照](docs/asvs-coverage.zh-TW.md)。這些案例不代表正式應用已完成相同驗證。

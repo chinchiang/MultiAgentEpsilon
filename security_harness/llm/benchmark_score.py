@@ -6,7 +6,7 @@ import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 
-from .benchmark import (CASES_PATH, ORACLE_PATH, load_cases, case_digest, review_request,
+from .benchmark import (CASES_PATH, ORACLE_PATH, CWES, load_cases, case_digest, review_request,
                         request_digest, validate_review, bounded_text)
 from .gateway import digest
 from .transport import strict_json
@@ -30,7 +30,7 @@ def reference():
                 bool(value['findings']) != (value['verdict'] == 'VULNERABLE')):
             raise ValueError('invalid reference')
         for finding in value['findings']:
-            if (set(finding) != {'cwe', 'line'} or finding['cwe'] not in ('CWE-89', 'CWE-78') or
+            if (set(finding) != {'cwe', 'line'} or finding['cwe'] not in CWES or
                     type(finding['line']) is not int or not 1 <= finding['line'] <= len(cases[key]['source'].splitlines())):
                 raise ValueError('invalid reference location')
     return data['cases']

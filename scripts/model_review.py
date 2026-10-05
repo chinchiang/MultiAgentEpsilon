@@ -8,7 +8,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
-from security_harness.llm.benchmark import PROVIDERS, load_cases
+from security_harness.llm.benchmark import PROVIDERS, SUITES, load_cases
 from security_harness.llm.benchmark_runner import initial_report
 from security_harness.llm.lifecycle import persist, supervise
 
@@ -16,7 +16,10 @@ from security_harness.llm.lifecycle import persist, supervise
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--provider', choices=PROVIDERS, action='append')
-    parser.add_argument('--case', choices=tuple(load_cases()), action='append')
+    selection = parser.add_mutually_exclusive_group()
+    selection.add_argument('--case', choices=tuple(load_cases()), action='append')
+    selection.add_argument('--suite', choices=(*SUITES, 'all'),
+                           help='default: injection; boundaries selects B07-B12; all still obeys budgets')
     parser.add_argument('--live', action='store_true', help='permit selected live API calls for fixed synthetic cases')
     parser.add_argument('--output-tokens', type=int, choices=(512, 1024), default=512,
                         help='per-review reservation; total must remain <=8192 tokens')
@@ -24,8 +27,9 @@ def main():
     providers = args.provider or ['mock-review-a', 'mock-review-b']
     if any(not p.startswith('mock-') for p in providers) and not args.live:
         parser.error('live providers require --live')
+    cases = args.case or (list(load_cases()) if args.suite == 'all' else list(SUITES[args.suite or 'injection']))
     try:
-        report = initial_report(providers, args.case or list(load_cases()), str(uuid.uuid4()), args.output_tokens)
+        report = initial_report(providers, cases, str(uuid.uuid4()), args.output_tokens)
     except ValueError:
         parser.error('use unique providers/cases, at most 16 reviews and at most 8192 reserved output tokens')
     path = ROOT / 'artifacts' / report['run_id'] / 'report.json'
