@@ -84,6 +84,30 @@ class JsonHTTP:
                         raise ModelError("AUTHENTICATION")
                     if status == 429:
                         raise ModelError("RATE_LIMIT")
+                    if status == 400:
+                        # Diagnose known configuration rejections only. Never
+                        # retain provider text, which can echo prompts or secrets.
+                        detail = None
+                        if (response.headers.get('content-encoding', 'identity').lower() == 'identity' and
+                                response.headers.get('content-type', '').split(';')[0].strip() == 'application/json'):
+                            body = bytearray()
+                            async for chunk in response.aiter_raw():
+                                if len(body) + len(chunk) > 8192:
+                                    break
+                                body.extend(chunk)
+                            else:
+                                try:
+                                    error = strict_json(body).get('error')
+                                    message = error.get('message') if isinstance(error, dict) else None
+                                    if type(message) is str:
+                                        normalized = ''.join(c for c in message.lower() if 'a' <= c <= 'z')
+                                        if any(k in normalized for k in ('thinkingconfig', 'thinkinglevel', 'thinkingbudget')):
+                                            detail = 'THINKING_CONFIGURATION'
+                                        elif any(k in normalized for k in ('responsejsonschema', 'responseschema', 'responsemimetype')):
+                                            detail = 'OUTPUT_CONFIGURATION'
+                                except ModelError:
+                                    pass
+                        raise ModelError('HTTP_ERROR', detail)
                     if status != 200:
                         raise ModelError("HTTP_ERROR")
                     if response.headers.get("content-encoding", "identity").lower() != "identity":

@@ -380,3 +380,147 @@ def test_cli_seal_failure_closes_input_without_starting_child(monkeypatch):
     result, evidence = invoke(BedrockAdapter('synthetic', 'ap-southeast-1', AwsCLI()))
     assert result is None and evidence['status'] == 'ERROR'
     assert set(Path('/proc/self/fd').iterdir()) == before
+
+
+@pytest.mark.parametrize('provider', ['gemini', 'bedrock'])
+def test_review_uses_native_schema_without_weakening_local_evidence_checks(provider):
+    import copy
+    from security_harness.llm import benchmark as bench
+    from security_harness.llm.output_schema import review_schema
+    case = bench.load_cases()['B09']
+    request = bench.review_request(case, 'opaque-id')
+    # Syntactically valid output can still contain fabricated evidence.
+    review = {'review_id': 'opaque-id', 'verdict': 'VULNERABLE', 'reason': 'Unsafe path.',
+              'findings': [{'cwe': 'CWE-22', 'line': 3, 'evidence': 'fabricated', 'rationale': 'Unsafe path.'}]}
+    captured = []
+    if provider == 'gemini':
+        value = copy.deepcopy(GEMINI)
+        value['candidates'][0]['content']['parts'] = [{'text': json.dumps(review)}]
+        http, wire, _ = http_fixture(value)
+        adapter = GeminiAdapter('gemini-3.8-flash', 'synthetic-key', http)
+    else:
+        value = copy.deepcopy(BEDROCK)
+        value['output']['message']['content'] = [{'text': json.dumps(review)}]
+        class CLI:
+            async def converse(self, region, payload):
+                captured.append(payload)
+                return value
+        adapter = BedrockAdapter('anthropic.claude-synthetic', 'ap-southeast-1', CLI())
+    result, evidence = invoke(adapter, request)
+    assert result is not None
+    with pytest.raises(ModelError) as failure:
+        bench.parse_review(result.text, case, 'opaque-id')
+    assert failure.value.detail == 'EVIDENCE_MISMATCH'
+    if provider == 'gemini':
+        assert len(wire) == 1
+        config = json.loads(wire[0].content)['generationConfig']
+        assert config['responseMimeType'] == 'application/json'
+        assert config['responseJsonSchema'] == review_schema()
+        assert config['thinkingConfig'] == {'thinkingLevel': 'LOW', 'includeThoughts': False}
+        assert config['maxOutputTokens'] == request.max_output_tokens
+    else:
+        assert len(captured) == 1
+        config = captured[0]['outputConfig']['textFormat']
+        assert config['type'] == 'json_schema'
+        assert json.loads(config['structure']['jsonSchema']['schema']) == review_schema()
+        assert captured[0]['inferenceConfig'] == {'maxTokens': request.max_output_tokens}
+        assert 'toolConfig' not in captured[0]
+    assert evidence['request_sha256'] == bench.request_digest(request)
+
+
+@pytest.mark.parametrize('model,minimal', [('gemini-3.8-flash', True), ('gemini-3-flash-preview', True),
+                                          ('gemini-2.5-flash', False), ('gemini-3-pro', False),
+                                          ('synthetic-model', False)])
+def test_gemini_thinking_controls_are_scoped_to_supported_review_model_family(model, minimal):
+    from security_harness.llm.benchmark import load_cases, review_request
+    http, wire, _ = http_fixture(GEMINI)
+    invoke(GeminiAdapter(model, 'synthetic-key', http), review_request(load_cases()['B10'], 'opaque-id'))
+    assert ('thinkingConfig' in json.loads(wire[0].content)['generationConfig']) is minimal
+    http, wire, _ = http_fixture(GEMINI)
+    invoke(GeminiAdapter(model, 'synthetic-key', http))
+    config = json.loads(wire[0].content)['generationConfig']
+    assert not {'thinkingConfig', 'responseMimeType', 'responseJsonSchema'} & config.keys()
+
+
+@pytest.mark.parametrize('thoughts,code,total', [(0, None, 2), (7, None, 9), (31, 'RESPONSE_LIMIT', None),
+                                              (-1, 'INVALID_RESPONSE', None), (True, 'INVALID_RESPONSE', None)])
+def test_gemini_thinking_usage_cannot_hide_output_budget_overrun(thoughts, code, total):
+    import copy
+    value = copy.deepcopy(GEMINI)
+    value['usageMetadata']['thoughtsTokenCount'] = thoughts
+    http, wire, _ = http_fixture(value)
+    result, evidence = invoke(GeminiAdapter('gemini-3.8-flash', 'synthetic-key', http))
+    assert evidence['code'] == code and len(wire) == 1
+    if code is None:
+        assert result.output_tokens == total and evidence['output_tokens'] == total
+    else:
+        assert result is None
+
+
+@pytest.mark.parametrize('provider', ['gemini', 'bedrock'])
+def test_native_schema_request_does_not_repair_fenced_json_or_accept_truncation(provider):
+    import copy
+    from security_harness.llm import benchmark as bench
+    request = bench.review_request(bench.load_cases()['B10'], 'opaque-id')
+    for truncated in (False, True):
+        if provider == 'gemini':
+            value = copy.deepcopy(GEMINI)
+            value['candidates'][0]['content']['parts'] = [{'text': '```json\n{}\n```'}]
+            value['candidates'][0]['finishReason'] = 'MAX_TOKENS' if truncated else 'STOP'
+            http, wire, _ = http_fixture(value)
+            adapter = GeminiAdapter('gemini-3.8-flash', 'synthetic-key', http)
+        else:
+            value = copy.deepcopy(BEDROCK)
+            value['output']['message']['content'] = [{'text': '```json\n{}\n```'}]
+            value['stopReason'] = 'max_tokens' if truncated else 'end_turn'
+            class CLI:
+                async def converse(self, region, payload): return value
+            adapter = BedrockAdapter('anthropic.claude-synthetic', 'ap-southeast-1', CLI())
+        result, evidence = invoke(adapter, request)
+        if truncated:
+            assert result is None and evidence['code'] == 'TRUNCATED'
+        else:
+            with pytest.raises(ModelError) as failure:
+                bench.parse_review(result.text, bench.load_cases()['B10'], 'opaque-id')
+            assert failure.value.detail == 'JSON_SYNTAX'
+
+
+def test_response_format_is_bound_and_unknown_formats_never_reach_provider():
+    from dataclasses import replace
+    from security_harness.llm.gateway import request_digest
+    from security_harness.llm.output_schema import REVIEW_FORMAT
+    assert request_digest(REQUEST) != request_digest(replace(REQUEST, response_format=REVIEW_FORMAT))
+    class Forbidden(MockAdapter):
+        async def generate(self, _): pytest.fail('unknown format reached provider')
+    result, evidence = invoke(Forbidden(), replace(REQUEST, response_format='untrusted-format'))
+    assert result is None and evidence['code'] == 'ROUTING_DENIED'
+
+
+def test_unsupported_native_schema_fails_without_unstructured_retry():
+    from security_harness.llm.benchmark import load_cases, review_request
+    http, wire, _ = http_fixture(body=b'sensitive-provider-error', status=400)
+    result, evidence = invoke(GeminiAdapter('gemini-3.8-flash', 'synthetic-key', http),
+                              review_request(load_cases()['B10'], 'opaque-id'))
+    assert result is None and evidence['code'] == 'HTTP_ERROR' and len(wire) == 1
+    assert 'sensitive-provider-error' not in json.dumps(evidence)
+
+
+@pytest.mark.parametrize('message,detail', [('Invalid thinking_config.thinking_level secret', 'THINKING_CONFIGURATION'),
+                                           ('Thinking level MINIMAL is not supported', 'THINKING_CONFIGURATION'),
+                                           ('Unknown responseJsonSchema secret', 'OUTPUT_CONFIGURATION'),
+                                           ('private model message', None)])
+def test_bad_request_diagnostics_retain_only_fixed_configuration_categories(message, detail):
+    http, wire, stream = http_fixture({'error': {'message': message}}, status=400)
+    result, evidence = invoke(GeminiAdapter('synthetic', 'synthetic-key', http))
+    assert result is None and evidence['code'] == 'HTTP_ERROR'
+    assert evidence['diagnostic'] == detail and len(wire) == 1 and stream.closed
+    assert message not in json.dumps(evidence)
+
+
+def test_bad_request_diagnostics_do_not_parse_oversize_or_duplicate_error_bodies():
+    for body in (b'{"error":{"message":"responseJsonSchema' + b'x' * 8192 + b'"}}',
+                 b'{"error":{"message":"responseJsonSchema","message":"thinkingConfig"}}'):
+        http, wire, stream = http_fixture(body=body, status=400)
+        result, evidence = invoke(GeminiAdapter('synthetic', 'synthetic-key', http))
+        assert result is None and evidence['code'] == 'HTTP_ERROR' and evidence['diagnostic'] is None
+        assert len(wire) == 1 and stream.closed

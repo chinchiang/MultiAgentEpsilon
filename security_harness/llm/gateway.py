@@ -8,6 +8,8 @@ import uuid
 from dataclasses import dataclass, field
 from typing import Protocol
 
+from .output_schema import REVIEW_FORMAT
+
 
 class ModelError(Exception):
     """Only fixed error codes may cross the evidence boundary."""
@@ -19,7 +21,7 @@ class ModelError(Exception):
     DETAILS = frozenset({'JSON_SYNTAX', 'JSON_ENCODING', 'JSON_DUPLICATE_KEY',
         'JSON_NONFINITE', 'ENVELOPE_SCHEMA', 'MISSING_FIELD', 'UNEXPECTED_CONTENT',
         'EMPTY_TEXT', 'USAGE_SCHEMA', 'STOP_REASON', 'REVIEW_SCHEMA', 'EVIDENCE_MISMATCH',
-        'HTTP_CONTENT_TYPE'})
+        'HTTP_CONTENT_TYPE', 'OUTPUT_CONFIGURATION', 'THINKING_CONFIGURATION'})
 
     def __init__(self, code, detail=None):
         self.code = code if code in self.CODES else "PROVIDER_FAILURE"
@@ -37,6 +39,13 @@ class Request:
     user: str = field(repr=False)
     data_class: str = "synthetic"
     max_output_tokens: int = 128
+    response_format: str = 'text'
+
+
+def request_digest(request):
+    return digest(json.dumps(
+        [request.system, request.user, request.data_class, request.max_output_tokens, request.response_format],
+        ensure_ascii=True, separators=(',', ':')))
 
 
 @dataclass(frozen=True)
@@ -98,6 +107,7 @@ class Gateway:
                     type(request.system) is not str or type(request.user) is not str or
                     not request.system or not request.user or
                     type(request.max_output_tokens) is not int or
+                    type(request.response_format) is not str or request.response_format not in ('text', REVIEW_FORMAT) or
                     not 0 < request.max_output_tokens <= 4096):
                 evidence["code"] = "ROUTING_DENIED"
                 return None
@@ -105,9 +115,7 @@ class Gateway:
             if size > self.limits.max_input_bytes:
                 evidence["code"] = "INPUT_LIMIT"
                 return None
-            evidence["request_sha256"] = digest(json.dumps(
-                [request.system, request.user, request.data_class, request.max_output_tokens],
-                ensure_ascii=True, separators=(",", ":")))
+            evidence["request_sha256"] = request_digest(request)
             if (self.calls >= self.limits.max_calls or self.reserved_tokens +
                     request.max_output_tokens > self.limits.reserved_output_tokens):
                 evidence["code"] = "BUDGET_EXHAUSTED"

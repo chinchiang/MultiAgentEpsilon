@@ -4,7 +4,8 @@ import random
 import uuid
 from pathlib import Path
 
-from .gateway import Request, Reply, ModelError, digest
+from .gateway import Request, Reply, ModelError, digest, request_digest
+from .output_schema import REVIEW_FORMAT
 from .transport import strict_json
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -65,12 +66,7 @@ def review_request(case, review_id, output_tokens=OUTPUT_TOKENS):
     # Explicit projection: no catalog ID, truth, filename, category or peer output.
     return Request(SYSTEM, json.dumps({'review_id': review_id, 'language': case['language'],
                    'context': case['context'], 'source': case['source']}, ensure_ascii=True),
-                   max_output_tokens=output_tokens)
-
-
-def request_digest(request):
-    return digest(json.dumps([request.system, request.user, request.data_class, request.max_output_tokens],
-                            ensure_ascii=True, separators=(',', ':')))
+                   max_output_tokens=output_tokens, response_format=REVIEW_FORMAT)
 
 
 def bounded_text(value):

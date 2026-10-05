@@ -1,8 +1,10 @@
 """Gemini generateContent, OpenAI-compatible GLM chat, and Bedrock Converse."""
 import re
+import json
 
 from .gateway import ModelError, Reply
 from .transport import AwsCLI, JsonHTTP, validate_url
+from .output_schema import REVIEW_FORMAT, review_schema
 
 
 def usage(value, input_key, output_key):
@@ -60,13 +62,20 @@ class GeminiAdapter:
         self.http = http or JsonHTTP()
 
     async def generate(self, request):
+        config = {"maxOutputTokens": request.max_output_tokens, "candidateCount": 1, "temperature": 0}
+        if request.response_format == REVIEW_FORMAT:
+            config.update(responseMimeType='application/json', responseJsonSchema=review_schema())
+            # Use LOW for Gemini 3 Flash; MINIMAL was rejected by the live model.
+            # Do not send this model-specific
+            # option to earlier generations, Pro, or arbitrary model aliases.
+            if re.fullmatch(r'gemini-3(?:\.\d+)?-flash(?:-[a-z0-9-]+)?', self.model):
+                config['thinkingConfig'] = {'thinkingLevel': 'LOW', 'includeThoughts': False}
         value = await self.http.post(
             f"https://generativelanguage.googleapis.com/v1beta/models/{self.model}:generateContent",
             {"x-goog-api-key": self._api_key},
             {"systemInstruction": {"parts": [{"text": request.system}]},
              "contents": [{"role": "user", "parts": [{"text": request.user}]}],
-             "generationConfig": {"maxOutputTokens": request.max_output_tokens,
-                                  "candidateCount": 1, "temperature": 0}})
+             "generationConfig": config})
         if "promptFeedback" in value and not isinstance(value["promptFeedback"], dict):
             raise ModelError("INVALID_RESPONSE", "ENVELOPE_SCHEMA")
         if value.get("promptFeedback", {}).get("blockReason"):
@@ -90,7 +99,11 @@ class GeminiAdapter:
         if content.get("role") != "model":
             raise ModelError("INVALID_RESPONSE", "ENVELOPE_SCHEMA")
         text = text_parts(candidate["content"].get("parts"))
-        return Reply(text, *usage(value.get("usageMetadata"), "promptTokenCount", "candidatesTokenCount"))
+        metadata = value.get('usageMetadata')
+        inputs, outputs = usage(metadata, 'promptTokenCount', 'candidatesTokenCount')
+        _, thoughts = usage(metadata, 'promptTokenCount', 'thoughtsTokenCount')
+        # The output budget covers both visible output and internal thinking.
+        return Reply(text, inputs, outputs + (thoughts or 0) if outputs is not None else None)
 
 
 class GLMAdapter:
@@ -143,11 +156,16 @@ class BedrockAdapter:
         self.family = "claude" if "anthropic.claude" in model else "unverified"
 
     async def generate(self, request):
-        value = await self.cli.converse(self.region, {
+        payload = {
             "modelId": self.model, "system": [{"text": request.system}],
             "messages": [{"role": "user", "content": [{"text": request.user}]}],
             # Sampling knobs are model-specific; retain the provider default.
-            "inferenceConfig": {"maxTokens": request.max_output_tokens}})
+            "inferenceConfig": {"maxTokens": request.max_output_tokens}}
+        if request.response_format == REVIEW_FORMAT:
+            payload['outputConfig'] = {'textFormat': {
+                'type': 'json_schema', 'structure': {'jsonSchema': {
+                    'name': 'security_review', 'schema': json.dumps(review_schema(), separators=(',', ':'))}}}}
+        value = await self.cli.converse(self.region, payload)
         reason = value.get("stopReason")
         if reason == "tool_use":
             raise ModelError("TOOL_REQUEST")
