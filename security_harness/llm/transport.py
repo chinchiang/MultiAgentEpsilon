@@ -1,5 +1,6 @@
 """Bounded HTTP and AWS CLI transports. No redirects, retries or raw error logs."""
 import asyncio
+import fcntl
 import json
 import math
 import os
@@ -100,7 +101,8 @@ class JsonHTTP:
 class AwsCLI:
     """Use the configured AWS credential chain. No shell or interactive login.
 
-    Request JSON is sent on stdin, not a process argument or temporary file.
+    Request JSON uses a sealed anonymous Linux memory file, never a command argument
+    or filesystem payload. stdin carries only the registration handshake.
     Kill the dedicated process group and reap the CLI on cancellation/timeout.
     """
 
@@ -114,20 +116,32 @@ class AwsCLI:
                and k not in {"GEMINI_API_KEY", "GLM_API_KEY"}}
         env.update(AWS_EC2_METADATA_DISABLED="true", AWS_MAX_ATTEMPTS="1", AWS_PAGER="",
                    AWS_IGNORE_CONFIGURED_ENDPOINT_URLS="true", AWS_CLI_AUTO_PROMPT="off")
-        command = [self.executable, "bedrock-runtime", "converse", "--region", region,
-            "--cli-input-json", "file:///dev/stdin", "--output", "json", "--no-cli-pager",
-            "--cli-connect-timeout", "10", "--cli-read-timeout", "20"]
-        if self.run_directory is not None:
-            from .lifecycle import gated_command, register_group
-            command = gated_command(command)
-        process = await asyncio.create_subprocess_exec(*command,
-            stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.DEVNULL, env=env, start_new_session=True)
+        # AWS CLI v2 cannot parse the JSON from a pipe-backed /dev/stdin here.
+        # memfd provides a seekable input; seals prevent any child from modifying it.
+        # Linux ABI constants are used when the Python build omits their names.
+        fd = os.memfd_create("epsilon-aws-input", os.MFD_CLOEXEC | os.MFD_ALLOW_SEALING)
+        try:
+            with os.fdopen(os.dup(fd), 'wb') as handle:
+                handle.write(json.dumps(payload).encode())
+            os.lseek(fd, 0, os.SEEK_SET)
+            fcntl.fcntl(fd, getattr(fcntl, 'F_ADD_SEALS', 1033), 0x000F)
+            input_path = f"file:///proc/self/fd/{fd}"
+            command = [self.executable, "bedrock-runtime", "converse", "--region", region,
+                "--cli-input-json", input_path, "--output", "json", "--no-cli-pager",
+                "--cli-connect-timeout", "10", "--cli-read-timeout", "20"]
+            if self.run_directory is not None:
+                from .lifecycle import gated_command, register_group
+                command = gated_command(command)
+            process = await asyncio.create_subprocess_exec(*command,
+                stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.DEVNULL, env=env, start_new_session=True,
+                pass_fds=(fd,))
+        finally:
+            os.close(fd)
         try:
             if self.run_directory is not None:
                 register_group(self.run_directory, process.pid)
                 process.stdin.write(b'G')
-            process.stdin.write(json.dumps(payload).encode())
             await process.stdin.drain()
             process.stdin.close()
             body = bytearray()

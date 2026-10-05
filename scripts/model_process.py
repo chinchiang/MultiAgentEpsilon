@@ -4,7 +4,7 @@ import os
 import sys
 
 if __name__ == '__main__':
-    # Unbuffered read preserves the remainder of stdin for the AWS JSON payload.
+    # stdin contains only the gate; AWS payloads use a sealed inherited descriptor.
     # An owner killed before registration closes this pipe: EOF means no exec.
     if os.read(0, 1) != b'G':
         raise SystemExit(1)

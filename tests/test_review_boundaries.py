@@ -131,6 +131,7 @@ def test_new_suite_is_supervised_and_all_suite_cannot_silently_exceed_budget():
     all_data = json.loads(Path(json.loads(all_done.stdout)['evidence']).read_text())
     assert set(all_data['case_ids']) == set(bench.load_cases()) and len(all_data['calls']) == 12
     assert all_data['status'] == 'COMPLETE' and all_data['cleanup']['completed']
+    assert all_data['analysis']['limits'].startswith('12 selected synthetic snippets')
     for args in [['--suite', 'all'], ['--suite', 'boundaries', '--case', 'B01']]:
         rejected = subprocess.run([*command, *args], capture_output=True, timeout=10)
         assert rejected.returncode == 2

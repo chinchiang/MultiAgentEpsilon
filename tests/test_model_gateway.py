@@ -88,7 +88,7 @@ def test_provider_contracts_keep_system_separate_and_bound_output(provider):
     else:
         assert captured[0][0] == "ap-southeast-1"
         assert captured[0][1]["system"] == [{"text": REQUEST.system}]
-        assert captured[0][1]["inferenceConfig"]["maxTokens"] == 32
+        assert captured[0][1]["inferenceConfig"] == {"maxTokens": 32}
 
 
 @pytest.mark.parametrize("model_request,code", [
@@ -252,7 +252,7 @@ def cli_fixture(tmp_path, body):
     return AwsCLI(str(executable))
 
 
-def test_real_cli_subprocess_contract_uses_stdin_and_disables_endpoint_overrides(tmp_path, monkeypatch):
+def test_real_cli_subprocess_contract_uses_sealed_seekable_input_and_disables_endpoint_overrides(tmp_path, monkeypatch):
     monkeypatch.setenv("AWS_ENDPOINT_URL_BEDROCK_RUNTIME", "https://attacker.example.invalid")
     monkeypatch.setenv("GEMINI_API_KEY", "synthetic-key")
     cli = cli_fixture(tmp_path, "import sys,json,os\n"
@@ -261,7 +261,15 @@ def test_real_cli_subprocess_contract_uses_stdin_and_disables_endpoint_overrides
         "assert os.environ['AWS_IGNORE_CONFIGURED_ENDPOINT_URLS'] == 'true'\n"
         "assert os.environ['AWS_MAX_ATTEMPTS'] == '1'\n"
         "assert 'Synthetic sample' not in ' '.join(sys.argv)\n"
-        "p=json.load(sys.stdin)\n"
+        "path=sys.argv[sys.argv.index('--cli-input-json')+1].removeprefix('file://')\n"
+        "assert path.startswith('/proc/self/fd/')\n"
+        "assert sys.stdin.read() == ''\n"
+        "with open(path) as source:\n"
+        " p=json.load(source); source.seek(0); assert json.load(source)==p\n"
+        "try:\n"
+        " with open(path, 'r+b') as target: target.write(b'X')\n"
+        "except PermissionError: pass\n"
+        "else: raise AssertionError('input is writable')\n"
         "assert p['messages'][0]['content'][0]['text'] == 'Synthetic sample'\n"
         f"print({json.dumps(json.dumps(BEDROCK))})\n")
     result, evidence = invoke(BedrockAdapter("anthropic.claude-synthetic-v1", "ap-southeast-1", cli))
@@ -346,3 +354,29 @@ def test_smoke_cli_offline_default_and_no_implicit_live_calls(tmp_path):
     assert denied.returncode == 2
     duplicate = subprocess.run([sys.executable, "-I", str(script), "--output", str(output)], capture_output=True, timeout=10)
     assert duplicate.returncode == 2
+
+
+def test_cli_spawn_failure_closes_anonymous_input(monkeypatch):
+    from security_harness.llm import transport
+    before = set(Path('/proc/self/fd').iterdir())
+    async def fail_spawn(*args, **kwargs):
+        assert len(kwargs['pass_fds']) == 1
+        raise OSError('synthetic spawn failure')
+    monkeypatch.setattr(transport.asyncio, 'create_subprocess_exec', fail_spawn)
+    result, evidence = invoke(BedrockAdapter('synthetic', 'ap-southeast-1', AwsCLI()))
+    assert result is None and evidence['status'] == 'ERROR'
+    assert set(Path('/proc/self/fd').iterdir()) == before
+
+
+def test_cli_seal_failure_closes_input_without_starting_child(monkeypatch):
+    from security_harness.llm import transport
+    before = set(Path('/proc/self/fd').iterdir())
+    def fail_seal(*args):
+        raise OSError('synthetic sealing failure')
+    async def forbidden_spawn(*args, **kwargs):
+        pytest.fail('unsealed input must never be passed to a child')
+    monkeypatch.setattr(transport.fcntl, 'fcntl', fail_seal)
+    monkeypatch.setattr(transport.asyncio, 'create_subprocess_exec', forbidden_spawn)
+    result, evidence = invoke(BedrockAdapter('synthetic', 'ap-southeast-1', AwsCLI()))
+    assert result is None and evidence['status'] == 'ERROR'
+    assert set(Path('/proc/self/fd').iterdir()) == before

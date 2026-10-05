@@ -120,7 +120,8 @@ class BedrockAdapter:
         value = await self.cli.converse(self.region, {
             "modelId": self.model, "system": [{"text": request.system}],
             "messages": [{"role": "user", "content": [{"text": request.user}]}],
-            "inferenceConfig": {"maxTokens": request.max_output_tokens, "temperature": 0}})
+            # Sampling knobs are model-specific; retain the provider default.
+            "inferenceConfig": {"maxTokens": request.max_output_tokens}})
         reason = value.get("stopReason")
         if reason == "tool_use":
             raise ModelError("TOOL_REQUEST")

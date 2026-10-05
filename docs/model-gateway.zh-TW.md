@@ -34,7 +34,7 @@ gateway 提供共用 `Request`／`Reply`、離線 mock、Gemini `generateContent
 - `Gateway` 只接受可信呼叫者標示的 synthetic 類別，限制 system＋user 共 16 KiB、單次 output 上限與整個 gateway 的呼叫／token 預留額度。預留在 I/O 前完成，失敗不退還，不會以多次平行請求繞過預算。
 - HTTP 禁止 redirects，保留 proxy 與 CA trust；回應 envelope 最多 128 KiB、文字最多 64 KiB。拒絕壓縮回應、非 JSON、重複 key、非有限數值、截斷與不支援的結束原因。
 - tool／function 呼叫、code-execution payload 與 content-filter 拒答均產生失敗證據。任何文字輸出都只當資料，沒有 shell、工具分派或網路委派入口。system 與 user 在供應商協定中分開傳送。
-- AWS CLI 使用 stdin 傳送 JSON，禁止 shell、互動提示、重試及 configured endpoint overrides；stdout 有上限，stderr 不寫入證據。取消／逾時時終止 process group 並回收 CLI。
+- AWS CLI 使用封存的 Linux 匿名記憶體檔案傳送 JSON，子程序只繼承指定的檔案描述元；不將內容放入命令列參數或具名暫存檔。stdin 只傳遞登記後的放行字元。禁止 shell、互動提示、重試及 configured endpoint overrides；stdout 有上限，stderr 不寫入證據。取消／逾時時終止 process group 並回收 CLI。
 - 證據保存 call ID、模型／輸入／輸出 digest、耗時、固定錯誤碼與供應商回報 token 數。缺 usage 為 null，不記作免費或零消耗。原始 prompt、回答、HTTP body、憑證、端點及例外文字都不進報告。
 
 synthetic 標籤是可信呼叫者的分類聲明，並不是 DLP 或機密偵測。模型輸出仍是不可信資料；分離角色不保證模型本身不受 prompt injection 影響。token 限制不是精確的金額預算，供應商計價、hidden reasoning 與取消後的遠端運算可能另有費用。回應超限時只能拒絕本次結果，無法追回供應商已收取的費用。
@@ -49,7 +49,7 @@ synthetic 標籤是可信呼叫者的分類聲明，並不是 DLP 或機密偵�
 
 ## 2026-10-05 模型 runner 生命週期
 
-smoke runner 現在由獨立 supervisor 管理，使用既有 `.state/runs/<run-id>` 登記及同一支 janitor。模型回收不需要 Docker。worker 及每個 AWS CLI process group 都先以 PID、start ticks、boot ID、UID 持久化登記，再透過 stdin 放行執行；登記前 owner 消失會使 pipe EOF，子程序不會執行模型請求。AWS JSON payload 接在放行字元之後，wrapper 不讀取或記錄其內容。
+smoke runner 現在由獨立 supervisor 管理，使用既有 `.state/runs/<run-id>` 登記及同一支 janitor。模型回收不需要 Docker。worker 及每個 AWS CLI process group 都先以 PID、start ticks、boot ID、UID 持久化登記，再透過 stdin 放行執行；登記前 owner 消失會使 pipe EOF，子程序不會執行模型請求。AWS JSON 透過封存記憶體檔案提供，放行包裝程式不讀取或記錄其內容。登記前收到 EOF 仍不會執行 AWS 命令。
 
 worker 最多只能寫 AWAITING_CLEANUP，最後的 COMPLETE 由 parent 在驗證所有供應商結果、退出碼及清理成功後寫入。worker／CLI 受到 2 GiB address-space、512 MiB data、30／35 秒 CPU、1 MiB 檔案、128 FD 及禁用 core dump 的限制。SIGTERM／SIGINT、總期限、worker 異常退出均終止登記的程序群組並清理專屬 TMPDIR。
 
@@ -63,4 +63,17 @@ janitor 只處理已死亡的 owner；先停止 worker，再重新盤點 AWS 子
 
 新增 29 項離線生命週期回歸涵蓋 parent SIGTERM／SIGINT／SIGKILL、worker SIGKILL、忽略 SIGTERM 的 CLI 子程序、登記前中斷、成功待清理時中斷、清理途中取消、缺失／損壞／重複 key 證據、清理重試、PID／boot 身分保護及並行 janitor。既有 CI 的 always 清理步驟會執行相同 janitor；主機中斷需在恢復後、保留原 workspace 的環境執行。若整個 workspace／登記遺失，就無法由本地 janitor 重建證據；已送到供應商的遠端推論也不能保證停止或不計費。直接呼叫未綁定 run directory 的 adapter 不具有此 runner 的孤兒回收契約。
 
-已加入 [固定合成案例的盲測與裁決框架](blind-review.zh-TW.md)，保存獨立意見、分歧及帶分母的品質指標。ACK smoke 預設不保留回答文字；盲測會保存經 schema 驗證的結構化 finding／reason，供人工判讀。後續仍需 Bedrock／GLM 真實推論驗收、至少兩個真實家族的重複實驗與裁決身分驗證，再擴充 SCA／SBOM／G3、完整 G5 與 G6。不得用多數模型同意替代確定性 oracle 或獨立合併核准。
+已加入 [固定合成案例的盲測與裁決框架](blind-review.zh-TW.md)，保存獨立意見、分歧及帶分母的品質指標。ACK smoke 預設不保留回答文字；盲測會保存經 schema 驗證的結構化 finding／reason，供人工判讀。後續仍需 GLM 真實推論驗收、Claude 失敗回應的後續觀測、兩個真實家族的重複實驗與裁決身分驗證，再擴充 SCA／SBOM／G3、完整 G5 與 G6。不得用多數模型同意替代確定性 oracle 或獨立合併核准。
+
+
+## 2026-10-05 Bedrock 真實串接修正
+
+真實 AWS CLI v2.37.9 無法解析透過管線 `/dev/stdin` 傳入的 JSON。原有模擬命令直接讀取標準輸入，未涵蓋這個差異。現在使用 Linux `memfd_create` 建立可定位讀取的匿名記憶體檔案，寫入後封存寫入、增長及縮短能力，只讓指定子程序繼承。父程序啟動子程序後關閉自己的描述元；啟動或封存失敗也會關閉。這項實作依賴 Linux 與 `/proc`；能力不足時不改用明文暫存檔。
+
+測試命令現在按照真正的 `--cli-input-json` 檔案參數讀取，驗證可重新定位及禁止寫入；另加入啟動失敗、封存失敗的描述元清理回歸。取消、期限及孤兒回收仍沿用既有監督程序。
+
+目前設定的 Claude 模型拒絕固定溫度參數。Bedrock 介面因此只傳送輸出詞元上限，取樣採模型預設值；Gemini 與 GLM 的既有設定不變。不同供應商的取樣設定並不相同，不能將一次配對測試視為控制所有變因的偏誤實驗。
+
+若使用者已透過安全環境設定提供 AWS 暫時憑證，而繼承的 `AWS_PROFILE` 指向不存在的設定檔，可只在單次命令移除 `AWS_PROFILE`／`AWS_DEFAULT_PROFILE`。必須先使用相同選擇方式執行 `sts get-caller-identity`，核對目標帳號及角色；單一登入角色可能是權限集名稱加上 AWS 保留前綴與識別後綴。不得因此切換至未核對的其他身分，也不改寫原有設定檔。若有受管理的 AWS 身分，仍優先按照執行環境的身分清單選擇，不套用此方式。
+
+本輪已核對 AWS 帳號及單一登入權限集，固定合成回覆成功，API 回報輸入 63、輸出 19 個詞元，清理完成。模型資料查詢仍遭權限拒絕，不能把它誤判為推論權限也不可用；反過來，推論成功也不代表具備模型資料查詢權限。模型設定保留在環境，不寫入儲存庫。

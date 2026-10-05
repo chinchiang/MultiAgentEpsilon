@@ -37,7 +37,7 @@ def setup_driver(tmp_path, *, hang=True, timeout=20, pause=None, child_registrat
     aws = tmp_path / 'aws-fixture'
     aws.write_text(f'#!{sys.executable}\n' + '''import json,os,signal,subprocess,sys,time
 from pathlib import Path
-payload=json.load(sys.stdin)
+payload=json.loads(Path(sys.argv[sys.argv.index('--cli-input-json')+1].removeprefix('file://')).read_text())
 assert payload['messages'][0]['content'][0]['text'].startswith('Reply with exactly')
 temp=Path(os.environ['TMPDIR'])/'nested';temp.mkdir();(temp/'owned.tmp').write_text('synthetic')
 child=subprocess.Popen([sys.executable,'-c','import signal,time; signal.signal(signal.SIGTERM,signal.SIG_IGN); time.sleep(60)'],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)

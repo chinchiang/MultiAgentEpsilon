@@ -175,7 +175,7 @@ def summarize(report, expected_plan=None):
     return {'advisory_only': True, 'provider_metrics': metrics, 'pairwise': pairs,
             'adjudication': decisions, 'live_family_labels_observed': sorted(families),
             'bias_reduction': 'NOT_ESTABLISHED', 'security_gate_effect': 'NONE',
-            'limits': 'Six synthetic snippets, two CWE classes; not product or ASVS coverage.'}
+            'limits': f'{len(selected)} selected synthetic snippets in their declared scope; not product or ASVS coverage.'}
 
 
 def add_adjudication(report_path, case_id, decision, reviewer, reason):
