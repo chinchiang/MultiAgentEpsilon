@@ -15,8 +15,9 @@ ROOT = Path(__file__).resolve().parents[1]
 def test_external_oracle_rejects_defect_and_accepts_fixed():
     vulnerable = run_isolated(ROOT, "vulnerable")
     fixed = run_isolated(ROOT, "fixed")
-    assert len(vulnerable["cases"]) == len(fixed["cases"]) == 16
-    assert sum(not c["passed"] for c in vulnerable["cases"]) == 5
+    contract = json.loads((ROOT / "security/policy.json").read_text())["gate_contracts"]["AUTH"]
+    assert len(vulnerable["cases"]) == len(fixed["cases"]) == len(contract["case_ids"])
+    assert {c["case"] for c in vulnerable["cases"] if not c["passed"]} == set(contract["seeded_defect_case_ids"])
     assert all(c["passed"] for c in fixed["cases"])
     assert fixed["isolation"]["network"] == "none"
     assert fixed["isolation"]["user"] == "10001:10001"

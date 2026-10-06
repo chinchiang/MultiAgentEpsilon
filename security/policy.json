@@ -59,8 +59,18 @@
         "admin cross-tenant denied",
         "member export denied",
         "admin export tenant-scoped",
+        "same-tenant admin write allowed",
+        "admin cross-tenant write denied without side effect",
         "owner field cannot be reassigned",
         "logout revokes session"
+      ],
+      "seeded_defect_case_ids": [
+        "bob: unauthorized read denied without data",
+        "bob: unauthorized write denied without side effect",
+        "carol: unauthorized read denied without data",
+        "carol: unauthorized write denied without side effect",
+        "admin cross-tenant denied",
+        "admin cross-tenant write denied without side effect"
       ]
     }
   }

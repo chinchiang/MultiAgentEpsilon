@@ -36,6 +36,9 @@ MUTATIONS = {'wrong_password_accepted': ('if not user or not hmac.compare_digest
                                      '(user["tenant"],)).fetchall()\n'
                                      '            return [{**row, "leaked": '
                                      'other} for row in rows]'),
+ # The admin branch of the write predicate escapes the tenant boundary.
+ 'admin_cross_tenant_write': ("WHERE id=%s AND tenant=%s AND (owner=%s OR %s='admin') RETURNING *",
+                              "WHERE id=%s AND ((tenant=%s AND owner=%s) OR %s='admin') RETURNING *"),
  'denied_write_changes_other_row': ('if not row:\n'
                                     '            raise HTTPException(404, '
                                     '"item not found")',
@@ -52,8 +55,10 @@ EXPECTED = {
     'wrong_password_accepted': {'wrong password denied without session'},
     'cross_tenant_404_leak': {'admin cross-tenant denied'},
     'export_nested_cross_tenant_leak': {'admin export tenant-scoped'},
+    'admin_cross_tenant_write': {'admin cross-tenant write denied without side effect'},
     'denied_write_changes_other_row': {'bob: unauthorized write denied without side effect',
-                                     'carol: unauthorized write denied without side effect'},
+                                     'carol: unauthorized write denied without side effect',
+                                     'admin cross-tenant write denied without side effect'},
 }
 
 @pytest.mark.integration

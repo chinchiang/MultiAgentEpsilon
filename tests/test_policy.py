@@ -87,3 +87,17 @@ def test_incomplete_or_inconsistent_case_evidence_blocks(mutation):
     else:
         auth["kind"] = "scan"
     assert judge(rows) == "BLOCK"
+
+
+@pytest.mark.parametrize("seeded", [None, [], ["not a case"], ["anonymous denied", "anonymous denied"],
+                                    "all", "every case"])
+def test_seeded_defect_manifest_must_be_a_strict_subset_of_required_cases(seeded):
+    policy = deepcopy(POLICY)
+    contract = policy["gate_contracts"]["AUTH"]
+    if seeded == "every case":
+        contract["seeded_defect_case_ids"] = list(contract["case_ids"])
+    elif seeded is None:
+        del contract["seeded_defect_case_ids"]
+    else:
+        contract["seeded_defect_case_ids"] = seeded
+    assert judge(records(), policy) == "BLOCK"

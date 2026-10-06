@@ -110,6 +110,14 @@ def evaluate(client, dsn, schema, passwords, connect):
     check("admin cross-tenant denied", "get", "/items/3", 404, {"detail": "item not found"}, headers=headers["admin"])
     check("member export denied", "get", "/admin/export", 403, {"detail": "admin required"}, headers=headers["alice"])
     check("admin export tenant-scoped", "get", "/admin/export", 200, [updated, seeded_items[1]], headers=headers["admin"])
+    # Admin delegation is a write privilege too: it must work in-tenant and stop at the tenant boundary.
+    admin_updated = {**seeded_items[1], "value": "admin-updated"}
+    expected = snapshot(dsn, schema, connect)
+    expected["items"][1] = admin_updated
+    check("same-tenant admin write allowed", "patch", "/items/2", 200, admin_updated, expected=expected,
+          headers=headers["admin"], json={"value": "admin-updated"})
+    check("admin cross-tenant write denied without side effect", "patch", "/items/3", 404,
+          {"detail": "item not found"}, headers=headers["admin"], json={"value": "cross-tenant-update"})
     check("owner field cannot be reassigned", "patch", "/items/1", 422,
           {"detail": [{"type": "extra_forbidden", "loc": ["body", "owner"],
                        "msg": "Extra inputs are not permitted", "input": "bob"}]},

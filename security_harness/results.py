@@ -82,6 +82,18 @@ def validate_policy(policy: dict) -> None:
             raise ValueError("invalid gate contract")
         if contract["kind"] == "test":
             validate_cases([{"case": c, "passed": True} for c in contract.get("case_ids", [])], contract)
+            seeded_defects(contract)
+
+
+def seeded_defects(contract: dict) -> set[str]:
+    """Exact cases the seeded vulnerable variant must fail; a count alone would let a
+    regression trade one detected violation for another."""
+    seeded = contract.get("seeded_defect_case_ids")
+    if (not isinstance(seeded, list) or not seeded or
+            any(not isinstance(x, str) or not x for x in seeded) or len(set(seeded)) != len(seeded) or
+            not set(seeded) < set(contract.get("case_ids", []))):
+        raise ValueError("invalid seeded defect manifest")
+    return set(seeded)
 
 
 def validate_cases(cases: list[dict], contract: dict) -> None:

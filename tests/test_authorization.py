@@ -1,3 +1,6 @@
+import json
+from pathlib import Path
+
 import pytest
 
 from fixture_app.app import database_url, connect
@@ -11,13 +14,16 @@ def test_identical_oracle_rejects_vulnerable_and_accepts_fixed():
     dsn = database_url()  # Missing PostgreSQL is a failure, never a silent skip.
     vulnerable = run_authorization(dsn, "vulnerable")
     fixed = run_authorization(dsn, "fixed")
-    assert len(vulnerable) == len(fixed) == 16
+    contract = json.loads((Path(__file__).resolve().parents[1] / "security/policy.json").read_text())["gate_contracts"]["AUTH"]
+    assert len(vulnerable) == len(fixed) == len(contract["case_ids"]) == 18
     failed = {x["case"] for x in vulnerable if not x["passed"]}
-    assert failed == {"bob: unauthorized read denied without data",
-                      "bob: unauthorized write denied without side effect",
-                      "carol: unauthorized read denied without data",
-                      "carol: unauthorized write denied without side effect",
-                      "admin cross-tenant denied"}
+    assert failed == set(contract["seeded_defect_case_ids"]) == {
+        "bob: unauthorized read denied without data",
+        "bob: unauthorized write denied without side effect",
+        "carol: unauthorized read denied without data",
+        "carol: unauthorized write denied without side effect",
+        "admin cross-tenant denied",
+        "admin cross-tenant write denied without side effect"}
     assert all(x["passed"] for x in fixed)
 
 
