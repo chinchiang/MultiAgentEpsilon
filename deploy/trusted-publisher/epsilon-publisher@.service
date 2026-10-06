@@ -1,0 +1,49 @@
+[Unit]
+Description=Dedicated trusted security check publisher for PR %i
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=epsilon-publisher
+Group=epsilon-publisher
+WorkingDirectory=/opt/epsilon-publisher/app
+EnvironmentFile=-/etc/epsilon-publisher/network.env
+# The App key stays root-owned (0600) on disk; systemd hands the service a private
+# read-only copy, so the service account can neither read nor replace the original.
+LoadCredential=github-app.pem:/etc/epsilon-publisher/github-app.pem
+ExecStart=/usr/bin/python3 -I /opt/epsilon-publisher/app/scripts/publish_trusted_check.py --settings /etc/epsilon-publisher/publisher.json --gate-policy /etc/epsilon-publisher/gate-policy.json --private-key ${CREDENTIALS_DIRECTORY}/github-app.pem --lock-file /var/lib/epsilon-publisher/publisher.lock --state-file /var/lib/epsilon-publisher/pr-%i-state.json --pr %i --output /var/lib/epsilon-publisher/pr-%i.json
+TimeoutStartSec=300
+KillMode=control-group
+StateDirectory=epsilon-publisher
+StateDirectoryMode=0700
+UMask=0077
+NoNewPrivileges=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectSystem=strict
+ProtectHome=yes
+ProtectProc=invisible
+ProcSubset=pid
+ReadWritePaths=/var/lib/epsilon-publisher
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+RemoveIPC=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallErrorNumber=EPERM
+CapabilityBoundingSet=
+AmbientCapabilities=
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+MemoryMax=256M
+TasksMax=64
+CPUQuota=50%

@@ -50,3 +50,9 @@ def test_missing_tampered_scanner_and_empty_scope_fail(tmp_path):
     (tmp_path / "data").write_text("safe")
     with pytest.raises(ValueError):
         scan(tmp_path, ROOT / ".tools/gitleaks", ROOT / "security/gitleaks.toml", "incorrect")
+
+
+def test_candidate_inline_allow_comment_cannot_suppress_canary(tmp_path):
+    canary = "VIBE_TEST_" + "SECRET_" + secrets.token_hex(16)
+    (tmp_path / "settings.py").write_text('token = "' + canary + '" # gitleaks:allow\n')
+    assert len(run(tmp_path)["findings"]) == 1

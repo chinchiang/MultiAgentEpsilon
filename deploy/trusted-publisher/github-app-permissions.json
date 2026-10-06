@@ -1,0 +1,13 @@
+{
+  "description": "Permissions to select in GitHub App settings; not an App creation manifest.",
+  "repository_selection": ["chinchiang/MultiAgentEpsilon"],
+  "permissions": {
+    "actions": "read",
+    "contents": "read",
+    "pull_requests": "read",
+    "checks": "write",
+    "metadata": "read"
+  },
+  "webhook_active": false,
+  "check_name": "epsilon/trusted-merge"
+}

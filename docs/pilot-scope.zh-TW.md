@@ -14,9 +14,9 @@
 
 登入憑證隨每次 schema 產生；session 使用隨機 opaque token，資料庫只存 token hash，15 分鐘到期，登出即刪除。這是 fixture 的最小認證，不是完整登入安全方案，尚未驗證 MFA、防暴力破解或生產等級 session 政策。HTTP 僅本機，沒有 TLS 合規聲明。
 
-受測操作為讀取、更新及租戶匯出，未提供建立／刪除等完整產品 CRUD。更新採單一具 tenant／owner／role 條件的 SQL，避免先查後寫的授權窗口。測試包含 14 個案例，會查 PostgreSQL 真實副作用；另有真實 HTTP 啟動／登入 smoke。主要授權測試使用 in-process HTTP／ASGI 與內部 DB oracle，屬灰箱，不能稱為完整純黑箱 DAST。
+受測操作為讀取、更新及租戶匯出，未提供建立／刪除等完整產品 CRUD。更新採單一具 tenant／owner／role 條件的 SQL，避免先查後寫的授權窗口。測試包含 18 個案例（含 admin 同租戶寫入與跨租戶寫入），會查 PostgreSQL 真實副作用；另有真實 HTTP 啟動／登入 smoke。可信 CI 在無網路容器中執行候選 fixture，由容器外的 oracle 經受限 HTTP bridge 與獨立資料庫查詢評分；本機開發另有 in-process HTTP／ASGI 版本。兩者都屬灰箱，不能稱為完整純黑箱 DAST。
 
-刻意缺陷版只省略物件存取的 tenant／owner 約束，保留相同測試介面。預期抓到 bob／carol 的非法讀寫各一次，加上 admin 跨租戶讀取，共 5 個違規。正式 server 腳本只允許 fixed variant；測試程式必須明確指定 vulnerable。
+刻意缺陷版只省略物件存取的 tenant／owner 約束，保留相同測試介面。預期抓到 bob／carol 的非法讀寫各一次，加上 admin 跨租戶讀取與跨租戶寫入，共 6 個違規；這組精確案例記錄在政策的 `seeded_defect_case_ids`，數量相同但換成其他案例失敗也不算通過。正式 server 腳本只允許 fixed variant；測試程式必須明確指定 vulnerable。
 
 | 主要威脅 | 目前控制與證據 | 仍有限制 |
 |---|---|---|
