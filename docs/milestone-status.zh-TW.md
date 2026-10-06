@@ -6,10 +6,22 @@
 
 ### 遠端治理
 
-- main 已由規則集 24512048 保護：active、沒有 bypass、須經 PR 與 code owner 核准、推送新 commit 後舊核准失效、最後推送須另獲核准，必要檢查為 GitHub Actions App 15368 的 `trusted-security-pilot`。
+- main 由規則集 24512048 保護：沒有 bypass、須經 PR 與 code owner 核准、推送新 commit 後舊核准失效、最後推送須另獲核准，必要檢查為 GitHub Actions App 15368 的 `trusted-security-pilot`。2026-10-06 為首次基準遷移由擁有者暫時停用，本文件合併後恢復為 active；最新狀態以 `python3 scripts/audit_merge_protection.py` 讀回為準。
 - 這個必要檢查仍可由任何 workflow 以同名產生。專用 App 的 `epsilon/trusted-merge` 尚未建立、部署或綁定；過渡期間，審查者在核准或合併前以 `scripts/verify_required_check.py --pr <編號>` 核對檢查來源。
-- **合併死結：** 儲存庫只有一位 collaborator（chinchiang，同時是 PR 作者），main 的 CODEOWNERS 只列 chinchiang，而 GitHub 不允許作者核准自己的 PR；CatGrocery 尚不是具寫入權限的協作者。完成擁有者授權的首次基準遷移前，任何 PR 都無法依規則合併。
-- 新的 `pull_request_target` workflow 必須先成為 main 的內容，才會對 PR 自動執行；在此之前，PR 上不會出現可信的必要檢查。
+- **首次基準遷移已完成（2026-10-06）：** 擁有者暫時停用規則集後，以 merge commit 合併 [#6](https://github.com/chinchiang/MultiAgentEpsilon/pull/6)（`da567d8`）與 [#7](https://github.com/chinchiang/MultiAgentEpsilon/pull/7)（`0ac31cb`）。之後的 PR 由 main 上的新 evaluator 以 `pull_request_target` 評估。
+- **仍缺獨立審查者：** CODEOWNERS 已列 chinchiang 與 CatGrocery，但 CatGrocery 尚不是具寫入權限的協作者。規則集恢復後，作者為 chinchiang 的 PR 仍需另一位具寫入權限的 code owner 核准才能合併；涉及受保護路徑的 PR 另需 `security/trust-policy.json` 中非作者的基準審查者核准，guard 才會放行。
+
+### 遷移後的真實流程驗收（2026-10-06）
+
+| 情境 | run | 結果 |
+|---|---|---|
+| #7 改以 main 為 base（第一次真實 `pull_request_target`） | [37446641158](https://github.com/chinchiang/MultiAgentEpsilon/actions/runs/37446641158) | workflow 取自 main、evaluator 為 base `da567d8`；guard 偵測 29 個受保護變更且無獨立核准而 BLOCK，未執行任何候選步驟；檢查掛在 PR head |
+| main 合併後（push，`0ac31cb`） | [37446694680](https://github.com/chinchiang/MultiAgentEpsilon/actions/runs/37446694680) | 532 項測試全過；修正版 18／0 ALLOW；缺陷版恰好 6 個 seeded findings；證據自我檢查 PUBLISHABLE |
+| 驗證 PR #8：admin 寫入越過租戶邊界 | [37447163081](https://github.com/chinchiang/MultiAgentEpsilon/actions/runs/37447163081) | guard 放行（只改 fixture）；evaluator 自我測試 532 項全過；候選恰好出現 `admin cross-tenant write denied without side effect` 一個 finding，BLOCK |
+| 驗證 PR #9：政策移除 AUTH 閘門 | [37447183081](https://github.com/chinchiang/MultiAgentEpsilon/actions/runs/37447183081) | guard 以 `security/policy.json` 受保護且未獲核准而 BLOCK |
+| 本文件 PR（只改 Markdown） | 見 PR 說明 | 正向驗證：guard 放行，完整可信流程成功 |
+
+`verify_required_check.py` 也以真實 GitHub 資料核對：PR #5 舊 head `9a47966` 上手動觸發、候選自評的綠燈判為 `UNTRUSTED_CHECK_SOURCE`；#7 head 上真正的 `pull_request_target` 檢查來源可信，但因結果失敗判為 `LATEST_CHECK_NOT_SUCCESS`。#8、#9 驗證後已關閉、未合併，分支已刪除。
 
 ### 本版驗收（commit `2158448`，遠端手動 [run 37441975087](https://github.com/chinchiang/MultiAgentEpsilon/actions/runs/37441975087)；之後的 commit 只改文件與範本測試下限）
 
@@ -32,7 +44,7 @@
 
 ### 仍待完成
 
-- **需擁有者操作：** 邀請獨立審查者並取得寫入權限、執行擁有者授權的首次基準遷移（見 [可信執行文件](trusted-execution.zh-TW.md)）、建立並部署專用 App、把 `epsilon/trusted-merge` 加入規則集，並以普通開發者身分完成繞過驗收。
+- **需擁有者操作：** 邀請獨立審查者並取得寫入權限（之後的 PR 才能依規則合併）、建立並部署專用 App、把 `epsilon/trusted-merge` 加入規則集，並以普通開發者身分完成繞過驗收。首次基準遷移已於 2026-10-06 完成。
 - **功能面：** G3、完整 G5、SBOM／SCA／CVE、ASVS 產品適用性判定、證據簽章與正式發布、GLM 真實推論與結構化輸出、較大樣本的跨家族穩定性與偏誤實驗（2026-10-06 已完成 B07／B08 兩輪的雙模型小樣本驗收，見 [多輪盲測](repeated-review.zh-TW.md)），以及 W15–W25。
 - 本地完整流程僅支援 Linux x86_64 與 Docker；Windows 需使用 WSL。
 

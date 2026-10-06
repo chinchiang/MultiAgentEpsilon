@@ -1,5 +1,7 @@
 # 遠端合併保護：設定與驗收缺口
 
+2026-10-06 更新：首次基準遷移已完成（擁有者暫時停用規則集後合併 #6、#7，驗收後恢復），真實 `pull_request_target` 流程的正反例結果見 [里程碑狀態](milestone-status.zh-TW.md)。CatGrocery 仍不在協作者名單，專用 App 仍未部署。
+
 更新：擁有者已啟用規則集 24512048，API 讀回 active、main.protected=true、無 bypass，必要檢查仍綁定共用 GitHub Actions App 15368。下列 403 為整合程式操作的歷史結果；手動啟用不會擴充整合程式權限。發布程式與部署範本見[可信檢查來源部署準備](trusted-check-publisher.zh-TW.md)，App 尚未部署。
 
 （歷史查詢，已被上段更新取代）2026-10-05 查詢時，`main` 尚未受保護、規則集為空。2026-10-06 再次查詢：規則集已啟用，但 PR #5 仍沒有審查紀錄，CatGrocery 仍不在協作者名單（權限查詢的 `read` 只是公開儲存庫的基本存取權）。以下是待完成的部署及驗收，不是已啟用的證據；首次遷移程序見 [可信執行文件](trusted-execution.zh-TW.md)。
