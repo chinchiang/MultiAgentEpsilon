@@ -11,9 +11,9 @@
 - **合併死結：** 儲存庫只有一位 collaborator（chinchiang，同時是 PR 作者），main 的 CODEOWNERS 只列 chinchiang，而 GitHub 不允許作者核准自己的 PR；CatGrocery 尚不是具寫入權限的協作者。完成擁有者授權的首次基準遷移前，任何 PR 都無法依規則合併。
 - 新的 `pull_request_target` workflow 必須先成為 main 的內容，才會對 PR 自動執行；在此之前，PR 上不會出現可信的必要檢查。
 
-### 本版驗收（commit `bfb447a`，遠端手動 [run 37406848399](https://github.com/chinchiang/MultiAgentEpsilon/actions/runs/37406848399)；之後的 commit 只改文件）
+### 本版驗收（commit `35bb15d`，遠端手動 [run 37407830521](https://github.com/chinchiang/MultiAgentEpsilon/actions/runs/37407830521)；之後的 commit 只改文件與範本測試下限）
 
-- 525 項測試全數通過，0 失敗／錯誤／略過（其中可信閘門 PR 單獨為 265 項，見 [run 37406839553](https://github.com/chinchiang/MultiAgentEpsilon/actions/runs/37406839553)）。
+- 526 項測試全數通過，0 失敗／錯誤／略過（其中可信閘門 PR 單獨為 266 項，見 [run 37407823134](https://github.com/chinchiang/MultiAgentEpsilon/actions/runs/37407823134)）。
 - 修正版 18 個授權案例、0 findings、ALLOW；缺陷版恰好是政策 `seeded_defect_case_ids` 指定的 6 個案例失敗，BLOCK。
 - CI 以發布程式的同一套證據契約自我檢查，結果為 PUBLISHABLE。
 - 手動 run 的檢查名稱為 `manual-security-evaluation`；該 head 上沒有 `trusted-security-pilot`。
