@@ -260,7 +260,16 @@ def supervise(root, report, command, max_seconds):
                 process.stdin.close()
             if process.returncode is None:
                 terminate_group(process.pid)
-            process.wait(timeout=5)
+            try:
+                process.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                # A worker that outlives its group kill must not skip finalization below.
+                reason = reason or 'SUPERVISOR_FAILED'
+                process.kill()
+                try:
+                    process.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    pass
         try:
             with cleanup_lock(work) as locked:
                 if not locked:

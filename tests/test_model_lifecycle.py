@@ -258,6 +258,28 @@ def test_cleanup_failure_blocks_and_preserves_recovery_inventory(tmp_path, monke
     assert_clean(tmp_path, json.loads(path.read_text()))
 
 
+def test_one_unrecoverable_run_does_not_strand_the_others(tmp_path, monkeypatch):
+    from security_harness.lifecycle import SweepIncomplete
+    runs = sorted([stale_fixture(tmp_path), stale_fixture(tmp_path)])
+    (broken, broken_path, broken_work), (healthy, healthy_path, _) = runs  # sweep order is by run ID
+    original = life.stop_registered
+    def selective(work):
+        if work.name == broken:
+            raise RuntimeError('sensitive CLI diagnostics')
+        return original(work)
+    monkeypatch.setattr(life, 'stop_registered', selective)
+    with pytest.raises(SweepIncomplete) as raised:
+        sweep_stale(tmp_path)
+    assert raised.value.cleaned == [healthy]
+    assert raised.value.failures == [{'run_id': broken, 'error_type': 'RuntimeError'}]
+    assert 'sensitive' not in str(raised.value.failures)
+    assert_clean(tmp_path, json.loads(healthy_path.read_text()))
+    assert broken_work.exists() and json.loads(broken_path.read_text())['code'] == 'CLEANUP_FAILED'
+    monkeypatch.setattr(life, 'stop_registered', original)
+    assert sweep_stale(tmp_path) == [broken]
+    assert_clean(tmp_path, json.loads(broken_path.read_text()))
+
+
 @pytest.mark.parametrize('change', ['boot', 'start'])
 def test_janitor_does_not_signal_different_boot_or_reused_pid(tmp_path, change):
     run_id, path, work = stale_fixture(tmp_path)
@@ -293,6 +315,28 @@ def test_signal_during_cleanup_cannot_publish_complete(tmp_path, monkeypatch):
     data = life.supervise(tmp_path, report, [sys.executable, '-I', str(ROOT / 'scripts/model_worker.py'),
                                            str(tmp_path), run_id], 10)
     assert data['status'] == 'CANCELLED'
+    assert_clean(tmp_path, data)
+
+
+def test_worker_wait_timeout_still_finalizes_evidence(tmp_path, monkeypatch):
+    # A reap timeout used to escape before finish(), leaving AWAITING_CLEANUP evidence
+    # and the signal handlers installed.
+    run_id = str(uuid.uuid4())
+    report = initial_report(['mock'], run_id)
+    life.persist(tmp_path / 'artifacts' / run_id / 'report.json', report)
+    original_wait = subprocess.Popen.wait
+    raised = []
+    def stubborn(self, timeout=None):
+        if not raised and timeout == 5:
+            raised.append(True)
+            raise subprocess.TimeoutExpired(self.args, timeout)
+        return original_wait(self, timeout=timeout)
+    monkeypatch.setattr(subprocess.Popen, 'wait', stubborn)
+    handler = signal.getsignal(signal.SIGTERM)
+    data = life.supervise(tmp_path, report, [sys.executable, '-I', str(ROOT / 'scripts/model_worker.py'),
+                                           str(tmp_path), run_id], 10)
+    assert raised and data['status'] not in ('COMPLETE', 'AWAITING_CLEANUP') and 'pending_status' not in data
+    assert signal.getsignal(signal.SIGTERM) is handler
     assert_clean(tmp_path, data)
 
 

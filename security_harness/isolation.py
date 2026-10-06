@@ -46,9 +46,10 @@ def run_flags(name, run_id):
 def cleanup_run(run_id):
     if not re.fullmatch(r"[a-f0-9-]{32,36}", run_id):
         raise ValueError("invalid isolation run ID")
-    ids = docker("ps", "-aq", "--filter", "label=epsilon.isolated=true", "--filter", "label=epsilon.run=" + run_id, timeout=5).stdout.split()
+    # Cleanup is not a security deadline: a slow daemon must delay it, not leak containers.
+    ids = docker("ps", "-aq", "--filter", "label=epsilon.isolated=true", "--filter", "label=epsilon.run=" + run_id, timeout=30).stdout.split()
     if ids:
-        docker("rm", "--force", *ids, timeout=5)
+        docker("rm", "--force", *ids, timeout=30)
 
 
 def run_isolated(candidate: Path, variant="fixed", run_id=None) -> dict:

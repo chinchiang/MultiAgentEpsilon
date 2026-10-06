@@ -90,44 +90,59 @@ def cleanup(root, run_id):
         shutil.rmtree(work)
 
 
+class SweepIncomplete(RuntimeError):
+    """Some stale runs could not be reaped; the others were still processed."""
+
+    def __init__(self, cleaned, failures):
+        super().__init__('stale run cleanup incomplete')
+        self.cleaned, self.failures = cleaned, failures
+
+
 def sweep_stale(root):
     cleaned = []
+    failures = []
     for work in sorted((root / '.state' / 'runs').glob('*')):
-        if work.is_symlink():
-            raise ValueError('invalid run directory')
         try:
-            marker = json.loads((work / 'owner.json').read_text())
-        except FileNotFoundError:
-            # Another janitor removed it, or initialization has not published
-            # ownership yet. No external resources exist before that marker.
-            continue
-        if marker['run_id'] != work.name or marker['uid'] != os.getuid():
-            raise ValueError('invalid run owner')
-        if not owner_alive(marker):
-            if marker.get('operation') == 'model-smoke':
-                from .llm.lifecycle import recover
-                if recover(root, work.name):
-                    cleaned.append(work.name)
+            if work.is_symlink():
+                raise ValueError('invalid run directory')
+            try:
+                marker = json.loads((work / 'owner.json').read_text())
+            except FileNotFoundError:
+                # Another janitor removed it, or initialization has not published
+                # ownership yet. No external resources exist before that marker.
                 continue
-            if 'worker_pid' in marker:
-                try:
-                    same_worker = identity(marker['worker_pid']) == marker['worker_start']
-                except FileNotFoundError:
-                    same_worker = True  # An extant old process group can outlive its leader.
-                if same_worker:
-                    terminate_group(marker['worker_pid'])
-            cleanup(root, work.name)
-            report = root / 'artifacts' / work.name / 'report.json'
-            if report.exists():
-                from .audit import AuditRun
-                audit = AuditRun.__new__(AuditRun)
-                audit.output = report.parent
-                audit.data = json.loads(report.read_text())
-                audit.data.update(execution='CANCELLED', decision='BLOCK', reasons=['orphaned supervisor reaped'],
-                                  cleanup={'completed': True, 'recovered_by_janitor': True,
-                                           'run_directory_removed': True, 'temporary_directory_removed': True})
-                audit.finish((('G1', 'scan'), ('G2', 'scan'), ('AUTH', 'test')))
-            cleaned.append(work.name)
+            if marker['run_id'] != work.name or marker['uid'] != os.getuid():
+                raise ValueError('invalid run owner')
+            if not owner_alive(marker):
+                if marker.get('operation') == 'model-smoke':
+                    from .llm.lifecycle import recover
+                    if recover(root, work.name):
+                        cleaned.append(work.name)
+                    continue
+                if 'worker_pid' in marker:
+                    try:
+                        same_worker = identity(marker['worker_pid']) == marker['worker_start']
+                    except FileNotFoundError:
+                        same_worker = True  # An extant old process group can outlive its leader.
+                    if same_worker:
+                        terminate_group(marker['worker_pid'])
+                cleanup(root, work.name)
+                report = root / 'artifacts' / work.name / 'report.json'
+                if report.exists():
+                    from .audit import AuditRun
+                    audit = AuditRun.__new__(AuditRun)
+                    audit.output = report.parent
+                    audit.data = json.loads(report.read_text())
+                    audit.data.update(execution='CANCELLED', decision='BLOCK', reasons=['orphaned supervisor reaped'],
+                                      cleanup={'completed': True, 'recovered_by_janitor': True,
+                                               'run_directory_removed': True, 'temporary_directory_removed': True})
+                    audit.finish((('G1', 'scan'), ('G2', 'scan'), ('AUTH', 'test')))
+                cleaned.append(work.name)
+        except Exception as exc:
+            # Keep reaping the remaining runs; report every failure, without its text.
+            failures.append({'run_id': work.name, 'error_type': type(exc).__name__})
+    if failures:
+        raise SweepIncomplete(cleaned, failures)
     return cleaned
 
 

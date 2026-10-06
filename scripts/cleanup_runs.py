@@ -6,7 +6,12 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
-from security_harness.lifecycle import sweep_stale
+from security_harness.lifecycle import SweepIncomplete, sweep_stale
 
 if __name__ == '__main__':
-    print(json.dumps({'cleaned_run_ids': sweep_stale(ROOT)}))
+    try:
+        print(json.dumps({'cleaned_run_ids': sweep_stale(ROOT)}))
+    except SweepIncomplete as exc:
+        # Every other stale run was still reaped; the failures are listed without text.
+        print(json.dumps({'cleaned_run_ids': exc.cleaned, 'failed': exc.failures}))
+        raise SystemExit(1)
