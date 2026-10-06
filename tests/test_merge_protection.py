@@ -37,3 +37,51 @@ def test_author_with_write_access_cannot_fill_independent_reviewer_requirement()
                                    [{'login': 'author', 'role_name': 'write'}], ['author'])
     assert not result['configuration']['configured_independent_reviewer_available']
     assert not result['configuration']['non_admin_developer_available']
+
+
+def main_ruleset(**overrides):
+    rules = [{'type': 'deletion'}, {'type': 'non_fast_forward'},
+             {'type': 'required_status_checks', 'parameters': {'strict_required_status_checks_policy': True,
+              'required_status_checks': overrides.pop('checks', [{'context': 'trusted-security-pilot', 'integration_id': 15368}])}}]
+    ruleset = {'enforcement': 'active', 'target': 'branch', 'bypass_actors': [], 'rules': rules,
+               'conditions': {'ref_name': {'include': ['~DEFAULT_BRANCH'], 'exclude': []}}}
+    ruleset.update(overrides)
+    return ruleset
+
+
+def test_hidden_bypass_actors_are_unknown_not_absent():
+    hidden = main_ruleset()
+    del hidden['bypass_actors']  # GitHub omits it for callers without ruleset write access
+    result = inspect_configuration({'protected': True}, [hidden], {'user': {'login': 'author'}}, [], [])
+    assert result['configuration']['active_main_ruleset'] and not result['configuration']['no_bypass']
+    assert inspect_configuration({'protected': True}, [main_ruleset()], {'user': {'login': 'author'}}, [], [])[
+        'configuration']['no_bypass']
+
+
+@pytest.mark.parametrize('checks,publisher,legacy,dedicated', [
+    ([{'context': 'trusted-security-pilot', 'integration_id': 15368}], None, True, False),
+    ([{'context': 'trusted-security-pilot', 'integration_id': 999}], None, False, False),
+    ([{'context': 'trusted-security-pilot'}], None, False, False),
+    ([{'context': 'epsilon/trusted-merge', 'integration_id': 4242}], 4242, False, True),
+    ([{'context': 'epsilon/trusted-merge', 'integration_id': 15368}], 15368, False, False),
+    ([{'context': 'epsilon/trusted-merge', 'integration_id': 4242}], None, False, False),
+])
+def test_required_checks_bind_the_expected_integration(checks, publisher, legacy, dedicated):
+    result = inspect_configuration({'protected': True}, [main_ruleset(checks=checks)], {'user': {'login': 'author'}},
+                                   [], [], publisher_app_id=publisher)
+    assert result['configuration']['required_check_present'] is legacy
+    assert result['configuration']['dedicated_app_check_required'] is dedicated
+    assert result['decision'] == 'BLOCK'
+
+
+@pytest.mark.parametrize('codeowners,role,expected', [
+    ('* @author\n', 'write', False),
+    ('# comment\n* @author @reviewer\n', 'write', True),
+    ('* @author @reviewer\n', 'read', False),
+    ('* @author @org/team\n', 'write', False),
+    (None, 'write', False),
+])
+def test_base_branch_codeowners_must_name_an_independent_writer(codeowners, role, expected):
+    result = inspect_configuration({'protected': True}, [], {'user': {'login': 'author'}},
+                                   [{'login': 'reviewer', 'role_name': role}], ['reviewer'], codeowners)
+    assert result['configuration']['base_codeowner_independent_reviewer'] is expected
