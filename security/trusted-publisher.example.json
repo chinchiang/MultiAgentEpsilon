@@ -1,0 +1,16 @@
+{
+  "schema_version": 1,
+  "repository": "chinchiang/MultiAgentEpsilon",
+  "repository_id": 1403706385,
+  "app_id": null,
+  "installation_id": null,
+  "base_branch": "main",
+  "workflow_id": 374309318,
+  "workflow_path": ".github/workflows/security.yml",
+  "evaluator_sha": null,
+  "evaluator_digest": null,
+  "policy_digest": null,
+  "minimum_regression_tests": 265,
+  "reviewers": ["chinchiang", "CatGrocery"],
+  "check_name": "epsilon/trusted-merge"
+}

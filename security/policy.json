@@ -33,5 +33,45 @@
     "typing-extensions",
     "typing-inspection",
     "uvicorn"
-  ]
+  ],
+  "gate_contracts": {
+    "G1": {
+      "kind": "scan"
+    },
+    "G2": {
+      "kind": "scan",
+      "coverage_required": true
+    },
+    "AUTH": {
+      "kind": "test",
+      "case_ids": [
+        "wrong password denied without session",
+        "unknown user denied without session",
+        "anonymous denied",
+        "forged bearer denied",
+        "owner reads own data",
+        "owner updates own data",
+        "bob: unauthorized read denied without data",
+        "bob: unauthorized write denied without side effect",
+        "carol: unauthorized read denied without data",
+        "carol: unauthorized write denied without side effect",
+        "same-tenant admin delegation allowed",
+        "admin cross-tenant denied",
+        "member export denied",
+        "admin export tenant-scoped",
+        "same-tenant admin write allowed",
+        "admin cross-tenant write denied without side effect",
+        "owner field cannot be reassigned",
+        "logout revokes session"
+      ],
+      "seeded_defect_case_ids": [
+        "bob: unauthorized read denied without data",
+        "bob: unauthorized write denied without side effect",
+        "carol: unauthorized read denied without data",
+        "carol: unauthorized write denied without side effect",
+        "admin cross-tenant denied",
+        "admin cross-tenant write denied without side effect"
+      ]
+    }
+  }
 }

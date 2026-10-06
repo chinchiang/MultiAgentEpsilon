@@ -3,72 +3,102 @@ name: Security pilot
 on:
   push:
     branches: [main]
-  pull_request:
+  pull_request_target:
+    branches: [main]
+    types: [opened, synchronize, reopened, ready_for_review]
   workflow_dispatch:
+    inputs:
+      candidate_sha:
+        description: 'Optional immutable candidate SHA; evaluator comes from the selected workflow ref'
+        required: false
+        type: string
 
 permissions:
   contents: read
+  pull-requests: read
 
 concurrency:
-  group: security-pilot-${{ github.ref }}
+  group: trusted-security-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 jobs:
-  security-pilot:
+  trusted-security-pilot:
+    # A manual run evaluates a maintainer-selected ref (possibly the candidate
+    # itself), so it must never report under the required check name.
+    name: ${{ github.event_name == 'workflow_dispatch' && 'manual-security-evaluation' || 'trusted-security-pilot' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
-      - name: Checkout candidate (no retained Git credential)
-        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-        with:
-          path: candidate
-          fetch-depth: 0
-          persist-credentials: false
-      - name: Checkout trusted PR base
-        if: github.event_name == 'pull_request'
-        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: Checkout evaluator from trusted base
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           path: trusted
-          ref: ${{ github.event.pull_request.base.sha }}
+          ref: ${{ github.event.pull_request.base.sha || github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Checkout candidate as data only
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          path: candidate
+          ref: ${{ github.event.pull_request.head.sha || inputs.candidate_sha || github.sha }}
+          fetch-depth: 0
           persist-credentials: false
       - name: Set Python
-        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
         with:
           python-version: '3.12'
-      - name: Block changes to evaluator and policy pending independent review
-        if: github.event_name == 'pull_request'
+      - name: Record evaluator-owned CI provenance
+        env:
+          PR_NUMBER: ${{ github.event.pull_request.number || 0 }}
+        run: python -I trusted/scripts/write_ci_provenance.py
+      - name: Check protected changes and exact-head independent approval
+        if: github.event_name == 'pull_request_target'
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
-        run: python trusted/scripts/check_trusted_changes.py --base "$BASE_SHA" --candidate candidate --output audit/trusted-guard.json
-      - name: G1 and G2 before wheel-only dependency installation
-        working-directory: candidate
-        run: python scripts/bootstrap.py
-      - name: Start disposable database
-        working-directory: candidate
-        run: python scripts/dev_db.py start
-      - name: Contract and real adapter acceptance tests
-        working-directory: candidate
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          GH_TOKEN: ${{ github.token }}
+        run: python -I trusted/scripts/check_trusted_changes.py --base "$BASE_SHA" --candidate candidate --pr "$PR_NUMBER" --output audit/trusted-guard.json
+      - name: Install only evaluator dependencies
+        working-directory: trusted
+        run: python -I scripts/bootstrap.py
+      - name: Build offline runtime from trusted wheels
+        working-directory: trusted
+        run: python -I scripts/build_runtime.py
+      - name: Start evaluator regression database
+        working-directory: trusted
+        run: python -I scripts/dev_db.py start
+      - name: Evaluator regressions and isolation adversarial checks
+        working-directory: trusted
         run: .venv/bin/python -m pytest --junitxml=artifacts/pytest.xml
-      - name: Real HTTP smoke
-        working-directory: candidate
-        run: .venv/bin/python scripts/smoke_http.py
-      - name: Verify seeded defect is blocked
-        working-directory: candidate
-        run: .venv/bin/python scripts/expect_block.py
-      - name: Fixed variant security gate
-        working-directory: candidate
-        run: .venv/bin/python scripts/run_security.py
-      - name: Remove owned database
+      - name: Prove seeded defect still blocks
+        working-directory: trusted
+        run: .venv/bin/python -I scripts/expect_block.py
+      - name: Evaluate candidate through external oracle
+        working-directory: trusted
+        run: .venv/bin/python -I scripts/run_security.py --candidate ../candidate
+      - name: Self-check evidence against the publisher contract
+        working-directory: trusted
+        env:
+          PR_NUMBER: ${{ github.event.pull_request.number || 0 }}
+        run: .venv/bin/python -I scripts/check_publishable_evidence.py --candidate ../candidate --output ../audit/publishable-evidence.json
+      - name: Remove evaluator regression database
         if: always()
-        working-directory: candidate
-        run: python scripts/dev_db.py stop
-      - name: Retain redacted run evidence
+        working-directory: trusted
+        run: python -I scripts/dev_db.py stop
+      - name: Reap cancelled security runs
         if: always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        working-directory: trusted
+        run: |
+          if [ -x .venv/bin/python ]; then
+            .venv/bin/python -I scripts/cleanup_runs.py
+          fi
+      - name: Retain evaluator-owned evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
-          name: security-pilot-${{ github.run_id }}-${{ github.run_attempt }}
+          name: ${{ github.event_name == 'workflow_dispatch' && 'manual-security' || 'trusted-security' }}-${{ github.run_id }}-${{ github.run_attempt }}
           path: |
-            candidate/artifacts/
+            trusted/artifacts/
             audit/
           retention-days: 7
           if-no-files-found: error

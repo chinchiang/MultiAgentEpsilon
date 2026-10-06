@@ -1,5 +1,5 @@
 {
-  "name": "Security pilot \u2014 protected main",
+  "name": "Security pilot — protected main",
   "target": "branch",
   "enforcement": "active",
   "bypass_actors": [],
@@ -33,7 +33,7 @@
       "parameters": {
         "required_status_checks": [
           {
-            "context": "security-pilot",
+            "context": "trusted-security-pilot",
             "integration_id": 15368
           }
         ],

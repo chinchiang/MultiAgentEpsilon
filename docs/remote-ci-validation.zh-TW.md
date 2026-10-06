@@ -2,6 +2,8 @@
 
 驗收日期：2026-10-04（Asia/Taipei）。原始執行索引與 SHA 見 [remote-ci-evidence.json](remote-ci-evidence.json)。
 
+> **歷史紀錄。** 本文保留 2026-10-04 首版 main 的遠端驗收原貌。之後 main 已由規則集 24512048 保護，授權案例與 workflow 也已改版；現況以 [里程碑狀態](milestone-status.zh-TW.md) 開頭的「目前狀態」為準。
+
 ## 已實際驗證
 
 | 情境 | GitHub 證據 | 結果 |
@@ -18,7 +20,7 @@
 
 ## 尚未生效：main 合併保護
 
-**目前 main 的 `protected` 為 false，ruleset 清單為空。CI 失敗尚不等於 GitHub 會禁止合併。**
+**（2026-10-04 當時）main 的 `protected` 為 false，ruleset 清單為空。CI 失敗尚不等於 GitHub 會禁止合併。**
 
 已準備並嘗試建立 [github-main-ruleset.json](github-main-ruleset.json)，API 回覆 HTTP 403 `Resource not accessible by integration`。目前整合能推送程式碼、建立 PR、讀取 Actions 結果；不能據此推論它具有 Repository administration 的寫入權限。
 

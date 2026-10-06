@@ -1,0 +1,69 @@
+import copy
+
+import pytest
+
+from scripts import verify_required_check as checker
+
+HEAD = "b" * 40
+
+
+def fake_api(checks, runs_by_suite, pr_state="open"):
+    def api(path):
+        if path.endswith("/pulls/5"):
+            return {"state": pr_state, "head": {"sha": HEAD}}
+        if "/check-runs?" in path:
+            assert f"/commits/{HEAD}/" in path and "filter=all" in path
+            return {"total_count": len(checks), "check_runs": checks}
+        if "check_suite_id=" in path:
+            return {"workflow_runs": runs_by_suite[int(path.split("check_suite_id=")[1].split("&")[0])]}
+        raise AssertionError(path)
+    return api
+
+
+def check(id_, suite, conclusion="success", started="2026-10-06T01:00:00Z", app=15368):
+    return {"id": id_, "name": "trusted-security-pilot", "app": {"id": app}, "head_sha": HEAD,
+            "check_suite": {"id": suite}, "status": "completed", "conclusion": conclusion, "started_at": started}
+
+
+def run(id_, event="pull_request_target", path=".github/workflows/security.yml", head=HEAD):
+    return {"id": id_, "run_attempt": 1, "event": event, "path": path, "head_sha": head}
+
+
+def test_trusted_pull_request_target_source_allows():
+    result = checker.verify(fake_api([check(1, 10)], {10: [run(100)]}), "owner/repo", 5)
+    assert result["decision"] == "ALLOW" and result["sources"][0]["run_id"] == 100
+
+
+@pytest.mark.parametrize("attack,code", [
+    ("manual_run", "UNTRUSTED_CHECK_SOURCE"),
+    ("push_run", "UNTRUSTED_CHECK_SOURCE"),
+    ("other_path", "UNTRUSTED_CHECK_SOURCE"),
+    ("other_head", "UNTRUSTED_CHECK_SOURCE"),
+    ("other_app", "FOREIGN_CHECK_SOURCE"),
+    ("missing", "REQUIRED_CHECK_MISSING"),
+    ("ambiguous", "CHECK_RUN_SOURCE_AMBIGUOUS"),
+    ("latest_failed", "LATEST_CHECK_NOT_SUCCESS"),
+    ("extra_forged_success", "UNTRUSTED_CHECK_SOURCE"),
+])
+def test_forged_or_manual_sources_block(attack, code):
+    checks, runs = [check(1, 10)], {10: [run(100)]}
+    if attack == "manual_run": runs[10] = [run(100, event="workflow_dispatch")]
+    elif attack == "push_run": runs[10] = [run(100, event="push")]
+    elif attack == "other_path": runs[10] = [run(100, path=".github/workflows/copy.yml")]
+    elif attack == "other_head": runs[10] = [run(100, head="d" * 40)]
+    elif attack == "other_app": checks = [check(1, 10, app=999)]
+    elif attack == "missing": checks = []
+    elif attack == "ambiguous": runs[10] = [run(100), run(101)]
+    elif attack == "latest_failed":
+        checks = [check(1, 10), check(2, 11, conclusion="failure", started="2026-10-06T02:00:00Z")]
+        runs[11] = [run(101)]
+    elif attack == "extra_forged_success":
+        checks = [check(1, 10), copy.deepcopy(check(2, 11))]
+        runs[11] = [run(101, event="push")]
+    with pytest.raises(checker.Denied, match=code):
+        checker.verify(fake_api(checks, runs), "owner/repo", 5)
+
+
+def test_closed_pr_is_not_verified():
+    with pytest.raises(checker.Denied, match="PR_NOT_OPEN"):
+        checker.verify(fake_api([check(1, 10)], {10: [run(100)]}, pr_state="closed"), "owner/repo", 5)

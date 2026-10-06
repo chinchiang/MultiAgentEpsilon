@@ -1,0 +1,12 @@
+[Unit]
+Description=Reconcile trusted security check for PR %i
+
+[Timer]
+OnBootSec=60s
+# Each cycle costs roughly 20 API calls (verified blobs are cached in the state
+# file), so a 120 s cadence stays well inside the installation rate limit.
+OnUnitInactiveSec=120s
+Unit=epsilon-publisher@%i.service
+
+[Install]
+WantedBy=timers.target
