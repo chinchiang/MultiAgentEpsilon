@@ -135,7 +135,7 @@ def create_app(dsn: str, schema: str, *, variant: str = "fixed") -> FastAPI:
                 # Deliberate seeded defect; same oracle must detect this variant.
                 row = conn.execute("UPDATE items SET value=%s WHERE id=%s RETURNING *", (body.value, item_id)).fetchone()
             else:
-                row = conn.execute("UPDATE items SET value=%s WHERE id=%s AND tenant=%s AND (owner=%s OR %s='admin') RETURNING *", (body.value, item_id, user["tenant"], user["id"], user["role"])).fetchone()
+                row = conn.execute("UPDATE items SET value=%s WHERE id=%s AND ((tenant=%s AND owner=%s) OR %s='admin') RETURNING *", (body.value, item_id, user["tenant"], user["id"], user["role"])).fetchone()
         if not row:
             raise HTTPException(404, "item not found")
         return row
