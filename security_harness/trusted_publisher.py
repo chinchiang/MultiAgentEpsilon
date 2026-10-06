@@ -23,7 +23,7 @@ from xml.etree import ElementTree
 
 from .inputs import excluded
 from .limits import LIMITS
-from .results import decide, validate_cases, validate_policy
+from .results import decide, seeded_defects, validate_cases, validate_policy
 
 SHA = re.compile(r"[0-9a-f]{40}")
 DIGEST = re.compile(r"[0-9a-f]{64}")
@@ -68,14 +68,14 @@ def validate_settings(settings, gate_policy):
     validate_policy(gate_policy)
 
 
-def reject_newer_runs(run, newer_runs, number):
+def reject_newer_runs(run, newer_runs, head):
+    # GitHub omits pull_requests for fork heads, so association cannot be the key:
+    # unrelated (e.g. outsider fork) runs must not block, and any newer evaluation of
+    # this exact head supersedes the older green result.
     for other in newer_runs:
-        if other["id"] <= run["id"]:
-            continue
-        associations = other.get("pull_requests", [])
-        # Unknown association cannot authorize reuse of an older green result.
-        need(bool(associations), "NEWER_RUN_AMBIGUOUS")
-        need(not any(p["number"] == number for p in associations), "NEWER_RUN_EXISTS")
+        need(type(other.get("id")) is int and SHA.fullmatch(other.get("head_sha") or ""), "RUN_LISTING")
+        if other["id"] > run["id"] and other["head_sha"] == head:
+            raise Denied("NEWER_RUN_EXISTS")
 
 
 def unpack_evidence(data):
@@ -106,7 +106,10 @@ def validate_pr(pr, settings):
     need(SHA.fullmatch(pr["head"]["sha"]), "CANDIDATE_SHA")
 
 
-def validate_review(pr, reviews, permissions, settings, push_actor):
+def validate_review(pr, reviews, permissions, settings, excluded):
+    """excluded: identities that touched the head (run actors, commit author/committer).
+    They are self-asserted or event-scoped, so they may only remove approvals; the
+    ruleset's native last-push approval stays authoritative for the actual pusher."""
     latest = {}
     ids = set()
     for review in sorted(reviews, key=lambda r: r["id"]):
@@ -120,51 +123,42 @@ def validate_review(pr, reviews, permissions, settings, push_actor):
         need(role in ("read", "triage", "write", "maintain", "admin"), "REVIEW_PERMISSION_UNKNOWN")
         capable = role in ("write", "maintain", "admin")
         need(not (capable and review["state"] == "CHANGES_REQUESTED"), "CHANGES_REQUESTED")
-        if (login in settings["reviewers"] and login not in (pr["user"]["login"], push_actor)
+        if (login in settings["reviewers"] and login != pr["user"]["login"] and login not in excluded
                 and capable and review["state"] == "APPROVED" and review["commit_id"] == pr["head"]["sha"]):
             allowed.append(review["id"])
     need(bool(allowed), "INDEPENDENT_APPROVAL_MISSING")
     return allowed
 
 
-def validate_bundle(settings, gate_policy, pr, run, newer_runs, jobs, files, reviews, permissions, subject, now):
-    validate_settings(settings, gate_policy)
-    validate_pr(pr, settings)
-    need(run["repository"]["id"] == settings["repository_id"]
-         and run["repository"]["full_name"] == settings["repository"], "RUN_REPOSITORY")
-    need(run["workflow_id"] == settings["workflow_id"] and run["path"] == settings["workflow_path"]
-         and run["event"] == "pull_request_target", "RUN_SOURCE")
-    need(run["status"] == "completed" and run["conclusion"] == "success", "RUN_NOT_SUCCESS")
-    # pull_request_target executes the base commit. Never accept a candidate
-    # commit as proof of which evaluator GitHub actually ran.
-    need(run["head_sha"] == settings["evaluator_sha"], "RUN_SHA")
-    need(type(run["run_attempt"]) is int and run["run_attempt"] >= 1, "RUN_ATTEMPT")
-    reject_newer_runs(run, newer_runs, pr["number"])
-    need(len(jobs) == 1 and jobs[0]["name"] == "trusted-security-pilot"
-         and jobs[0]["conclusion"] == "success", "JOB_SOURCE")
-    steps = {s["name"]: s["conclusion"] for s in jobs[0]["steps"]}
-    required_steps = ("Record evaluator-owned CI provenance", "Check protected changes and exact-head independent approval",
-                      "Evaluator regressions and isolation adversarial checks", "Prove seeded defect still blocks",
-                      "Evaluate candidate through external oracle", "Remove evaluator regression database",
-                      "Reap cancelled security runs", "Retain evaluator-owned evidence")
-    need(all(steps.get(s) == "success" for s in required_steps), "REQUIRED_STEP_INCOMPLETE")
-    provenance = strict_json(files["audit/ci-provenance.json"])
-    expected = {"schema_version": 1, "repository": settings["repository"], "repository_id": settings["repository_id"],
-                "run_id": run["id"], "run_attempt": run["run_attempt"], "event": "pull_request_target",
-                "workflow_ref": settings["repository"] + "/" + settings["workflow_path"] + "@refs/heads/main",
-                "workflow_sha": settings["evaluator_sha"], "pr_number": pr["number"],
-                "base_sha": pr["base"]["sha"], "candidate_sha": pr["head"]["sha"]}
-    need(provenance == expected, "PROVENANCE_MISMATCH")
-    approvals = validate_review(pr, reviews, permissions, settings, run["actor"]["login"])
-    guard = strict_json(files["audit/trusted-guard.json"])
-    need(guard.get("schema_version") == 2 and guard.get("decision") == "ALLOW"
-         and guard.get("base_sha") == pr["base"]["sha"] and guard.get("candidate_sha") == pr["head"]["sha"]
-         and guard.get("approval_error") is None, "TRUSTED_GUARD")
-    if guard.get("protected_changes"):
-        approval = guard.get("baseline_approval") or {}
-        need(approval.get("review_id") in approvals and approval.get("reviewer") in settings["reviewers"]
-             and approval.get("commit_id") == pr["head"]["sha"], "BASELINE_APPROVAL")
-    xml = files["trusted/artifacts/pytest.xml"]
+REQUIRED_STEPS = ("Record evaluator-owned CI provenance", "Check protected changes and exact-head independent approval",
+                  "Evaluator regressions and isolation adversarial checks", "Prove seeded defect still blocks",
+                  "Evaluate candidate through external oracle", "Remove evaluator regression database",
+                  "Reap cancelled security runs", "Retain evaluator-owned evidence")
+CLEANUP_KEYS = ("completed", "temporary_directory_removed", "run_directory_removed", "process_group_terminated")
+
+
+def evidence_file(files, name):
+    need(name in files, "EVIDENCE_FILE_MISSING")
+    return files[name]
+
+
+def expected_provenance(settings, run_id, run_attempt, pr_number, base_sha, candidate_sha):
+    return {"schema_version": 1, "repository": settings["repository"], "repository_id": settings["repository_id"],
+            "run_id": run_id, "run_attempt": run_attempt, "event": "pull_request_target",
+            "workflow_ref": settings["repository"] + "/" + settings["workflow_path"] + "@refs/heads/main",
+            "workflow_sha": settings["evaluator_sha"], "pr_number": pr_number,
+            "base_sha": base_sha, "candidate_sha": candidate_sha}
+
+
+def validate_evidence(settings, gate_policy, files, *, provenance, candidate_sha, subject, now):
+    """Artifact-only contract, shared by the publisher and the CI self-check.
+
+    The fixed report evaluates the candidate. The seeded-defect report is the
+    evaluator's self-test (expect_block runs the trusted tree's vulnerable variant),
+    so it is bound to the evaluator digest and evaluator history, never the candidate.
+    """
+    need(strict_json(evidence_file(files, "audit/ci-provenance.json")) == provenance, "PROVENANCE_MISMATCH")
+    xml = evidence_file(files, "trusted/artifacts/pytest.xml")
     need(len(xml) <= 2 * 1024**2 and b"<!DOCTYPE" not in xml.upper() and b"<!ENTITY" not in xml.upper(), "JUNIT_LIMIT")
     tree = ElementTree.fromstring(xml)
     need(tree.tag in ("testsuite", "testsuites"), "JUNIT_ROOT")
@@ -177,9 +171,9 @@ def validate_bundle(settings, gate_policy, pr, run, newer_runs, jobs, files, rev
     counts = {k: sum(int(s.get(k, "0")) for s in suites) for k in ("tests", "failures", "errors", "skipped")}
     need(counts["tests"] >= settings["minimum_regression_tests"]
          and counts["failures"] == counts["errors"] == counts["skipped"] == 0, "REGRESSION_FAILURE")
-    latest = files["trusted/artifacts/latest.txt"].decode().strip()
+    latest = evidence_file(files, "trusted/artifacts/latest.txt").decode().strip()
     need(re.fullmatch(r"[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}", latest), "LATEST_POINTER")
-    report = strict_json(files[f"trusted/artifacts/{latest}/report.json"])
+    report = strict_json(evidence_file(files, f"trusted/artifacts/{latest}/report.json"))
     need(report.get("schema_version") == 3 and report.get("operation") == "security"
          and report.get("variant") == "fixed" and report.get("run_id") == latest
          and report.get("execution") == "COMPLETED" and report.get("decision") == "ALLOW"
@@ -187,11 +181,10 @@ def validate_bundle(settings, gate_policy, pr, run, newer_runs, jobs, files, rev
     need(report.get("subject_digest") == subject and report.get("evaluator_digest") == settings["evaluator_digest"]
          and report.get("policy_digest") == settings["policy_digest"], "REPORT_DIGEST")
     cleanup = report.get("cleanup", {})
-    need(all(cleanup.get(k) is True for k in ("completed", "temporary_directory_removed", "run_directory_removed", "process_group_terminated"))
-         and cleanup.get("error_type") is None, "CLEANUP_INCOMPLETE")
+    need(all(cleanup.get(k) is True for k in CLEANUP_KEYS) and cleanup.get("error_type") is None, "CLEANUP_INCOMPLETE")
     need(decide(report["records"], gate_policy, subject, settings["policy_digest"], now, run_id=latest)["decision"] == "ALLOW", "GATE_REJECTED")
     scan = next(r for r in report["records"] if r["gate"] == "G2")
-    need(scan["evidence"]["coverage"].get("history_head") == pr["head"]["sha"], "HISTORY_SHA")
+    need(scan["evidence"]["coverage"].get("history_head") == candidate_sha, "HISTORY_SHA")
     reports = [strict_json(data) for path, data in files.items()
                if path.startswith("trusted/artifacts/") and path.endswith("/report.json")]
     negative = [r for r in reports if r.get("operation") == "security" and r.get("variant") == "vulnerable"]
@@ -199,25 +192,66 @@ def validate_bundle(settings, gate_policy, pr, run, newer_runs, jobs, files, rev
     negative = negative[0]
     need(negative.get("schema_version") == 3 and negative.get("execution") == "COMPLETED"
          and negative.get("decision") == "BLOCK" and not negative.get("errors")
-         and negative.get("subject_digest") == subject
+         and negative.get("subject_digest") == settings["evaluator_digest"]
          and negative.get("evaluator_digest") == settings["evaluator_digest"]
          and negative.get("policy_digest") == settings["policy_digest"], "NEGATIVE_BINDING")
     negative_cleanup = negative.get("cleanup", {})
-    need(all(negative_cleanup.get(k) is True for k in ("completed", "temporary_directory_removed", "run_directory_removed", "process_group_terminated"))
+    need(all(negative_cleanup.get(k) is True for k in CLEANUP_KEYS)
          and negative_cleanup.get("error_type") is None, "NEGATIVE_CLEANUP")
     normalized = copy.deepcopy(negative["records"])
     auth = [r for r in normalized if r.get("gate") == "AUTH"]
-    need(len(auth) == 1 and auth[0].get("findings") == 5
-         and sum(c.get("passed") is False for c in auth[0].get("cases", [])) == 5, "NEGATIVE_FINDINGS")
+    seeded = seeded_defects(gate_policy["gate_contracts"]["AUTH"])
+    need(len(auth) == 1 and auth[0].get("findings") == len(seeded) and isinstance(auth[0].get("cases"), list)
+         and {c.get("case") for c in auth[0]["cases"] if isinstance(c, dict) and c.get("passed") is False} == seeded,
+         "NEGATIVE_FINDINGS")
     validate_cases(auth[0]["cases"], gate_policy["gate_contracts"]["AUTH"])
     auth[0]["findings"] = 0
     for case in auth[0]["cases"]:
         case["passed"] = True
-    need(decide(normalized, gate_policy, subject, settings["policy_digest"], now, run_id=negative["run_id"])["decision"] == "ALLOW", "NEGATIVE_GATES")
+    need(decide(normalized, gate_policy, settings["evaluator_digest"], settings["policy_digest"], now,
+                run_id=negative["run_id"])["decision"] == "ALLOW", "NEGATIVE_GATES")
     negative_scan = next(r for r in normalized if r["gate"] == "G2")
-    need(negative_scan["evidence"]["coverage"].get("history_head") == pr["head"]["sha"], "NEGATIVE_HISTORY")
+    need(negative_scan["evidence"]["coverage"].get("history_head") == settings["evaluator_sha"], "NEGATIVE_HISTORY")
+    return counts["tests"]
+
+
+def validate_bundle(settings, gate_policy, pr, run, newer_runs, jobs, files, reviews, permissions, subject, now,
+                    commit_identities=()):
+    validate_settings(settings, gate_policy)
+    validate_pr(pr, settings)
+    need(run["repository"]["id"] == settings["repository_id"]
+         and run["repository"]["full_name"] == settings["repository"], "RUN_REPOSITORY")
+    # GitHub-attested: a pull_request_target run of this path always executes the
+    # default branch's workflow file, whatever the PR changes.
+    need(run["workflow_id"] == settings["workflow_id"] and run["path"] == settings["workflow_path"]
+         and run["event"] == "pull_request_target", "RUN_SOURCE")
+    need(run["status"] == "completed" and run["conclusion"] == "success", "RUN_NOT_SUCCESS")
+    # GitHub reports pull_request_target runs (and their check suites) on the PR head
+    # commit; the evaluator commit is bound below via the trusted workflow's provenance.
+    need(run["head_sha"] == pr["head"]["sha"], "RUN_SHA")
+    need(type(run["run_attempt"]) is int and run["run_attempt"] >= 1, "RUN_ATTEMPT")
+    reject_newer_runs(run, newer_runs, pr["head"]["sha"])
+    need(len(jobs) == 1 and jobs[0]["name"] == "trusted-security-pilot"
+         and jobs[0]["conclusion"] == "success", "JOB_SOURCE")
+    steps = {s["name"]: s["conclusion"] for s in jobs[0]["steps"]}
+    need(all(steps.get(s) == "success" for s in REQUIRED_STEPS), "REQUIRED_STEP_INCOMPLETE")
+    excluded = {person["login"] for person in (run.get("actor"), run.get("triggering_actor"))
+                if isinstance(person, dict) and person.get("login")} | set(commit_identities)
+    approvals = validate_review(pr, reviews, permissions, settings, excluded)
+    guard = strict_json(evidence_file(files, "audit/trusted-guard.json"))
+    need(guard.get("schema_version") == 2 and guard.get("decision") == "ALLOW"
+         and guard.get("base_sha") == pr["base"]["sha"] and guard.get("candidate_sha") == pr["head"]["sha"]
+         and guard.get("approval_error") is None, "TRUSTED_GUARD")
+    if guard.get("protected_changes"):
+        approval = guard.get("baseline_approval") or {}
+        need(approval.get("review_id") in approvals and approval.get("reviewer") in settings["reviewers"]
+             and approval.get("commit_id") == pr["head"]["sha"], "BASELINE_APPROVAL")
+    provenance = expected_provenance(settings, run["id"], run["run_attempt"], pr["number"],
+                                     pr["base"]["sha"], pr["head"]["sha"])
+    tests = validate_evidence(settings, gate_policy, files, provenance=provenance,
+                              candidate_sha=pr["head"]["sha"], subject=subject, now=now)
     return {"head_sha": pr["head"]["sha"], "base_sha": pr["base"]["sha"], "run_id": run["id"],
-            "run_attempt": run["run_attempt"], "subject_digest": subject, "review_ids": approvals, "tests": counts["tests"]}
+            "run_attempt": run["run_attempt"], "subject_digest": subject, "review_ids": approvals, "tests": tests}
 
 
 class NoRedirect(urllib.request.HTTPRedirectHandler):
@@ -301,10 +335,13 @@ def installation_client(settings, key_file):
     return GitHub(response["token"])
 
 
-def remote_subject(client, repo, sha):
+def remote_subject(client, repo, sha, blob_cache=None):
+    """blob_cache maps verified Git blob IDs to SHA-256. Blob IDs are content
+    addresses checked below before caching, so a cache hit cannot change a digest."""
     tree = client.api(f"/repos/{repo}/git/trees/{sha}?recursive=1")
     need(tree.get("truncated") is False, "SOURCE_TREE_TRUNCATED")
-    files, contents, total = [], {}, 0
+    contents = {} if blob_cache is None else blob_cache
+    files, total = [], 0
     for entry in sorted(tree["tree"], key=lambda e: e["path"]):
         if entry["type"] == "tree":
             continue
@@ -335,16 +372,28 @@ def remote_subject(client, repo, sha):
     return "worktree-manifest-v1:sha256:" + hashlib.sha256(value).hexdigest()
 
 
-def collect(client, settings, number, run_id, gate_policy):
+def head_runs(client, settings, head):
+    listing = client.api(f"/repos/{settings['repository']}/actions/workflows/{settings['workflow_id']}"
+                         f"/runs?event=pull_request_target&head_sha={head}&per_page=100")
+    need(listing["total_count"] == len(listing["workflow_runs"]), "RUNS_TRUNCATED")
+    return listing["workflow_runs"]
+
+
+def identities(*people):
+    return {p["login"] for p in people if isinstance(p, dict) and isinstance(p.get("login"), str)}
+
+
+def collect(client, settings, number, run_id, gate_policy, blob_cache=None):
     repo = settings["repository"]
     prefix = f"/repos/{repo}"
     pr = client.api(f"{prefix}/pulls/{number}")
     validate_pr(pr, settings)
+    head = pr["head"]["sha"]
     run = client.api(f"{prefix}/actions/runs/{run_id}")
     workflow = client.api(f"{prefix}/actions/workflows/{settings['workflow_id']}")
     need(workflow["path"] == settings["workflow_path"] and workflow["state"] == "active", "WORKFLOW_IDENTITY")
-    runs = client.api(f"{prefix}/actions/workflows/{settings['workflow_id']}/runs?event=pull_request_target&per_page=100")
-    need(runs["workflow_runs"] and any(r["id"] == run_id for r in runs["workflow_runs"]), "RUN_NOT_RECENT")
+    runs = head_runs(client, settings, head)
+    need(any(r["id"] == run_id for r in runs), "RUN_NOT_LISTED")
     jobs = client.api(f"{prefix}/actions/runs/{run_id}/attempts/{run['run_attempt']}/jobs?per_page=100")
     need(jobs["total_count"] == len(jobs["jobs"]), "JOBS_TRUNCATED")
     artifacts = client.api(f"{prefix}/actions/runs/{run_id}/artifacts?per_page=100")
@@ -360,34 +409,43 @@ def collect(client, settings, number, run_id, gate_policy):
     reviews = client.pages(f"{prefix}/pulls/{number}/reviews")
     logins = {r["user"]["login"] for r in reviews if r["state"] in ("APPROVED", "DISMISSED", "CHANGES_REQUESTED")}
     permissions = {login: client.api(f"{prefix}/collaborators/{urllib.parse.quote(login, safe='')}/permission")["role_name"] for login in logins}
-    twins = client.pages(f"{prefix}/commits/{pr['head']['sha']}/pulls")
-    need([p["number"] for p in twins if p["state"] == "open" and p["head"]["sha"] == pr["head"]["sha"]] == [number], "SHARED_PR_HEAD")
-    subject = remote_subject(client, repo, pr["head"]["sha"])
-    proof = validate_bundle(settings, gate_policy, pr, run, runs["workflow_runs"], jobs["jobs"],
-                            unpack_evidence(raw), reviews, permissions, subject, datetime.now(timezone.utc))
+    twins = client.pages(f"{prefix}/commits/{head}/pulls")
+    need([p["number"] for p in twins if p["state"] == "open" and p["head"]["sha"] == head] == [number], "SHARED_PR_HEAD")
+    commit = client.api(f"{prefix}/commits/{head}")
+    commit_identities = identities(commit.get("author"), commit.get("committer"))
+    subject = remote_subject(client, repo, head, blob_cache)
+    proof = validate_bundle(settings, gate_policy, pr, run, runs, jobs["jobs"], unpack_evidence(raw), reviews,
+                            permissions, subject, datetime.now(timezone.utc), commit_identities)
+    proof["excluded_identities"] = sorted(commit_identities)
     return proof
 
 
-def discover_run(client, settings, number):
-    runs = client.api(f"/repos/{settings['repository']}/actions/workflows/{settings['workflow_id']}/runs?event=pull_request_target&per_page=100")
-    associated = [r for r in runs["workflow_runs"] if any(p["number"] == number for p in r.get("pull_requests", []))]
-    need(bool(associated), "RUN_ASSOCIATION_MISSING")
-    return max(r["id"] for r in associated)
+def discover_run(client, settings, head):
+    runs = [r for r in head_runs(client, settings, head)
+            if r.get("head_sha") == head and r.get("path") == settings["workflow_path"]]
+    need(bool(runs), "RUN_MISSING")
+    return max(r["id"] for r in runs)
 
 
-def publish(client, settings, gate_policy, number, run_id=None):
+THROTTLED = ("GITHUB_HTTP_403", "GITHUB_HTTP_429", "API_BUDGET")
+
+
+def publish(client, settings, gate_policy, number, run_id=None, state=None):
+    """Publish one completed check only when the verified outcome changes.
+
+    No in_progress placeholder is posted: re-verification every cycle would make the
+    required check flap. state persists the blob cache, the last published outcome
+    and a back-off deadline after GitHub throttling (nothing can be posted then).
+    """
+    state = {} if state is None else state
     prefix = "/repos/" + settings["repository"]
     pr = client.api(f"{prefix}/pulls/{number}")
     need(SHA.fullmatch(pr["head"]["sha"]) and pr["base"]["repo"]["id"] == settings["repository_id"], "CHECK_TARGET")
     head = pr["head"]["sha"]
-    check = client.api(prefix + "/check-runs", "POST", {"name": settings["check_name"], "head_sha": head,
-        "status": "in_progress", "external_id": f"epsilon:{number}:{run_id}",
-        "output": {"title": "Validating trusted source", "summary": "Verification is incomplete; do not merge."}})
-    need(check["app"]["id"] == settings["app_id"] and check["head_sha"] == head, "CHECK_APP_IDENTITY")
     try:
         if run_id is None:
-            run_id = discover_run(client, settings, number)
-        proof = collect(client, settings, number, run_id, gate_policy)
+            run_id = discover_run(client, settings, head)
+        proof = collect(client, settings, number, run_id, gate_policy, state.setdefault("blobs", {}))
         need(proof["head_sha"] == head, "HEAD_CHANGED")
         # Recheck mutable PR/reviews/latest attempt immediately before green.
         fresh = client.api(f"{prefix}/pulls/{number}")
@@ -395,22 +453,35 @@ def publish(client, settings, gate_policy, number, run_id=None):
         need(fresh["head"]["sha"] == head, "HEAD_CHANGED")
         run = client.api(f"{prefix}/actions/runs/{run_id}")
         need(run["run_attempt"] == proof["run_attempt"] and run["status"] == "completed"
-             and run["conclusion"] == "success", "RUN_CHANGED")
-        newest = client.api(f"{prefix}/actions/workflows/{settings['workflow_id']}/runs?event=pull_request_target&per_page=100")
-        reject_newer_runs(run, newest["workflow_runs"], number)
+             and run["conclusion"] == "success" and run["head_sha"] == head, "RUN_CHANGED")
+        reject_newer_runs(run, head_runs(client, settings, head), head)
         reviews = client.pages(f"{prefix}/pulls/{number}/reviews")
         permissions = {r["user"]["login"]: client.api(f"{prefix}/collaborators/{urllib.parse.quote(r['user']['login'], safe='')}/permission")["role_name"]
                        for r in reviews if r["state"] in ("APPROVED", "DISMISSED", "CHANGES_REQUESTED")}
-        need(validate_review(fresh, reviews, permissions, settings, run["actor"]["login"]) == proof["review_ids"], "REVIEW_CHANGED")
+        excluded = identities(run.get("actor"), run.get("triggering_actor")) | set(proof["excluded_identities"])
+        need(validate_review(fresh, reviews, permissions, settings, excluded) == proof["review_ids"], "REVIEW_CHANGED")
         conclusion, code = "success", "VERIFIED"
-    except Exception as exc:
-        conclusion = "failure"
-        code = str(exc) if isinstance(exc, Denied) else "VERIFICATION_ERROR"
-        proof = None
-    result = client.api(f"{prefix}/check-runs/{check['id']}", "PATCH", {
-        "status": "completed", "conclusion": conclusion,
-        "output": {"title": "Trusted verification " + conclusion, "summary": code}})
-    need(result["app"]["id"] == settings["app_id"] and result["head_sha"] == head
-         and result["conclusion"] == conclusion, "PUBLISH_READBACK")
+    except Denied as exc:
+        if str(exc) in THROTTLED:
+            state["backoff_until"] = int(time.time()) + 900
+            raise
+        conclusion, code, proof = "failure", str(exc), None
+    except Exception:
+        conclusion, code, proof = "failure", "VERIFICATION_ERROR", None
+    outcome = {"head_sha": head, "conclusion": conclusion, "code": code,
+               "run_id": proof["run_id"] if proof else None, "run_attempt": proof["run_attempt"] if proof else None,
+               "review_ids": proof["review_ids"] if proof else None}
+    last = state.get("published")
+    if isinstance(last, dict) and last.get("check_run_id") and {k: last.get(k) for k in outcome} == outcome:
+        check_id = last["check_run_id"]
+    else:
+        result = client.api(prefix + "/check-runs", "POST", {
+            "name": settings["check_name"], "head_sha": head, "status": "completed", "conclusion": conclusion,
+            "external_id": f"epsilon:{number}:{outcome['run_id']}",
+            "output": {"title": "Trusted verification " + conclusion, "summary": code}})
+        need(result["app"]["id"] == settings["app_id"] and result["head_sha"] == head
+             and result["conclusion"] == conclusion, "PUBLISH_READBACK")
+        check_id = result["id"]
+        state["published"] = {**outcome, "check_run_id": check_id}
     return {"decision": "ALLOW" if conclusion == "success" else "BLOCK", "code": code,
-            "check_run_id": check["id"], "app_id": settings["app_id"], "head_sha": head, "proof": proof}
+            "check_run_id": check_id, "app_id": settings["app_id"], "head_sha": head, "proof": proof}

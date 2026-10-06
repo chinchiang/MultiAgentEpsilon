@@ -30,10 +30,12 @@ def bundle():
     pr = {"number": 5, "state": "open", "draft": False, "user": {"login": "author"},
           "base": {"ref": "main", "sha": "a"*40, "repo": {"id": 10, "full_name": "owner/repo"}},
           "head": {"sha": "b"*40}}
+    # Observed on GitHub: a pull_request_target run (and its check suite) carries the
+    # PR head SHA; the workflow file and evaluator come from the default branch.
     run = {"id": 100, "run_attempt": 1, "repository": {"id": 10, "full_name": "owner/repo"},
            "workflow_id": 99, "path": settings["workflow_path"], "event": "pull_request_target",
-           "head_sha": "a"*40, "status": "completed", "conclusion": "success",
-           "actor": {"login": "author"}, "pull_requests": [{"number": 5}]}
+           "head_sha": "b"*40, "status": "completed", "conclusion": "success",
+           "actor": {"login": "author"}, "triggering_actor": {"login": "author"}, "pull_requests": [{"number": 5}]}
     steps = ["Record evaluator-owned CI provenance", "Check protected changes and exact-head independent approval",
              "Evaluator regressions and isolation adversarial checks", "Prove seeded defect still blocks",
              "Evaluate candidate through external oracle", "Remove evaluator regression database",
@@ -48,7 +50,7 @@ def bundle():
                       evidence={"coverage": {"status": "COMPLETE", "selected_files": 1, "selected_bytes": 1,
                       "scanned_leaves": 1, "scanned_bytes": 1, "expanded_bytes": 0, "archives": 0,
                       "history_blobs": 1, "unsupported_files": 0, "history_head": "b"*40}}),
-               result("AUTH", "COMPLETED", "test", 16, 0, subject, "f"*64, "synthetic", run_id=run_id,
+               result("AUTH", "COMPLETED", "test", len(policy["gate_contracts"]["AUTH"]["case_ids"]), 0, subject, "f"*64, "synthetic", run_id=run_id,
                       cases=[{"case": n, "passed": True} for n in policy["gate_contracts"]["AUTH"]["case_ids"]])]
     for record in records:
         record["created_at"] = now.isoformat()
@@ -70,14 +72,20 @@ def bundle():
              "trusted/artifacts/pytest.xml": b'<testsuites><testsuite tests="360" failures="0" errors="0" skipped="0">' +
                  b'<testcase name="synthetic"/>'*360 + b'</testsuite></testsuites>',
              f"trusted/artifacts/{run_id}/report.json": json.dumps(report).encode()}
+    # expect_block runs the evaluator's own vulnerable variant: its subject and history
+    # are the evaluator's (digest e…, base a…), never the candidate's (c…, b…).
     negative = copy.deepcopy(report)
     negative_id = "22222222-2222-4222-8222-222222222222"
-    negative.update(variant="vulnerable", decision="BLOCK", run_id=negative_id)
+    negative.update(variant="vulnerable", decision="BLOCK", run_id=negative_id,
+                    subject_digest=settings["evaluator_digest"])
     for record in negative["records"]:
         record["run_id"] = negative_id
-    negative["records"][2]["findings"] = 5
-    for case in negative["records"][2]["cases"][:5]:
-        case["passed"] = False
+        record["subject_digest"] = settings["evaluator_digest"]
+    negative["records"][1]["evidence"]["coverage"]["history_head"] = "a"*40
+    seeded = set(policy["gate_contracts"]["AUTH"]["seeded_defect_case_ids"])
+    negative["records"][2]["findings"] = len(seeded)
+    for case in negative["records"][2]["cases"]:
+        case["passed"] = case["case"] not in seeded
     files[f"trusted/artifacts/{negative_id}/report.json"] = json.dumps(negative).encode()
     return {"settings": settings, "gate_policy": policy, "pr": pr, "run": run, "newer_runs": [run],
             "jobs": jobs, "files": files, "reviews": [review], "permissions": {"reviewer": "write"},
@@ -96,8 +104,9 @@ def test_verified_bundle_requires_remote_source_current_review_and_complete_evid
 
 
 @pytest.mark.parametrize("attack", ["app", "repo", "workflow", "event", "failed_run", "draft", "base",
-                                    "head", "candidate_run_source", "attempt", "new_run", "ambiguous_run", "step_skipped", "foreign_job",
-                                    "author", "push_actor", "read_role", "triage_role", "unknown_role", "stale_review",
+                                    "head", "evaluator_run_source", "attempt", "new_run", "step_skipped", "foreign_job",
+                                    "author", "push_actor", "triggering_actor", "commit_author",
+                                    "read_role", "triage_role", "unknown_role", "stale_review",
                                     "dismissed", "changes_requested", "guard", "guard_review", "policy", "subject",
                                     "evaluator", "history", "missing_case", "duplicate_case", "gate_error", "stale_gate",
                                     "future_gate", "cleanup", "failed_tests", "zero_tests", "skipped_tests", "junit_entity"])
@@ -111,14 +120,15 @@ def test_spoofed_or_stale_evidence_never_passes(bundle, attack):
     elif attack == "draft": bundle["pr"]["draft"] = True
     elif attack == "base": bundle["pr"]["base"]["sha"] = "d"*40
     elif attack == "head": bundle["pr"]["head"]["sha"] = "d"*40
-    elif attack == "candidate_run_source": bundle["run"]["head_sha"] = "b"*40
+    elif attack == "evaluator_run_source": bundle["run"]["head_sha"] = "a"*40
     elif attack == "attempt": bundle["run"]["run_attempt"] = 2
-    elif attack in ("new_run", "ambiguous_run"):
-        bundle["newer_runs"] = [{"id": 101, "pull_requests": [{"number": 5}] if attack == "new_run" else []}]
+    elif attack == "new_run": bundle["newer_runs"] = [bundle["run"], {"id": 101, "head_sha": "b"*40, "pull_requests": []}]
     elif attack == "step_skipped": bundle["jobs"][0]["steps"][1]["conclusion"] = "skipped"
     elif attack == "foreign_job": bundle["jobs"][0]["name"] = "fake"
     elif attack == "author": bundle["pr"]["user"]["login"] = "reviewer"
     elif attack == "push_actor": bundle["run"]["actor"]["login"] = "reviewer"
+    elif attack == "triggering_actor": bundle["run"]["triggering_actor"]["login"] = "reviewer"
+    elif attack == "commit_author": bundle["commit_identities"] = {"reviewer"}
     elif attack in ("read_role", "triage_role", "unknown_role"):
         bundle["permissions"]["reviewer"] = {"read_role": "read", "triage_role": "triage", "unknown_role": "custom"}[attack]
     elif attack == "stale_review": bundle["reviews"][0]["commit_id"] = "d"*40
@@ -243,9 +253,90 @@ def test_verification_error_publishes_failure_and_hides_exception_text(bundle, m
     def fail(*args): raise RuntimeError("credential-like-sensitive-diagnostic")
     monkeypatch.setattr(publisher, "collect", fail)
     report = publisher.publish(Client(), bundle["settings"], bundle["gate_policy"], 5, 100)
-    assert writes[0]["status"] == "in_progress" and writes[-1]["conclusion"] == "failure"
+    # One completed check per outcome: no in_progress placeholder that makes the required check flap.
+    assert len(writes) == 1 and writes[0]["status"] == "completed" and writes[0]["conclusion"] == "failure"
     assert report["decision"] == "BLOCK" and report["code"] == "VERIFICATION_ERROR"
     assert "sensitive" not in json.dumps(writes) + json.dumps(report)
+
+
+def test_unchanged_outcome_is_not_reposted_but_a_change_is(bundle, monkeypatch):
+    writes = []
+    class Client:
+        def api(self, path, method="GET", payload=None):
+            if method == "GET": return bundle["pr"]
+            writes.append(payload)
+            return {"id": 30 + len(writes), "app": {"id": 42}, "head_sha": "b"*40, "conclusion": payload["conclusion"]}
+    code = {"value": "RUN_MISSING"}
+    def deny(*args): raise publisher.Denied(code["value"])
+    monkeypatch.setattr(publisher, "collect", deny)
+    state = {}
+    first = publisher.publish(Client(), bundle["settings"], bundle["gate_policy"], 5, 100, state)
+    again = publisher.publish(Client(), bundle["settings"], bundle["gate_policy"], 5, 100, state)
+    assert len(writes) == 1 and first["check_run_id"] == again["check_run_id"] == 31
+    code["value"] = "GATE_REJECTED"
+    publisher.publish(Client(), bundle["settings"], bundle["gate_policy"], 5, 100, state)
+    assert len(writes) == 2 and state["published"]["code"] == "GATE_REJECTED"
+
+
+@pytest.mark.parametrize("code", ["GITHUB_HTTP_403", "GITHUB_HTTP_429", "API_BUDGET"])
+def test_throttling_backs_off_without_posting(bundle, monkeypatch, code):
+    writes = []
+    class Client:
+        def api(self, path, method="GET", payload=None):
+            if method == "GET": return bundle["pr"]
+            writes.append(payload)
+    def throttled(*args): raise publisher.Denied(code)
+    monkeypatch.setattr(publisher, "collect", throttled)
+    state = {}
+    with pytest.raises(publisher.Denied, match=code):
+        publisher.publish(Client(), bundle["settings"], bundle["gate_policy"], 5, 100, state)
+    assert writes == [] and state["backoff_until"] > datetime.now(timezone.utc).timestamp()
+
+
+def test_unrelated_fork_runs_do_not_block_but_a_newer_same_head_run_does(bundle):
+    # GitHub leaves pull_requests empty for fork heads; that must not be a denial lever.
+    bundle["newer_runs"] = [bundle["run"], {"id": 500, "head_sha": "d"*40, "pull_requests": []}]
+    assert publisher.validate_bundle(**bundle)["run_id"] == 100
+    bundle["newer_runs"].append({"id": 501, "head_sha": "b"*40, "pull_requests": []})
+    with pytest.raises(publisher.Denied, match="NEWER_RUN_EXISTS"):
+        publisher.validate_bundle(**bundle)
+
+
+def test_blob_cache_skips_refetch_without_changing_the_manifest(tmp_path):
+    (tmp_path / "README.md").write_text("synthetic\n")
+    data = (tmp_path / "README.md").read_bytes()
+    sha = hashlib.sha1(b"blob " + str(len(data)).encode() + b"\0" + data).hexdigest()
+    fetched = []
+    class Client:
+        def api(self, path):
+            if "/trees/" in path:
+                return {"tree": [{"path": "README.md", "type": "blob", "mode": "100644", "size": len(data), "sha": sha}],
+                        "truncated": False}
+            fetched.append(path)
+            return {"encoding": "base64", "size": len(data), "content": base64.b64encode(data).decode()}
+    cache = {}
+    first = publisher.remote_subject(Client(), "owner/repo", "a"*40, cache)
+    second = publisher.remote_subject(Client(), "owner/repo", "a"*40, cache)
+    assert first == second == subject_digest(tmp_path) and len(fetched) == 1
+    assert cache == {sha: hashlib.sha256(data).hexdigest()}
+
+
+def test_example_reviewers_match_the_ci_guard_policy():
+    example = json.loads((ROOT / "security/trusted-publisher.example.json").read_text())
+    trust = json.loads((ROOT / "security/trust-policy.json").read_text())
+    assert example["reviewers"] == trust["baseline_reviewers"]
+
+
+def test_publisher_state_file_rejects_tampered_cache(tmp_path):
+    from scripts.publish_trusted_check import load_state
+    state = tmp_path / "state.json"
+    state.write_text(json.dumps({"blobs": {"a"*40: "not-a-digest"}, "backoff_until": "soon",
+                                 "published": {"check_run_id": 1}}))
+    loaded = load_state(state)
+    assert loaded["blobs"] == {} and "backoff_until" not in loaded and loaded["published"] == {"check_run_id": 1}
+    state.write_text("{")
+    assert load_state(state) == {}
+    assert load_state(tmp_path / "absent.json") == {}
 
 
 def test_unconfigured_example_cannot_issue_live_token(bundle):
@@ -254,13 +345,29 @@ def test_unconfigured_example_cannot_issue_live_token(bundle):
         publisher.validate_settings(settings, bundle["gate_policy"])
 
 
-@pytest.mark.parametrize("attack", ["missing", "error", "findings", "history", "cleanup", "missing_case", "invalid_case_type", "fake_junit_count"])
+@pytest.mark.parametrize("attack", ["missing", "error", "findings", "swapped_failure", "history", "candidate_history", "candidate_subject",
+                                    "cleanup", "missing_case", "invalid_case_type", "fake_junit_count"])
 def test_seeded_defect_must_have_real_complete_negative_evidence(bundle, attack):
     path = next(p for p in bundle["files"] if "22222222" in p)
     if attack == "missing": del bundle["files"][path]
     elif attack == "error": mutate_json(bundle, path, lambda d: d.update(execution="ERROR"))
     elif attack == "findings": mutate_json(bundle, path, lambda d: d["records"][2].update(findings=4))
+    elif attack == "swapped_failure":
+        def swap(d):
+            cases = d["records"][2]["cases"]
+            failing = next(c for c in cases if not c["passed"])
+            passing = next(c for c in cases if c["passed"])
+            failing["passed"], passing["passed"] = True, False
+        mutate_json(bundle, path, swap)
     elif attack == "history": mutate_json(bundle, path, lambda d: d["records"][1]["evidence"]["coverage"].update(history_head="d"*40))
+    # A negative run against the candidate proves nothing about the evaluator's oracle.
+    elif attack == "candidate_history": mutate_json(bundle, path, lambda d: d["records"][1]["evidence"]["coverage"].update(history_head="b"*40))
+    elif attack == "candidate_subject":
+        def rebind(d):
+            d["subject_digest"] = bundle["subject"]
+            for record in d["records"]:
+                record["subject_digest"] = bundle["subject"]
+        mutate_json(bundle, path, rebind)
     elif attack == "cleanup": mutate_json(bundle, path, lambda d: d["cleanup"].update(completed=False))
     elif attack == "missing_case": mutate_json(bundle, path, lambda d: d["records"][2]["cases"].pop())
     elif attack == "invalid_case_type": mutate_json(bundle, path, lambda d: d["records"][2]["cases"][-1].update(passed="true"))
@@ -289,13 +396,16 @@ def test_publication_rechecks_mutable_state_before_green(bundle, monkeypatch, ch
                 return bundle["pr"] if gets == 1 else fresh
             if "/actions/runs/" in path: return run
             if "/actions/workflows/" in path:
-                return {"workflow_runs": [{"id": 101, "pull_requests": [{"number": 5}]}] if change == "new_run" else [run]}
+                assert "head_sha=" + "b"*40 in path
+                listing = [run, {"id": 101, "head_sha": "b"*40}] if change == "new_run" else [run]
+                return {"total_count": len(listing), "workflow_runs": listing}
             if "/permission" in path: return {"role_name": "read" if change == "review_permission" else "write"}
             raise AssertionError("unexpected request")
         def pages(self, path): return reviews
     monkeypatch.setattr(publisher, "collect", lambda *args: {
-        "head_sha": "b"*40, "base_sha": "a"*40, "run_id": 100, "run_attempt": 1, "review_ids": [11]})
+        "head_sha": "b"*40, "base_sha": "a"*40, "run_id": 100, "run_attempt": 1, "review_ids": [11],
+        "excluded_identities": []})
     report = publisher.publish(Client(), bundle["settings"], bundle["gate_policy"], 5, 100)
-    assert writes[0]["status"] == "in_progress"
+    assert len(writes) == 1 and writes[0]["status"] == "completed"
     assert writes[-1]["conclusion"] == ("success" if change == "none" else "failure")
     assert report["decision"] == ("ALLOW" if change == "none" else "BLOCK")

@@ -76,6 +76,11 @@ jobs:
       - name: Evaluate candidate through external oracle
         working-directory: trusted
         run: .venv/bin/python -I scripts/run_security.py --candidate ../candidate
+      - name: Self-check evidence against the publisher contract
+        working-directory: trusted
+        env:
+          PR_NUMBER: ${{ github.event.pull_request.number || 0 }}
+        run: .venv/bin/python -I scripts/check_publishable_evidence.py --candidate ../candidate --output ../audit/publishable-evidence.json
       - name: Remove evaluator regression database
         if: always()
         working-directory: trusted

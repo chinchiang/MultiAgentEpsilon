@@ -11,6 +11,6 @@
   "evaluator_digest": null,
   "policy_digest": null,
   "minimum_regression_tests": 360,
-  "reviewers": ["CatGrocery"],
+  "reviewers": ["chinchiang", "CatGrocery"],
   "check_name": "epsilon/trusted-merge"
 }
