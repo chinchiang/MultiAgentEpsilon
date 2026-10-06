@@ -152,7 +152,8 @@ def decide(records: list[dict], policy: dict, subject: str, policy_digest: str,
                           'expanded_bytes', 'archives', 'history_blobs', 'unsupported_files')
                 if (coverage['status'] != 'COMPLETE' or
                         any(type(coverage[key]) is not int or coverage[key] < 0 for key in counts) or
-                        coverage['selected_files'] != record['coverage_count'] or coverage['unsupported_files'] != 0):
+                        coverage['selected_files'] != record['coverage_count'] or coverage['unsupported_files'] != 0 or
+                        type(coverage.get('reviewed_binaries', 0)) is not int or coverage.get('reviewed_binaries', 0) < 0):
                     raise ValueError('incomplete scan coverage')
             if record["kind"] == "test":
                 validate_cases(record["cases"], policy["gate_contracts"][gate])

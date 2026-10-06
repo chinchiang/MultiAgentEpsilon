@@ -11,7 +11,7 @@ from .results import digest_file
 from .inputs import input_files
 from .limits import LIMITS, ResourceLimit
 from .processes import bounded_output
-from .scan_content import ContentInventory
+from .scan_content import ContentInventory, load_binary_allowlist
 
 
 def history_blobs(root):
@@ -65,9 +65,12 @@ def history_blobs(root):
     return tip, blobs
 
 
-def scan(root: Path, binary: Path, config: Path, expected_hash: str, *, history=True) -> dict:
+def scan(root: Path, binary: Path, config: Path, expected_hash: str, *, history=True,
+         binary_allowlist: Path | None = None) -> dict:
     if digest_file(binary) != expected_hash:
         raise ValueError('scanner integrity mismatch')
+    # The allowlist sits next to the trusted scanner config, never in the scanned tree.
+    reviewed = load_binary_allowlist(binary_allowlist or config.with_name('binary-allowlist.json'))
     paths = input_files(root)
     if not paths:
         raise ValueError('empty scan scope')
@@ -77,7 +80,7 @@ def scan(root: Path, binary: Path, config: Path, expected_hash: str, *, history=
         temp = Path(temp)
         snapshot = temp / 'snapshot'
         snapshot.mkdir()
-        inventory = ContentInventory(snapshot, LIMITS)
+        inventory = ContentInventory(snapshot, LIMITS, reviewed)
         selected_bytes = 0
         for path in paths:
             with path.open('rb') as stream:
@@ -116,7 +119,8 @@ def scan(root: Path, binary: Path, config: Path, expected_hash: str, *, history=
                     'scanned_leaves': len(inventory.entries), 'scanned_bytes': sum(e['bytes'] for e in inventory.entries.values()),
                     'expanded_bytes': inventory.expanded_bytes, 'archives': inventory.archives,
                     'history_head': tip, 'history_blobs': len(blobs), 'unsupported_files': 0,
-                    'formats': ['UTF-8', 'gzip', 'zip', 'ustar'],
+                    'reviewed_binaries': inventory.reviewed,
+                    'formats': ['UTF-8', 'gzip', 'zip', 'ustar', 'reviewed-binary-strings'],
                     'scope': 'worktree plus all blobs reachable from candidate HEAD; other refs excluded',
                     'limits': vars(LIMITS)}
     return {'targets': len(paths), 'findings': findings, 'coverage': coverage,

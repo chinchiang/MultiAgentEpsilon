@@ -1,4 +1,5 @@
 import gzip
+import hashlib
 import io
 import json
 import secrets
@@ -97,3 +98,64 @@ def test_aggregate_source_limit_applies_before_digest(tmp_path, monkeypatch):
     monkeypatch.setattr(inputs, 'LIMITS', replace(LIMITS, max_input_bytes=100))
     with pytest.raises(ResourceLimit):
         subject_digest(tmp_path)
+
+
+def png_like(payload=b''):
+    return b'\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR' + bytes(range(0, 32)) + payload + b'\x00\xff\x00'
+
+
+def allowlist(tmp_path, *blobs, reason='reviewed synthetic asset'):
+    path = tmp_path.parent / (tmp_path.name + '-binary-allowlist.json')
+    path.write_text(json.dumps({'schema_version': 1, 'entries': [
+        {'sha256': hashlib.sha256(b).hexdigest(), 'reason': reason} for b in blobs]}))
+    return path
+
+
+def scan_with(tmp_path, allowed, history=False):
+    from tests.test_gitleaks import LOCK, ROOT
+    return scanner.scan(tmp_path, ROOT / '.tools/gitleaks', ROOT / 'security/gitleaks.toml', LOCK['binary_sha256'],
+                        history=history, binary_allowlist=allowed)
+
+
+def test_unreviewed_binary_still_blocks_but_reviewed_digest_is_strings_scanned(tmp_path):
+    data = png_like()
+    (tmp_path / 'diagram.png').write_bytes(data)
+    with pytest.raises(UnsupportedContent, match='reviewed digest'):
+        scan_with(tmp_path, allowlist(tmp_path))
+    result = scan_with(tmp_path, allowlist(tmp_path, data))
+    assert result['findings'] == [] and result['coverage']['reviewed_binaries'] == 1
+    assert result['coverage']['status'] == 'COMPLETE' and result['coverage']['unsupported_files'] == 0
+
+
+@pytest.mark.parametrize('encoding', ['ascii', 'utf-16-le'])
+def test_secret_embedded_in_reviewed_binary_is_still_found(tmp_path, encoding):
+    canary = 'VIBE_TEST_' + 'SECRET_' + secrets.token_hex(16)
+    data = png_like(b' key=' + canary.encode(encoding) + b' ')
+    (tmp_path / 'asset.bin').write_bytes(data)
+    result = scan_with(tmp_path, allowlist(tmp_path, data))
+    assert [f['file'] for f in result['findings']] == ['asset.bin!strings']
+    assert canary not in json.dumps(result)
+
+
+def test_changed_binary_needs_a_new_review(tmp_path):
+    reviewed = png_like(b'version-one')
+    (tmp_path / 'asset.bin').write_bytes(png_like(b'version-two'))
+    with pytest.raises(UnsupportedContent):
+        scan_with(tmp_path, allowlist(tmp_path, reviewed))
+
+
+@pytest.mark.parametrize('entries', [[{'sha256': 'x'}], [{'sha256': 'a' * 64, 'reason': ' '}],
+                                     [{'sha256': 'a' * 64, 'reason': 'r'}] * 2,
+                                     [{'sha256': 'a' * 64, 'reason': 'r', 'path': 'any'}]])
+def test_malformed_binary_allowlist_fails_closed(tmp_path, entries):
+    (tmp_path / 'README.md').write_text('synthetic\n')
+    path = tmp_path.parent / (tmp_path.name + '-bad.json')
+    path.write_text(json.dumps({'schema_version': 1, 'entries': entries}))
+    with pytest.raises(ValueError, match='invalid binary allowlist'):
+        scan_with(tmp_path, path)
+
+
+def test_repository_binary_allowlist_is_valid_and_reviewed():
+    from security_harness.scan_content import load_binary_allowlist
+    from tests.test_gitleaks import ROOT
+    assert isinstance(load_binary_allowlist(ROOT / 'security/binary-allowlist.json'), frozenset)
