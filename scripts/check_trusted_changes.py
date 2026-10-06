@@ -51,7 +51,7 @@ def live_approval(number, head, base):
             # gh 2.46 (the cloud runtime) predates --slurp. Stream one JSON
             # object per line across all pages; review text remains JSON-escaped.
             args += ["--paginate", "--jq", ".[] | @json"]
-        output = subprocess.check_output(args, text=True, timeout=30, stderr=subprocess.DEVNULL)
+        output = subprocess.check_output(args, encoding="utf-8", timeout=30, stderr=subprocess.DEVNULL)
         return [json.loads(line) for line in output.splitlines() if line] if pages else json.loads(output)
     pr = api(f"pulls/{number}")
     reviews = api(f"pulls/{number}/reviews?per_page=100", pages=True)

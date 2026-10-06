@@ -89,7 +89,7 @@ def main():
         repo = trust['repository']
         def api(path):
             return json.loads(subprocess.check_output(['gh','api',f'repos/{repo}/{path}'],
-                              text=True, stderr=subprocess.DEVNULL, timeout=30))
+                              encoding='utf-8', stderr=subprocess.DEVNULL, timeout=30))
         branch = api('branches/main')
         brief = api('rulesets?includes_parents=true')
         rules = [api('rulesets/'+str(r['id'])) for r in brief]

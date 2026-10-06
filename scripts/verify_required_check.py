@@ -54,7 +54,8 @@ def verify(api, repo, number):
 
 
 def gh_api(path):
-    output = subprocess.check_output(["gh", "api", path], text=True, timeout=30, stderr=subprocess.DEVNULL)
+    # gh emits UTF-8; the locale codec (e.g. cp950 on zh-TW Windows) cannot decode PR titles.
+    output = subprocess.check_output(["gh", "api", path], encoding="utf-8", timeout=30, stderr=subprocess.DEVNULL)
     return json.loads(output)
 
 
