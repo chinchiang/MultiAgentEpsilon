@@ -22,12 +22,52 @@ def test_new_execution_entrypoints_are_protected_by_default():
 def test_baseline_approval_binds_independent_reviewer_and_current_head():
     pr = {"state": "open", "head": {"sha": "head"}, "base": {"sha": "base"}, "user": {"login": "author"}}
     review = {"id": 1, "state": "APPROVED", "commit_id": "head", "user": {"login": "owner"}}
-    assert approved_review(pr, [review], "head", "base", ["owner"])["review_id"] == 1
-    assert approved_review(pr, [review], "changed", "base", ["owner"]) is None
-    assert approved_review(pr, [review], "head", "new-base", ["owner"]) is None
-    assert approved_review(pr, [review], "head", "base", ["stranger"]) is None
-    assert approved_review(pr, [{**review, "user": {"login": "author"}}], "head", "base", ["author"]) is None
-    assert approved_review(pr, [review, {**review, "id": 2, "state": "DISMISSED"}], "head", "base", ["owner"]) is None
+    write = {"owner": "write", "author": "admin"}
+    assert approved_review(pr, [review], "head", "base", ["owner"], write)["review_id"] == 1
+    assert approved_review(pr, [review], "changed", "base", ["owner"], write) is None
+    assert approved_review(pr, [review], "head", "new-base", ["owner"], write) is None
+    assert approved_review(pr, [review], "head", "base", ["stranger"], write) is None
+    assert approved_review(pr, [{**review, "user": {"login": "author"}}], "head", "base", ["author"], write) is None
+    assert approved_review(pr, [review, {**review, "id": 2, "state": "DISMISSED"}], "head", "base", ["owner"], write) is None
+
+
+@pytest.mark.parametrize("role", ["read", "triage", None, "custom"])
+def test_listed_reviewer_without_write_access_cannot_approve_baseline(role):
+    # GitHub records approvals from read-only users; they must not lift the guard.
+    pr = {"state": "open", "head": {"sha": "head"}, "base": {"sha": "base"}, "user": {"login": "author"}}
+    review = {"id": 1, "state": "APPROVED", "commit_id": "head", "user": {"login": "owner"}}
+    assert approved_review(pr, [review], "head", "base", ["owner"], {"owner": role}) is None
+    assert approved_review(pr, [review], "head", "base", ["owner"], {"owner": "maintain"})["reviewer"] == "owner"
+
+
+def test_head_commit_identities_only_remove_approvals():
+    pr = {"state": "open", "head": {"sha": "head"}, "base": {"sha": "base"}, "user": {"login": "author"}}
+    review = {"id": 1, "state": "APPROVED", "commit_id": "head", "user": {"login": "owner"}}
+    assert approved_review(pr, [review], "head", "base", ["owner"], {"owner": "write"}, {"owner"}) is None
+    assert approved_review(pr, [review], "head", "base", ["owner"], {"owner": "write"}, {"web-flow"}) is not None
+
+
+@pytest.mark.parametrize("role,approved", [("write", True), ("read", False)])
+def test_live_approval_resolves_reviewer_permission_through_github(monkeypatch, role, approved):
+    import scripts.check_trusted_changes as guard
+    reviewer = json.loads((Path(__file__).resolve().parents[1] / "security/trust-policy.json").read_text())["baseline_reviewers"][-1]
+    responses = {
+        "pulls/7": {"state": "open", "head": {"sha": "h" * 40}, "base": {"sha": "b" * 40}, "user": {"login": "someone-else"}},
+        f"collaborators/{reviewer}/permission": {"role_name": role},
+        "commits/" + "h" * 40: {"author": {"login": "someone-else"}, "committer": {"login": "web-flow"}},
+    }
+    review = {"id": 3, "state": "APPROVED", "commit_id": "h" * 40, "user": {"login": reviewer}}
+    requested = []
+    def fake(args, **kwargs):
+        path = args[2].split("/", 3)[3]
+        requested.append(path)
+        if path.startswith("pulls/7/reviews"):
+            return json.dumps(review) + "\n"
+        return json.dumps(responses[path])
+    monkeypatch.setattr(guard.subprocess, "check_output", fake)
+    result = guard.live_approval(7, "h" * 40, "b" * 40)
+    assert (result is not None) is approved
+    assert f"collaborators/{reviewer}/permission" in requested
 
 
 def test_guard_retains_sha_bound_evidence_even_when_it_blocks(tmp_path):

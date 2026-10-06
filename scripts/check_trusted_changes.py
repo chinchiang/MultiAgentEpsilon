@@ -20,15 +20,21 @@ def protected_changes(names):
         (name.startswith("docs/") and name.endswith(".md")) or name == "README.md")]
 
 
-def approved_review(pr, reviews, head, base, reviewers):
+WRITE_ROLES = ("write", "maintain", "admin")
+
+
+def approved_review(pr, reviews, head, base, reviewers, permissions, excluded=()):
+    """An approval counts only from a listed, write-capable reviewer who is not the
+    author or a known pusher. Exclusions may only remove approvals, never add them."""
     if pr["state"] != "open" or pr["head"]["sha"] != head or pr["base"]["sha"] != base:
         return None
     latest = {}
     for review in sorted(reviews, key=lambda r: r["id"]):
         if review["state"] in ("APPROVED", "CHANGES_REQUESTED", "DISMISSED"):
             latest[review["user"]["login"]] = review
+    blocked = {pr["user"]["login"], *excluded}
     for login, review in latest.items():
-        if (login in reviewers and login != pr["user"]["login"] and
+        if (login in reviewers and login not in blocked and permissions.get(login) in WRITE_ROLES and
                 review["state"] == "APPROVED" and review["commit_id"] == head):
             return {"review_id": review["id"], "reviewer": login, "commit_id": head}
     return None
@@ -49,7 +55,19 @@ def live_approval(number, head, base):
         return [json.loads(line) for line in output.splitlines() if line] if pages else json.loads(output)
     pr = api(f"pulls/{number}")
     reviews = api(f"pulls/{number}/reviews?per_page=100", pages=True)
-    return approved_review(pr, reviews, head, base, policy["baseline_reviewers"])
+    candidates = {r["user"]["login"] for r in reviews
+                  if r["state"] == "APPROVED" and r["user"]["login"] in policy["baseline_reviewers"]}
+    permissions = {}
+    for login in sorted(candidates):
+        if not re.fullmatch(r"[A-Za-z0-9-]+", login):
+            continue
+        permissions[login] = api(f"collaborators/{login}/permission")["role_name"]
+    # Commit identities are self-asserted, so they are used only to exclude reviewers;
+    # the ruleset's native last-push approval remains the authoritative pusher check.
+    commit = api(f"commits/{head}")
+    excluded = {person["login"] for person in (commit.get("author"), commit.get("committer"))
+                if isinstance(person, dict) and person.get("login")}
+    return approved_review(pr, reviews, head, base, policy["baseline_reviewers"], permissions, excluded)
 
 
 def main():
