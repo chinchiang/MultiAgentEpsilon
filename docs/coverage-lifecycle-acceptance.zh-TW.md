@@ -4,7 +4,7 @@
 
 工作樹與 subject manifest 共用檔案清冊。G2 額外掃描**候選 HEAD 可達的全部 Git blobs**，包括從工作樹移除的舊內容；不將其他本地分支、遠端不可得物件算入本次覆蓋。報告保存 history_head、history_blobs 與 finding 的 object_id，結束前再次核對 HEAD。
 
-支援 UTF-8 文字及以 magic 辨識的 gzip、zip、ustar。壓縮成員只讀入平坦掃描快照，絕不依 archive 路徑解壓至檔案系統。未知二進位、加密 ZIP、link／特殊成員、不安全路徑、壞檔與超限皆產生 G2 ERROR／INCOMPLETE，不能當成零 findings 通過。這不代表支援任意編碼、加密或所有封裝格式。
+支援 UTF-8 文字及以 magic 辨識的 gzip、zip、ustar。壓縮成員只讀入平坦掃描快照，絕不依 archive 路徑解壓至檔案系統。未經審查的二進位、加密 ZIP、link／特殊成員、不安全路徑、壞檔與超限皆產生 G2 ERROR／INCOMPLETE，不能當成零 findings 通過。二進位內容若其 SHA-256 已經審查列入 evaluator 端的 `security/binary-allowlist.json`，則改以 ASCII／UTF-16LE 可讀字串掃描（報告的 reviewed_binaries 計數），內嵌的明文機密仍會被找到；內容一改就須重新審查。這不代表支援任意編碼、加密或所有封裝格式。
 
 報告區分 selected_files／selected_bytes、scanned_leaves／scanned_bytes、expanded_bytes、archives 與 history_blobs。政策要求 COMPLETE、unsupported_files=0 及與 gate 相符的檔案數；單獨填入正數 coverage_count 不足以放行。
 

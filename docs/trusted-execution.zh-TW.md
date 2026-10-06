@@ -29,16 +29,22 @@
 
 1. 開立 PR，完成差異審閱及候選版本驗證。此時舊基準可以拒絕變更，屬預期行為。
 2. `security/trust-policy.json` 中的基準 reviewer 對目前 head SHA 核准；reviewer 必須不同於 PR 作者。核准權限來自 base 版本的政策，不能由 PR 自增 reviewer。
-3. 重新執行可信工作流程。guard 即時查詢 GitHub PR 與 reviews，確認仍 open、base/head 相符、最後有效決定為 APPROVED 且 commit_id 相同。查詢失敗、撤回、CHANGES_REQUESTED 或 head 變動均不授權。
+3. 重新執行可信工作流程。guard 即時查詢 GitHub PR 與 reviews，確認仍 open、base/head 相符、最後有效決定為 APPROVED 且 commit_id 相同；核准者必須具 write、maintain 或 admin 權限，head commit 的作者／提交者不計入。查詢失敗、撤回、CHANGES_REQUESTED、權限不足或 head 變動均不授權。
 4. 此輪依然由舊 evaluator／policy 執行。核准變更不代表新 evaluator 已自動證明正確；維護者需評估新增政策與測試的驗收證據。合併後的新 commit 才成為下一輪基準。
 
 `pull_request_target` 不會因 review submitted 自動重跑；審核後由有權人員 rerun 對應的 head run。禁止用 PR label、候選檔案或任意 CLI approval 字串取代 GitHub 的即時審核查驗。單人作者不能自行核准自己的 PR；需有合格的獨立 reviewer。
 
 ## 首次遷移與 GitHub 管理設定
 
-舊 main 的 guard 不支援此更新流程，且新 workflow 尚未成為預設分支內容。因此第一次採納此版本屬明確的基準遷移：維護者先審查 PR 與手動 workflow 驗證，再採納新基準；不能把舊 guard 的拒絕偽裝成成功。手動 workflow 的 evaluator 由執行者選定 ref，只能當選定版本的測試證據。
+舊 main 的 guard 不支援此更新流程，且新 workflow 尚未成為預設分支內容。因此第一次採納此版本屬明確的基準遷移：維護者先審查 PR 與手動 workflow 驗證，再採納新基準；不能把舊 guard 的拒絕偽裝成成功。手動 workflow 的 evaluator 由執行者選定 ref，只能當選定版本的測試證據；因此手動執行的檢查名稱固定為 `manual-security-evaluation`，不會滿足必要檢查。
 
-`docs/github-main-ruleset.json` 提供最低合併保護候選設定：禁止刪除／強推、獨立 CODEOWNERS 核准、變更後重審、嚴格 required check `trusted-security-pilot`、無 bypass。管理者完成基準遷移後才套用，避免要求尚不存在的檢查而卡住所有更新。
+`docs/github-main-ruleset.json` 提供最低合併保護候選設定：禁止刪除／強推、獨立 CODEOWNERS 核准、變更後重審、嚴格 required check `trusted-security-pilot`、無 bypass。原訂於基準遷移後才套用；**實際上規則集 24512048 已在遷移前啟用**，而 main 目前的 workflow 只會產生 `security-pilot`，CODEOWNERS 也只有作者本人，所以現在沒有任何 PR 能依規則合併。首次遷移需由擁有者依下列程序操作：
+
+1. 邀請獨立審查者（例如 CatGrocery）成為具 write 權限的 collaborator，並由對方接受邀請；以 `python3 scripts/audit_merge_protection.py` 讀回確認。
+2. 審查者審閱可信閘門 PR 的差異、遠端手動 run（`manual-security-evaluation`）的結果，以及 artifact 中 `audit/publishable-evidence.json` 為 PUBLISHABLE，並以審查者帳號核准目前 head。
+3. 擁有者在規則集設定中**暫時**將自己加入 bypass，只用於合併這一個 PR；合併後立即移除，並以 `gh api repos/chinchiang/MultiAgentEpsilon/rulesets/24512048` 讀回確認 bypass 為空。不要刪除或停用整個規則集。
+4. 合併後，main 的 CODEOWNERS 包含兩位審查者，`pull_request_target` workflow 生效：之後的 PR 會在 head 上產生 `trusted-security-pilot`。專用 App 綁定前，每次核准或合併前以 `python3 scripts/verify_required_check.py --pr <編號>` 確認該檢查來自可信 workflow 的 `pull_request_target` run。
+5. 疊在其上的發布程式與多模型 PR 改以 main 為 base 後，依一般流程審查；它們會由已合併的新 evaluator 評估。
 
 **GitHub Actions app ID + check 名稱仍不唯一綁定 evaluator workflow。** 若要把檢查視為不可偽造的自動閘門，需額外採平台支援的 required workflow，或獨立 GitHub App：App 必須查核 repository、workflow 身分／可信 evaluator SHA、事件、候選 SHA、run attempt、完整報告與結論後，才對候選 SHA 發佈必要檢查。其他 workflow 的 GITHUB_TOKEN 不應能以該 App 身分發佈檢查。此獨立來源機制目前未部署，不能聲稱一般開發者無法偽造同名檢查。
 
@@ -56,7 +62,7 @@ python scripts/dev_db.py start
 python scripts/dev_db.py stop
 ```
 
-隔離回歸會執行缺陷版、修正版，以及在候選匯入時嘗試寫入唯讀來源／入口、讀取 evaluator／Docker socket／token、建立 IP 出向連線的探測。必要結果為：完整 16 案例、缺陷版 5 findings／BLOCK、修正版 0 findings／ALLOW。另有錯誤密碼登入、404 洩漏、匯出夾帶跨租戶資料及其他資料列被非法修改四種變體，必須產生指定 AUTH findings；socket 改指向 host 測試端點必須失敗且端點不得收到連線。
+隔離回歸會執行缺陷版、修正版，以及在候選匯入時嘗試寫入唯讀來源／入口、讀取 evaluator／Docker socket／token、建立 IP 出向連線的探測。必要結果為：完整 18 案例、缺陷版恰好政策 `seeded_defect_case_ids` 的 6 個 findings／BLOCK、修正版 0 findings／ALLOW。另有錯誤密碼登入、404 洩漏、匯出夾帶跨租戶資料、其他資料列被非法修改，以及 admin 寫入條件越過租戶邊界五種變體，必須產生指定 AUTH findings；socket 改指向 host 測試端點必須失敗且端點不得收到連線。
 
 候選 lock digest 必須等於已驗證 runtime lock digest；尚不支援任意候選依賴映像建置。受保護變更使用禁用 rename 折疊的 diff，同時判斷刪除與新增路徑。結果 schema 3 使用版本化逐檔 manifest，不能沿用 schema 2 的 gate 證據。
 

@@ -14,6 +14,10 @@ gateway 提供共用 `Request`／`Reply`、離線 mock、Gemini `generateContent
 .venv/bin/python -I scripts/model_smoke.py --live --provider bedrock --provider glm
 ```
 
+`--live` 之外，live 呼叫還必須通過受保護的 `security/model-roe.json`：只限合成資料、`security_gate_effect` 為 NONE、每 run 最多 16 次呼叫，且所選供應商都在 `allowed_live_providers` 內；不符合時在建立任何報告或預留預算前就拒絕。安全閘門使用的 `security/roe.json` 維持 `llm_calls: false`，兩者互不取代。
+
+Bedrock 透過 AWS CLI 子程序呼叫時，只傳入 `AWS_*`（不含 endpoint 覆寫）與基本程序、代理及 CA 環境變數；`GH_TOKEN` 或其他供應商金鑰等無關權杖不會進入 CLI 或其 `credential_process`。Gemini 若回報推理詞元卻缺少可見輸出計數，視為用量格式錯誤，不能略過輸出預算檢查。
+
 每個供應商只收到同一個固定 ACK fixture，不接受 repository 路徑、附件或任意 prompt 參數。每個供應商最多 1 次呼叫、要求最多 256 output tokens、單次期限 30 秒；不重試、不自動切換付費供應商。每個 HTTP 操作另有 10 秒 I/O timeout。supervisor 的工作期限為供應商數 × 30＋10 秒，最多 130 秒，期限後進行程序清理。退出碼 0 必須同時滿足全部固定回應驗證及清理完成；任一失敗、缺設定或取消為 1。
 
 從報告 schema 2 起，正式證據位於 `artifacts/<run-id>/report.json`，開始執行前即建立 INCOMPLETE，逐供應商原子更新進度。`--output` 保留為額外匯出，必須使用新路徑；若 supervisor 被 SIGKILL，匯出檔可能停留在初始 INCOMPLETE，應依其 `canonical_report` 回查正式報告。janitor 不依任意匯出路徑寫檔。

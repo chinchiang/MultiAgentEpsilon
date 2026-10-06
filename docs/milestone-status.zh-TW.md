@@ -1,5 +1,41 @@
 # 第一個里程碑：實作狀態與驗收方式
 
+## 目前狀態（2026-10-06，以此節為準）
+
+下方各節依日期記錄歷次批次。其中「main 未受保護」、14／16 個授權案例、5 個 findings、81／103／125／431 項測試等描述只代表當時狀態，不是現況。
+
+### 遠端治理
+
+- main 已由規則集 24512048 保護：active、沒有 bypass、須經 PR 與 code owner 核准、推送新 commit 後舊核准失效、最後推送須另獲核准，必要檢查為 GitHub Actions App 15368 的 `trusted-security-pilot`。
+- 這個必要檢查仍可由任何 workflow 以同名產生。專用 App 的 `epsilon/trusted-merge` 尚未建立、部署或綁定；過渡期間，審查者在核准或合併前以 `scripts/verify_required_check.py --pr <編號>` 核對檢查來源。
+- **合併死結：** 儲存庫只有一位 collaborator（chinchiang，同時是 PR 作者），main 的 CODEOWNERS 只列 chinchiang，而 GitHub 不允許作者核准自己的 PR；CatGrocery 尚不是具寫入權限的協作者。完成擁有者授權的首次基準遷移前，任何 PR 都無法依規則合併。
+- 新的 `pull_request_target` workflow 必須先成為 main 的內容，才會對 PR 自動執行；在此之前，PR 上不會出現可信的必要檢查。
+
+### 本版驗收（commit `e79c5cd`，遠端手動 [run 37404856995](https://github.com/chinchiang/MultiAgentEpsilon/actions/runs/37404856995)）
+
+- 525 項測試全數通過，0 失敗／錯誤／略過。
+- 修正版 18 個授權案例、0 findings、ALLOW；缺陷版恰好是政策 `seeded_defect_case_ids` 指定的 6 個案例失敗，BLOCK。
+- CI 以發布程式的同一套證據契約自我檢查，結果為 PUBLISHABLE。
+- 手動 run 的檢查名稱為 `manual-security-evaluation`；該 head 上沒有 `trusted-security-pilot`。
+- 本機 WSL 另跑過不含 Docker 隔離的完整子集，以及 admin 跨租戶寫入等真實隔離 mutation；WSL 的 Docker 延遲高，本機驗證時曾暫時放寬 Docker 逾時，提交的程式維持原時限，並以遠端 run 為準。
+
+### 本版修正（2026-10-06）
+
+- 手動執行不再以必要檢查名稱回報；新增審查者用的檢查來源核對工具。
+- guard 只採計具寫入權限者的基準核准，並排除 head commit 的作者／提交者。
+- 授權 oracle 補上 admin 同租戶寫入（允許）與跨租戶寫入（拒絕且無副作用）；缺陷版改為比對精確案例集合。
+- 發布程式：負例綁定 evaluator 摘要與 evaluator SHA；run 綁定 PR head；以 head SHA 判定較新的 run，外部 fork PR 不能再阻斷發布；結果改變才發布 completed 檢查；blob 快取、節流退避、用後撤銷安裝權杖；設定須由 root 擁有、私鑰經 systemd `LoadCredential` 提供，unit 加強隔離。
+- 合併保護稽核：看不到 `bypass_actors` 時視為未知而非沒有；必要檢查須核對 integration ID；另查專用 App 檢查與 base 分支 CODEOWNERS。
+- G2：二進位內容須經審查列入 `security/binary-allowlist.json`（以 SHA-256 識別），之後仍以可讀字串掃描內嵌機密；未審查者照樣阻擋。
+- janitor 單一 run 回收失敗不再中斷其他 run；模型 supervisor 回收逾時不再跳過收尾；容器清理逾時放寬為 30 秒。
+- 模型：review 須能由原始回應重新導出並符合該次呼叫的回應雜湊；拒絕控制、格式（bidi、零寬）與分隔字元；補 Gemini 推理用量缺口；記錄供應商回報的服務模型以偵測別名漂移，模型識別改為每 run 金鑰化；AWS 子程序只取得 allowlist 環境變數；人工裁決須核對儲存的分析；live 呼叫另需 `security/model-roe.json`。
+
+### 仍待完成
+
+- **需擁有者操作：** 邀請獨立審查者並取得寫入權限、執行擁有者授權的首次基準遷移（見 [可信執行文件](trusted-execution.zh-TW.md)）、建立並部署專用 App、把 `epsilon/trusted-merge` 加入規則集，並以普通開發者身分完成繞過驗收。
+- **功能面：** G3、完整 G5、SBOM／SCA／CVE、ASVS 產品適用性判定、證據簽章與正式發布、GLM 真實推論與結構化輸出、兩個模型家族的多輪穩定性與偏誤實驗，以及 W15–W25。
+- 本地完整流程僅支援 Linux x86_64 與 Docker；Windows 需使用 WSL。
+
 ## 2026-10-05 固定預算多輪盲測與診斷
 
 已加入不含原文的錯誤分類、一至四輪共用總預算的盲測、逐輪與合併指標、失敗分母及跨輪穩定性。新增 32 項回歸；Gemini 兩案各兩輪取得四個有效且符合標準答案的結果。AWS 暫時憑證已到期，因此未做雙模型重複驗收。詳見 [多輪盲測與限制](repeated-review.zh-TW.md)。
@@ -42,9 +78,9 @@ HTTP socket 移入容器限額 tmpfs，host 透過限時限量 Docker exec bridg
 
 ruleset 管理 API 再次回覆 HTTP 403，main 仍未受保護；獨立可信檢查來源與一般開發者繞過驗收未完成。PR 作者目前也是唯一基準 reviewer，仍需有合格的獨立 reviewer，不能自我核准。操作及基準遷移見 [可信執行文件](trusted-execution.zh-TW.md)。下文保留先前 main 基線的歷史紀錄。
 
-本文件記錄公開程式碼試點的實作狀態。使用者原始參考文件與內部規劃留在本地。首版已建立可在本地執行的 Python harness、PyPI 安裝前預檢、真實 Gitleaks、PostgreSQL fixture、14 個授權案例、政策負例與 GitHub Actions 工作流程。
+（首版紀錄，2026-10-04）本文件記錄公開程式碼試點的實作狀態。使用者原始參考文件與內部規劃留在本地。首版已建立可在本地執行的 Python harness、PyPI 安裝前預檢、真實 Gitleaks、PostgreSQL fixture、14 個授權案例、政策負例與 GitHub Actions 工作流程。
 
-目前完成合成 fixture 的本地及遠端 CI 試點。遠端最新基線有 51 項測試通過，PR 正反例與早期 BLOCK 證據已驗證；main 的規則管理寫入仍被整合權限拒絕。詳見 [遠端紀錄](remote-ci-validation.zh-TW.md)。ASVS 345 項清冊仍未做真實產品適用性判定，不把示範案例寫成完整條文通過。雲地模型端點仍為 UNVERIFIED。
+首版當時完成合成 fixture 的本地及遠端 CI 試點。當時遠端基線有 51 項測試通過，PR 正反例與早期 BLOCK 證據已驗證；main 的規則管理寫入仍被整合權限拒絕。詳見 [遠端紀錄](remote-ci-validation.zh-TW.md)。ASVS 345 項清冊仍未做真實產品適用性判定，不把示範案例寫成完整條文通過。雲地模型端點仍為 UNVERIFIED。
 
 ## 可重現驗收
 
@@ -52,10 +88,10 @@ ruleset 管理 API 再次回覆 HTTP 403，main 仍未受保護；獨立可信�
 
 - `pytest.xml`：政策、套件 metadata、真實 Gitleaks、歷史機密、RoE、基準變更及 PostgreSQL 正反例。
 - `http-smoke.json`：真實 loopback HTTP 健康、登入、合法讀取及同角色非法讀取。
-- `<run-id>/report.json`：每次新 run 的 G1、G2、AUTH 結果及 ALLOW／BLOCK；缺陷版預期 5 個 AUTH findings，修正版預期 0。
+- `<run-id>/report.json`：每次新 run 的 G1、G2、AUTH 結果及 ALLOW／BLOCK；缺陷版預期恰好 6 個政策指定的 AUTH findings，修正版預期 0。
 - `latest.txt`：最新 run 的索引。檢查 report 的 subject／policy digest 與當次原碼，不能將舊報告當成本次結果。
 
-`expect_block.py` 要求三項 gate 都確實完成、G1／G2 無 findings、14 個授權案例中有指定數量的違規；工具 ERROR 或沒有案例會使驗收失敗。完整的已知違規集合另由 pytest 精確比對。
+`expect_block.py` 要求三項 gate 都確實完成、G1／G2 無 findings，且 18 個授權案例中失敗的恰好是政策 `seeded_defect_case_ids` 列出的 6 個；工具 ERROR、沒有案例或換成其他案例失敗都會使驗收失敗。
 
 ## 首輪本地基線結果（2026-10-04）
 
@@ -80,8 +116,8 @@ ruleset 管理 API 再次回覆 HTTP 403，main 仍未受保護；獨立可信�
 | W04 | 最小政策契約已實作 | 嚴格狀態、必要 coverage、錯 subject／policy、過期／重複／缺 gate；外部可信證據與發布還未完成。 |
 | W05、W09 | 授權 fixture 子集已實作 | 缺陷與修正版使用相同 oracle；完整 G5 尚待擴充。 |
 | W06、W20 | G1 metadata 與 G2 已實作 | G1 行為分析、SBOM／SCA、G3 尚未實作。 |
-| W08 | 遠端 main／PR 正反例與 guard 證據已驗證 | ruleset 寫入 HTTP 403；main 未受保護。可信來源綁定及普通開發者繞過驗收仍未完成。 |
-| W10–W14 | 已記錄兩個優先模型候選；其餘待完成 | 已作有限連線檢查；雲端認證／正式 model ID 與地端受允許連線尚未具備，未做模型推論、gateway 或偏誤實驗。 |
+| W08 | 遠端 main／PR 正反例與 guard 證據已驗證；main 已由規則集 24512048 保護 | 專用可信檢查來源、具寫入權限的獨立審查者、首次基準遷移及普通開發者繞過驗收仍未完成。 |
+| W10–W14 | 受限 gateway、三種 adapter、合成盲測與多輪框架已實作；Gemini／Claude 已有真實推論 | GLM 真實推論與結構化輸出、兩個模型家族的多輪穩定性及偏誤實驗仍未完成。 |
 | W15–W19 | 待完成 | 產品適用性、簽章證據、完整 release、營運與正式資料／預算治理。 |
 | W21 | 限縮本地 RoE 已實作 | 任意網路掃描、redirect／DNS／工具委派與外部資產授權尚未實作。 |
 | W22–W25 | 待完成 | 一手來源查核、組織成熟度評分、供應商驗收及產品弱點處理。 |

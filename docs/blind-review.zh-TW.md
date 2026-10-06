@@ -39,7 +39,9 @@ runner 預設 512 output tokens／次，可明確選擇 1024；每批最多 16 �
 
 ## 回應、指標與證據
 
-模型必須回傳嚴格 JSON：opaque review ID、VULNERABLE／CLEAN／ABSTAIN、findings、reason。finding 必須有 CWE-89／CWE-78／CWE-639／CWE-22／CWE-918、有效的原碼行號、完全符合該行的 evidence 與長度受限的 rationale。拒絕重複 key、錯誤 ID、額外工具欄位、假造引用、矛盾 verdict／findings、控制字元或超長理由。模型輸出不會被執行。
+模型必須回傳嚴格 JSON：opaque review ID、VULNERABLE／CLEAN／ABSTAIN、findings、reason。finding 必須有 CWE-89／CWE-78／CWE-639／CWE-22／CWE-918、有效的原碼行號、完全符合該行的 evidence 與長度受限的 rationale。拒絕重複 key、錯誤 ID、額外工具欄位、假造引用、矛盾 verdict／findings、超長理由，以及會讓人工判讀與實際內容不一致的字元：Unicode 控制字元（含 C1）、格式字元（如 bidi 覆寫、零寬字元）、行／段分隔符、私用區與未指派碼位；人工裁決的 reviewer 與 reason 欄位適用同一規則。模型輸出不會被執行。
+
+每個成功的 review 都保存供應商回傳的原始文字，評分時必須由該文字重新解析得到相同 review，且原始文字的雜湊等於該次呼叫的 `response_sha256`；因此不同供應商對同一案例的回答無法互換。人工裁決前會重新計算分析，報告中儲存的分析若與重新計算結果不同即拒絕。
 
 格式驗證成功後，報告保存結構化意見及理由，以支援人工判讀；它們仍是不可信文字，並非證明。無效回應只保留既有 gateway 的 digest／錯誤碼，不保存原始錯誤 body。輸入仍限固定合成資料，憑證與內部端點不放進 prompt 或報告。case、request、parsed review、catalog、oracle、implementation 與 call ID 均有對應 digest／識別綁定。這些是未簽章的本地證據。
 
