@@ -10,7 +10,7 @@
   "evaluator_sha": null,
   "evaluator_digest": null,
   "policy_digest": null,
-  "minimum_regression_tests": 266,
+  "minimum_regression_tests": 532,
   "reviewers": ["chinchiang", "CatGrocery"],
   "check_name": "epsilon/trusted-merge"
 }
