@@ -8,7 +8,7 @@ import pytest
 
 from security_harness.llm import benchmark as bench
 from security_harness.llm import benchmark_score as score
-from security_harness.llm.adapters import GeminiAdapter
+from security_harness.llm.adapters import BedrockAdapter, GeminiAdapter
 from security_harness.llm.gateway import Gateway, MockAdapter, Reply
 from tests.test_model_benchmark import collected
 from tests.test_model_gateway import GEMINI, cli_fixture, http_fixture, invoke
@@ -109,4 +109,31 @@ def test_aws_cli_child_receives_only_aws_and_basic_process_context(tmp_path, mon
         "assert os.environ['AWS_PROFILE'] == 'synthetic-profile'\n"
         "assert os.environ['HTTPS_PROXY'] == 'http://proxy.invalid:3128'\n"
         "print(json.dumps({'ok': True}))\n")
+    assert asyncio.run(cli.converse('ap-southeast-1', {'modelId': 'synthetic'})) == {'ok': True}
+
+
+@pytest.mark.parametrize('stderr,code,detail', [
+    ('An error occurred (ValidationException) when calling the Converse operation: The model returned the '
+     'following errors: output_config.format: Extra inputs are not permitted', 'PROVIDER_FAILURE', 'OUTPUT_CONFIGURATION'),
+    ('An error occurred (ExpiredTokenException) when calling the Converse operation: The security token '
+     'included in the request is expired', 'AUTHENTICATION', None),
+    ('An error occurred (AccessDeniedException) when calling the Converse operation: User: '
+     'arn:aws:sts::123456789012:assumed-role/synthetic/session is not authorized', 'AUTHENTICATION', None),
+    ('An error occurred (ThrottlingException) when calling the Converse operation: Too many requests', 'RATE_LIMIT', None),
+    ('An error occurred (ModelErrorException) when calling the Converse operation: private detail 123456789012',
+     'PROVIDER_FAILURE', None),
+])
+def test_bedrock_cli_failures_are_classified_without_keeping_provider_text(tmp_path, stderr, code, detail):
+    # Observed live: a Claude model without Bedrock structured-output support only
+    # surfaced as an unexplained PROVIDER_FAILURE before.
+    cli = cli_fixture(tmp_path, 'import sys\nsys.stderr.write(' + repr(stderr) + ')\nsys.exit(254)\n')
+    result, evidence = invoke(BedrockAdapter('global.anthropic.claude-synthetic', 'ap-southeast-1', cli))
+    assert result is None and evidence['code'] == code and evidence['diagnostic'] == detail
+    dumped = json.dumps(evidence)
+    assert '123456789012' not in dumped and 'arn:aws' not in dumped and 'Extra inputs' not in dumped
+
+
+def test_chatty_cli_stderr_cannot_block_the_response_or_be_stored(tmp_path):
+    cli = cli_fixture(tmp_path, "import json, sys\nsys.stderr.write('x' * 1000000)\nsys.stderr.flush()\n"
+                                "print(json.dumps({'ok': True}))\n")
     assert asyncio.run(cli.converse('ap-southeast-1', {'modelId': 'synthetic'})) == {'ok': True}

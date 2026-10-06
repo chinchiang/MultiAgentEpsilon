@@ -56,4 +56,23 @@ AWS 身分重驗回傳 `ExpiredToken`，本輪沒有送出 Bedrock 推論請求�
 
 這是單一模型、兩個案例的流程驗證，不是雙模型穩定性或偏誤改善的證據。所有案例仍因單一審查者而保持待審。待安全環境設定中的 AWS 暫時憑證更新，且重新核對帳號及角色後，才能執行雙模型重複驗收；不要將憑證貼在聊天或儲存庫。
 
+## 2026-10-06 雙模型多輪驗收
+
+使用者重新以 AWS IAM Identity Center 登入後，先以相同的憑證選取方式執行 `sts get-caller-identity`，核對為帳號 576607007707、Inventec-IT-Bedrock01 權限集；暫時憑證只經由程序標準輸入傳給執行環境，不寫入命令列、儲存庫或對話。評估程式為可信閘門 #6 之上的多模型分支 `30c959b`，指令與上方「真實配對」相同：Gemini／Bedrock、B07／B08、兩輪、每次 1,024 個輸出詞元，共八次請求。
+
+**第一次（報告 `792ef595-81f1-484b-8d8f-818b921b1036`，INCOMPLETE）：** Bedrock 使用 `global.anthropic.claude-opus-5-5`，四次皆為 `PROVIDER_FAILURE`；Gemini 四次有效且正確。以兩次最小合成請求個別診斷：同一模型的純文字 Converse 成功，加入 `outputConfig.textFormat` 後回報 `ValidationException`（`output_config.format: Extra inputs are not permitted`）。也就是此模型不接受 Bedrock 的原生 JSON schema 輸出，不是權限或憑證問題。報告保留，未被下一批覆蓋。之後 Bedrock CLI 的失敗會依固定分類記錄（結構化輸出被拒為 `OUTPUT_CONFIGURATION`，權限／權杖為 `AUTHENTICATION`，節流為 `RATE_LIMIT`），不保存 CLI 或供應商原文。
+
+**第二次（報告 `4d847d59-daf0-4502-874b-50fefe4eceb6`，COMPLETE）：** 先以一次最小請求確認 `global.anthropic.claude-sonnet-4-5-20250929-v1:0` 支援結構化輸出，再完整重跑。八個回應全部有效，清理完成；兩輪各自使用新的不透明識別碼。
+
+| 供應商 | B07（有漏洞） | B08（無漏洞） | 統計 | 跨輪一致 |
+|---|---|---|---|---|
+| Gemini 3.8 Flash | 兩輪皆 VULNERABLE、CWE-639 第 2 行 | 兩輪皆 CLEAN | tp=2／tn=2／fp=0／fn=0 | 2／2 案 |
+| Claude Sonnet 4.5 | 兩輪皆 VULNERABLE、CWE-639 第 2 行 | 第 1 輪 CLEAN、**第 2 輪 VULNERABLE（第 2 行）** | tp=2／tn=1／fp=1／fn=0 | 1／2 案 |
+
+四組配對均可比較，其中 1 組分歧（25%）。第 2 輪 B08 標示 `PENDING_HUMAN_REVIEW`（DISAGREEMENT、REFERENCE_MISMATCH），其餘三組為 `REFERENCE_MATCH`。Claude 第 2 輪的理由是「先取資料再檢查授權，KeyError 與 PermissionError 可區分文件是否存在」——這屬於存在性資訊洩漏（CWE-203 類），不在案例限定的 CWE-639 範圍；B08 並未允許越權讀取，因此標準答案 CLEAN 維持不變。是否接受此判讀，仍須由人工審查者以 `review_adjudicate.py` 註記；本文不代為裁決。
+
+用量：Gemini 輸入 1,819、輸出 552（含回報的思考詞元）；Claude 輸入 3,804、輸出 482；金額成本未知。
+
+判讀：這是兩個案例、兩輪的小樣本，第一次觀測到同一模型對同一案例跨輪答案不同，且屬於範圍外的誤報；它說明多輪與跨家族比對確實能凸顯待人工審查的案例，但樣本太小，不能據此估計穩定性、比較模型優劣或宣稱偏誤降低（`bias_reduction` 仍為 NOT_ESTABLISHED）。兩家取樣設定不同（Gemini temperature=0，Bedrock 為模型預設），也不是受控的偏誤實驗。
+
 後續已完成 B09～B12 的 Gemini／Claude 一輪真實配對，詳見[結構化輸出驗收](structured-output.zh-TW.md)。該批成功沒有覆蓋上述歷史失敗，也尚未完成雙模型多輪驗收。

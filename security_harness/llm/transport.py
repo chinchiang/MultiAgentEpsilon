@@ -126,6 +126,23 @@ class JsonHTTP:
             raise ModelError("TRANSPORT") from None
 
 
+CLI_DIAGNOSTIC_BYTES = 8192
+
+
+def cli_failure(stderr):
+    """Map a failed AWS CLI call to a fixed category. The provider/CLI text itself is
+    never kept: it can echo request content, account IDs or ARNs."""
+    text = ''.join(c for c in stderr.decode('utf-8', 'replace').lower() if 'a' <= c <= 'z')
+    if 'validationexception' in text and 'outputconfig' in text:
+        return ModelError('PROVIDER_FAILURE', 'OUTPUT_CONFIGURATION')
+    if any(k in text for k in ('expiredtoken', 'unrecognizedclient', 'accessdeniedexception',
+                               'invalidclienttokenid', 'tokenhasexpired', 'unabletolocatecredentials')):
+        return ModelError('AUTHENTICATION')
+    if any(k in text for k in ('throttlingexception', 'toomanyrequests', 'servicequotaexceeded')):
+        return ModelError('RATE_LIMIT')
+    return ModelError('PROVIDER_FAILURE')
+
+
 AWS_CHILD_ENV = frozenset({"PATH", "HOME", "USER", "LOGNAME", "LANG", "LC_ALL", "LC_CTYPE", "TZ", "TMPDIR",
                            "HTTP_PROXY", "HTTPS_PROXY", "NO_PROXY", "http_proxy", "https_proxy", "no_proxy",
                            "SSL_CERT_FILE", "SSL_CERT_DIR", "REQUESTS_CA_BUNDLE"})
@@ -169,7 +186,7 @@ class AwsCLI:
                 command = gated_command(command)
             process = await asyncio.create_subprocess_exec(*command,
                 stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.DEVNULL, env=env, start_new_session=True,
+                stderr=asyncio.subprocess.PIPE, env=env, start_new_session=True,
                 pass_fds=(fd,))
         finally:
             os.close(fd)
@@ -179,13 +196,26 @@ class AwsCLI:
                 process.stdin.write(b'G')
             await process.stdin.drain()
             process.stdin.close()
-            body = bytearray()
-            while chunk := await process.stdout.read(4096):
-                body.extend(chunk)
-                if len(body) > RESPONSE_BYTES:
-                    raise ModelError("RESPONSE_LIMIT")
+            async def read_stdout():
+                body = bytearray()
+                while chunk := await process.stdout.read(4096):
+                    body.extend(chunk)
+                    if len(body) > RESPONSE_BYTES:
+                        raise ModelError("RESPONSE_LIMIT")
+                return body
+
+            async def read_stderr():
+                # Keep at most a small prefix for classification; drain the rest
+                # so a chatty CLI cannot block on a full pipe.
+                head = bytearray()
+                while chunk := await process.stderr.read(4096):
+                    if len(head) < CLI_DIAGNOSTIC_BYTES:
+                        head.extend(chunk[:CLI_DIAGNOSTIC_BYTES - len(head)])
+                return bytes(head)
+
+            body, diagnostic = await asyncio.gather(read_stdout(), read_stderr())
             if await process.wait() != 0:
-                raise ModelError("PROVIDER_FAILURE")
+                raise cli_failure(diagnostic)
             return strict_json(body)
         finally:
             try:

@@ -18,6 +18,10 @@ Gemini 回報輸入 1,896、輸出 1,151（包含回報的思考詞元）；Clau
 
 這是一輪、四個合成案例的有效性驗收，不是多輪穩定性、完整 ASVS 覆蓋、偏誤降低或獨立人工核准。`REFERENCE_MATCH` 只代表與既有標準答案一致，不代表真人已審查。
 
+## 2026-10-06 模型相容性
+
+`global.anthropic.claude-opus-5-5` 的純文字 Converse 可用，但加入 `outputConfig.textFormat` 時回報 `ValidationException`（`output_config.format: Extra inputs are not permitted`），因此不能用於盲測審查請求；`global.anthropic.claude-sonnet-4-5-20250929-v1:0` 已確認支援並完成多輪驗收（見 [多輪盲測](repeated-review.zh-TW.md)）。選用 Bedrock 模型前，先以一次最小合成請求確認結構化輸出可用。不支援時，報告的診斷為 `OUTPUT_CONFIGURATION`，不會自動改用其他模型或移除 schema。
+
 ## API 依據
 
 - [AWS Bedrock structured outputs](https://docs.aws.amazon.com/bedrock/latest/userguide/structured-output.html)
