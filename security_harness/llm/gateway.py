@@ -1,8 +1,10 @@
 """Provider-independent limits and redacted evidence for advisory model calls."""
 import asyncio
 import hashlib
+import hmac
 import json
 import math
+import secrets
 import time
 import uuid
 from dataclasses import dataclass, field
@@ -53,6 +55,7 @@ class Reply:
     text: str = field(repr=False)
     input_tokens: int | None = None
     output_tokens: int | None = None
+    model_version: str | None = None
 
 
 class Adapter(Protocol):
@@ -93,11 +96,18 @@ class Gateway:
         self.calls = 0
         self.reserved_tokens = 0
         self.evidence = []
+        # Per-run key: model identities stay comparable within a report, but an ARN with
+        # an account ID cannot be recovered by brute-forcing an unsalted digest.
+        self._identity_key = secrets.token_bytes(32)
+
+    def identity(self, value):
+        return "hmac-sha256:" + hmac.new(self._identity_key, value.encode("utf-8"), hashlib.sha256).hexdigest()
 
     async def generate(self, adapter: Adapter, request: Request) -> Reply | None:
         evidence = {"schema_version": 1, "call_id": str(uuid.uuid4()),
                     "provider": adapter.provider, "family": adapter.family,
-                    "model_sha256": digest(adapter.model), "status": "ERROR", "code": None,
+                    "model_sha256": self.identity(adapter.model), "reported_model_sha256": None,
+                    "status": "ERROR", "code": None,
                     "request_sha256": None, "response_sha256": None, "diagnostic": None,
                     "input_tokens": None, "output_tokens": None, "advisory_only": True}
         self.evidence.append(evidence)
@@ -134,7 +144,8 @@ class Gateway:
             if reply.output_tokens is not None and reply.output_tokens > request.max_output_tokens:
                 raise ModelError("RESPONSE_LIMIT")
             evidence.update(status="SUCCESS", response_sha256=digest(reply.text),
-                            input_tokens=reply.input_tokens, output_tokens=reply.output_tokens)
+                            input_tokens=reply.input_tokens, output_tokens=reply.output_tokens,
+                            reported_model_sha256=self.identity(reply.model_version) if type(reply.model_version) is str else None)
             return reply
         except asyncio.CancelledError:
             evidence.update(status="CANCELLED", code="CANCELLED")

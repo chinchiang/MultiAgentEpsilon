@@ -20,6 +20,7 @@ from security_harness.llm.gateway import Gateway, Limits, MockAdapter, ModelErro
 from security_harness.llm.transport import AwsCLI
 from security_harness.llm.lifecycle import persist, read_report, supervise
 from security_harness.lifecycle import run_directory
+from security_harness.scope import load_model_roe
 
 FIXTURE = Request(
     system="You are running a synthetic transport check. Follow the user's exact output instruction.",
@@ -100,6 +101,13 @@ async def run_worker(root, run_id):
     return 0 if report['pending_status'] == 'COMPLETE' else 1
 
 
+def require_model_roe(parser, providers):
+    try:
+        load_model_roe(ROOT, providers)
+    except (OSError, ValueError):
+        parser.error("live model calls are outside the approved model RoE (security/model-roe.json)")
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--provider", choices=("mock", "gemini", "bedrock", "glm"), action="append")
@@ -111,6 +119,8 @@ def main():
         parser.error("duplicate providers are not allowed")
     if any(p != "mock" for p in providers) and not args.live:
         parser.error("live providers require --live")
+    if args.live:
+        require_model_roe(parser, providers)
     run_id = str(uuid.uuid4())
     canonical = ROOT / 'artifacts' / run_id / 'report.json'
     output = args.output or canonical

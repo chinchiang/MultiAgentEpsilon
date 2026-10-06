@@ -12,6 +12,13 @@ import pytest
 from security_harness.llm import benchmark as bench
 from security_harness.llm import benchmark_score as score
 
+
+@pytest.fixture(autouse=True)
+def _no_model_evidence_left_in_artifacts():
+    from tests.model_evidence import remove_new_model_evidence
+    with remove_new_model_evidence(Path(__file__).resolve().parents[1]):
+        yield
+
 ROOT = Path(__file__).resolve().parents[1]
 
 

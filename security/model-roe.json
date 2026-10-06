@@ -1,0 +1,9 @@
+{
+  "schema_version": 1,
+  "scope": "fixed synthetic review and smoke fixtures only; no product code, credentials or personal data",
+  "llm_calls": true,
+  "data_class": "synthetic",
+  "allowed_live_providers": ["gemini", "bedrock", "glm"],
+  "max_calls_per_run": 16,
+  "security_gate_effect": "NONE"
+}

@@ -49,6 +49,12 @@ def object_field(value, key):
     return value[key]
 
 
+def reported_model(value):
+    """Provider-reported serving model, to detect a floating alias drifting mid-run.
+    Malformed values are dropped (unknown), never trusted as identity."""
+    return value if type(value) is str and 0 < len(value) <= 256 and value.isprintable() else None
+
+
 class GeminiAdapter:
     provider = "gemini"
     family = "gemini"
@@ -102,8 +108,12 @@ class GeminiAdapter:
         metadata = value.get('usageMetadata')
         inputs, outputs = usage(metadata, 'promptTokenCount', 'candidatesTokenCount')
         _, thoughts = usage(metadata, 'promptTokenCount', 'thoughtsTokenCount')
+        if thoughts is not None and outputs is None:
+            # Reported thinking without a visible-output count cannot be checked against the budget.
+            raise ModelError('INVALID_RESPONSE', 'USAGE_SCHEMA')
         # The output budget covers both visible output and internal thinking.
-        return Reply(text, inputs, outputs + (thoughts or 0) if outputs is not None else None)
+        return Reply(text, inputs, outputs + (thoughts or 0) if outputs is not None else None,
+                     reported_model(value.get('modelVersion')))
 
 
 class GLMAdapter:
@@ -141,7 +151,8 @@ class GLMAdapter:
         if (message.get("role") != "assistant" or
                 type(message.get("content")) is not str):
             raise ModelError("INVALID_RESPONSE", "ENVELOPE_SCHEMA")
-        return Reply(message["content"], *usage(value.get("usage"), "prompt_tokens", "completion_tokens"))
+        return Reply(message["content"], *usage(value.get("usage"), "prompt_tokens", "completion_tokens"),
+                     reported_model(value.get("model")))
 
 
 class BedrockAdapter:

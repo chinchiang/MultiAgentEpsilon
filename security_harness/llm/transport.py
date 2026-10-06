@@ -126,6 +126,11 @@ class JsonHTTP:
             raise ModelError("TRANSPORT") from None
 
 
+AWS_CHILD_ENV = frozenset({"PATH", "HOME", "USER", "LOGNAME", "LANG", "LC_ALL", "LC_CTYPE", "TZ", "TMPDIR",
+                           "HTTP_PROXY", "HTTPS_PROXY", "NO_PROXY", "http_proxy", "https_proxy", "no_proxy",
+                           "SSL_CERT_FILE", "SSL_CERT_DIR", "REQUESTS_CA_BUNDLE"})
+
+
 class AwsCLI:
     """Use the configured AWS credential chain. No shell or interactive login.
 
@@ -139,9 +144,11 @@ class AwsCLI:
         self.run_directory = run_directory
 
     async def converse(self, region, payload):
-        # Prevent configured endpoint overrides from redirecting signed requests.
-        env = {k: v for k, v in os.environ.items() if not k.startswith("AWS_ENDPOINT_URL")
-               and k not in {"GEMINI_API_KEY", "GLM_API_KEY"}}
+        # Allowlist: the CLI and any credential_process helper see AWS settings and basic
+        # process/proxy/CA context only, never unrelated tokens (GH_TOKEN, other providers).
+        # Endpoint overrides are excluded so signed requests cannot be redirected.
+        env = {k: v for k, v in os.environ.items()
+               if (k.startswith("AWS_") and not k.startswith("AWS_ENDPOINT_URL")) or k in AWS_CHILD_ENV}
         env.update(AWS_EC2_METADATA_DISABLED="true", AWS_MAX_ATTEMPTS="1", AWS_PAGER="",
                    AWS_IGNORE_CONFIGURED_ENDPOINT_URLS="true", AWS_CLI_AUTO_PROMPT="off")
         # AWS CLI v2 cannot parse the JSON from a pipe-backed /dev/stdin here.

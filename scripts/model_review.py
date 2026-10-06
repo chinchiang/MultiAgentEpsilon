@@ -11,6 +11,7 @@ sys.path.insert(0, str(ROOT))
 from security_harness.llm.benchmark import PROVIDERS, SUITES, load_cases
 from security_harness.llm.benchmark_runner import initial_report
 from security_harness.llm.lifecycle import persist, supervise
+from scripts.model_smoke import require_model_roe
 
 
 def main():
@@ -29,6 +30,8 @@ def main():
     providers = args.provider or ['mock-review-a', 'mock-review-b']
     if any(not p.startswith('mock-') for p in providers) and not args.live:
         parser.error('live providers require --live')
+    if args.live:
+        require_model_roe(parser, providers)
     cases = args.case or (list(load_cases()) if args.suite == 'all' else list(SUITES[args.suite or 'injection']))
     try:
         report = initial_report(providers, cases, str(uuid.uuid4()), args.output_tokens, args.rounds)

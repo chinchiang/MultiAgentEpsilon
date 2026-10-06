@@ -84,7 +84,9 @@ async def run_worker(root, run_id):
                 except ModelError as exc:
                     check.update(status='ERROR', code='REVIEW_' + exc.code, diagnostic=exc.detail)
                 else:
-                    check.update(status='SUCCESS', review=value, review_sha256=digest(json.dumps(value, sort_keys=True)))
+                    # The raw text binds this review to its own call's response_sha256.
+                    check.update(status='SUCCESS', review=value, review_sha256=digest(json.dumps(value, sort_keys=True)),
+                                 response_text=reply.text)
             save()
         if all(c['status'] == 'SUCCESS' for c in report['checks']):
             report['pending_status'] = 'COMPLETE'

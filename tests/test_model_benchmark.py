@@ -18,6 +18,16 @@ from security_harness.llm import lifecycle as life
 from security_harness.llm.gateway import ModelError, Reply, digest
 from security_harness.lifecycle import prepare_run
 
+
+from tests.model_evidence import provider_answer
+
+
+@pytest.fixture(autouse=True)
+def _no_model_evidence_left_in_artifacts():
+    from tests.model_evidence import remove_new_model_evidence
+    with remove_new_model_evidence(Path(__file__).resolve().parents[1]):
+        yield
+
 ROOT = Path(__file__).resolve().parents[1]
 
 
@@ -152,7 +162,9 @@ def test_unassessed_cases_do_not_disappear_from_miss_rate(tmp_path, monkeypatch,
     assert metrics['false_negative_rate_valid'] is None and metrics['false_positive_rate_valid'] is None
     assert metrics['tn'] == 0 and metrics['tp'] == 0
     assert report['status'] == ('COMPLETE' if failure == 'abstain' else 'INCOMPLETE')
-    assert all(c['status'] == 'PENDING_HUMAN_REVIEW' for c in report['analysis']['adjudication'])
+    # SINGLE_REVIEWER alone would make PENDING_HUMAN_REVIEW unconditional; require the specific cause.
+    cause = 'ABSTAIN' if failure == 'abstain' else 'INCOMPLETE_REVIEW'
+    assert all(c['status'] == 'PENDING_HUMAN_REVIEW' and cause in c['reasons'] for c in report['analysis']['adjudication'])
     assert 'private raw invalid response' not in path.read_text()
 
 
@@ -178,7 +190,7 @@ def test_agreeing_wrong_models_still_require_human_review_and_localization_is_sc
     for check in data['checks']:
         value = check['review']
         value.update(verdict='CLEAN', findings=[], reason='Incorrect synthetic conclusion.')
-        check['review_sha256'] = digest(json.dumps(value, sort_keys=True))
+        provider_answer(data, check)
     analysis = score.summarize(data)
     assert analysis['pairwise'][0]['disagreements'] == 0
     assert analysis['adjudication'][0]['reasons'] == ['REFERENCE_MISMATCH']
@@ -186,7 +198,7 @@ def test_agreeing_wrong_models_still_require_human_review_and_localization_is_sc
     check = data['checks'][0]
     check['review'].update(verdict='VULNERABLE', findings=[{'cwe': 'CWE-89', 'line': 1,
         'evidence': bench.load_cases()['B01']['source'].splitlines()[0], 'rationale': 'Wrong root-cause line.'}])
-    check['review_sha256'] = digest(json.dumps(check['review'], sort_keys=True))
+    provider_answer(data, check)
     metrics = score.summarize(data)['provider_metrics'][check['provider']]
     assert metrics['tp'] == 1 and metrics['finding_recall_all'] == 0
 

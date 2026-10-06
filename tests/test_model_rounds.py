@@ -15,6 +15,16 @@ from security_harness.llm.adapters import BedrockAdapter
 from security_harness.llm.transport import strict_json
 from security_harness.lifecycle import prepare_run
 
+
+from tests.model_evidence import provider_answer
+
+
+@pytest.fixture(autouse=True)
+def _no_model_evidence_left_in_artifacts():
+    from tests.model_evidence import remove_new_model_evidence
+    with remove_new_model_evidence(Path(__file__).resolve().parents[1]):
+        yield
+
 ROOT = Path(__file__).resolve().parents[1]
 
 
@@ -76,7 +86,9 @@ def test_rounds_share_one_budget_and_preserve_opaque_ids(tmp_path):
 def test_failure_is_not_replaced_by_success_in_another_round(tmp_path):
     d=collect(tmp_path)
     c=next(c for c in d['checks'] if c['provider']=='mock-review-a' and c['case_id']=='B01' and c['round_index']==2)
+    # As the runner records a parse failure: no trusted review and no bound response text.
     c.update(status='ERROR',code='REVIEW_INVALID_RESPONSE',diagnostic='JSON_SYNTAX',review=None)
+    c.pop('response_text')
     d['status']='INCOMPLETE'
     a=score.summarize(d);m=a['provider_metrics']['mock-review-a']
     assert (m['tp'],m['tn'],m['unavailable'],m['planned'])==(1,2,1,4)
@@ -131,7 +143,7 @@ def test_changed_answers_are_not_reported_as_stable(tmp_path):
     d=collect(tmp_path)
     check=next(c for c in d['checks'] if c['provider']=='mock-review-a' and c['case_id']=='B01' and c['round_index']==2)
     check['review'].update(verdict='CLEAN',findings=[],reason='Synthetic incorrect answer')
-    check['review_sha256']=bench.digest(json.dumps(check['review'],sort_keys=True))
+    provider_answer(d,check)
     a=score.summarize(d)
     row=next(x for x in a['stability'] if x['provider']=='mock-review-a' and x['case_id']=='B01')
     assert row['all_rounds_agree'] is False and row['distinct_valid_answers']==2
@@ -144,7 +156,7 @@ def test_abstention_is_valid_response_but_not_classification(tmp_path):
     d=collect(tmp_path)
     check=d['checks'][0]
     check['review'].update(verdict='ABSTAIN',findings=[],reason='Cannot determine')
-    check['review_sha256']=bench.digest(json.dumps(check['review'],sort_keys=True))
+    provider_answer(d,check)
     m=score.summarize(d)['provider_metrics'][check['provider']]
     assert m['valid_response_rate']==1 and m['coverage']==.75
     assert m['error_categories']=={'ABSTAIN':1}

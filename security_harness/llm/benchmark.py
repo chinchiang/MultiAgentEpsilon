@@ -1,6 +1,7 @@
 """Blind request construction and strict, untrusted review parsing. No oracle import."""
 import json
 import random
+import unicodedata
 import uuid
 from pathlib import Path
 
@@ -69,9 +70,15 @@ def review_request(case, review_id, output_tokens=OUTPUT_TOKENS):
                    max_output_tokens=output_tokens, response_format=REVIEW_FORMAT)
 
 
+# Control (incl. C1), format (bidi overrides, zero-width), line/paragraph separators,
+# private-use, surrogate and unassigned code points can make text read differently
+# to a human adjudicator than it is stored.
+INVISIBLE_CATEGORIES = frozenset({'Cc', 'Cf', 'Cs', 'Co', 'Cn', 'Zl', 'Zp'})
+
+
 def bounded_text(value):
     return (type(value) is str and 0 < len(value.strip()) <= 400 and len(value) <= 400
-            and not any(ord(c) < 32 or ord(c) == 127 for c in value))
+            and not any(unicodedata.category(c) in INVISIBLE_CATEGORIES for c in value))
 
 
 def validate_review(value, case, review_id):

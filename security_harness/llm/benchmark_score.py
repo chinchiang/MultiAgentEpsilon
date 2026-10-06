@@ -9,7 +9,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from .benchmark import (CASES_PATH, ORACLE_PATH, CWES, PROVIDERS, load_cases, case_digest, review_request,
-                        request_digest, validate_review, bounded_text)
+                        request_digest, validate_review, bounded_text, parse_review)
+from .lifecycle import REPORT_LIMIT
 from .gateway import digest, ModelError
 from .transport import strict_json
 
@@ -97,17 +98,29 @@ def validate_collection(report, expected_plan=None):
             if evidence.get('diagnostic') is not None and (type(evidence['diagnostic']) is not str or evidence['diagnostic'] not in ModelError.DETAILS):
                 raise ValueError('unknown diagnostic')
         if check['status'] == 'SUCCESS':
-            value = validate_review(check['review'], case, item['review_id'])
-            if (call is None or call['status'] != 'SUCCESS' or
-                    check['review_sha256'] != digest(json.dumps(value, sort_keys=True))):
+            text = check.get('response_text')
+            if (call is None or call['status'] != 'SUCCESS' or type(text) is not str or
+                    len(text.encode()) > 16384 or digest(text) != call.get('response_sha256')):
                 raise ValueError('unbound review')
-        elif check.get('review') is not None:
+            try:
+                parsed = parse_review(text, case, item['review_id'])
+            except ModelError:
+                raise ValueError('unbound review') from None
+            value = validate_review(check['review'], case, item['review_id'])
+            if parsed != value or check['review_sha256'] != digest(json.dumps(value, sort_keys=True)):
+                raise ValueError('unbound review')
+        elif check.get('review') is not None or check.get('response_text') is not None:
             raise ValueError('failed attempt contains a trusted review')
     if used_calls != set(call_map) or len(set(tokens.values())) != len(tokens):
         raise ValueError('unexpected call or reused case identity')
     for provider in providers:
         if len({c.get('model_sha256') for c in calls if c['provider'] == provider}) > 1:
             raise ValueError('model changed across calls')
+        # A floating alias (e.g. *-latest) can be re-pointed between calls; the serving
+        # model the provider reports must stay the same where it is reported at all.
+        if len({c['reported_model_sha256'] for c in calls if c['provider'] == provider
+                and c.get('reported_model_sha256') is not None}) > 1:
+            raise ValueError('provider-reported model changed across calls')
     return cases
 
 
@@ -272,10 +285,11 @@ def summarize_repeated(report):
 
 def add_adjudication(report_path, case_id, decision, reviewer, reason):
     raw = report_path.read_bytes()
-    if len(raw) > 262144:
+    if len(raw) > REPORT_LIMIT:
         raise ValueError('report too large')
     report = strict_json(raw)
-    summarize(report)
+    if report.get('analysis') != summarize(report):
+        raise ValueError('stored analysis does not match the recomputed reference analysis')
     if (report_path.name != 'report.json' or report_path.parent.name != report['run_id'] or
             case_id not in report['case_ids'] or decision not in
             ('REFERENCE_CONFIRMED', 'REFERENCE_CHALLENGED', 'NEEDS_MORE_EVIDENCE') or

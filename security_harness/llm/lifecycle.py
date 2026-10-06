@@ -18,7 +18,8 @@ from .gateway import ModelError
 from .transport import strict_json
 
 SOURCE_ROOT = Path(__file__).resolve().parents[2]
-REPORT_LIMIT = 262144
+# 16 reviews x 16 KiB bound raw responses, plus metadata.
+REPORT_LIMIT = 1024 * 1024
 
 
 def persist(path, data):
