@@ -38,7 +38,7 @@
 
 舊 main 的 guard 不支援此更新流程，且新 workflow 尚未成為預設分支內容。因此第一次採納此版本屬明確的基準遷移：維護者先審查 PR 與手動 workflow 驗證，再採納新基準；不能把舊 guard 的拒絕偽裝成成功。手動 workflow 的 evaluator 由執行者選定 ref，只能當選定版本的測試證據；因此手動執行的檢查名稱固定為 `manual-security-evaluation`，不會滿足必要檢查。
 
-`docs/github-main-ruleset.json` 提供最低合併保護候選設定：禁止刪除／強推、獨立 CODEOWNERS 核准、變更後重審、嚴格 required check `trusted-security-pilot`、無 bypass。原訂於基準遷移後才套用；**實際上規則集 24512048 已在遷移前啟用**，而 main 目前的 workflow 只會產生 `security-pilot`，CODEOWNERS 也只有作者本人，所以現在沒有任何 PR 能依規則合併。首次遷移需由擁有者依下列程序操作：
+`docs/github-main-ruleset.json` 提供最低合併保護候選設定：禁止刪除／強推、獨立 CODEOWNERS 核准、變更後重審、嚴格 required check `trusted-security-pilot`、無 bypass。原訂於基準遷移後才套用；實際上規則集 24512048 在遷移前就已啟用，當時舊 workflow 只會產生 `security-pilot`、CODEOWNERS 也只有作者本人，任何 PR 都無法依規則合併。**首次遷移已於 2026-10-06 完成：** 擁有者暫時停用規則集，合併 #6 與 #7，完成真實流程驗收後恢復規則集（結果見 [里程碑狀態](milestone-status.zh-TW.md)）。當時沒有獨立審查者，因此省略了下列第 1、2 步，由擁有者直接合併。日後若需再次進行基準遷移，依下列程序：
 
 1. 邀請獨立審查者（例如 CatGrocery）成為具 write 權限的 collaborator，並由對方接受邀請；以 `python3 scripts/audit_merge_protection.py` 讀回確認。
 2. 審查者審閱可信閘門 PR 的差異、遠端手動 run（`manual-security-evaluation`）的結果，以及 artifact 中 `audit/publishable-evidence.json` 為 PUBLISHABLE，並以審查者帳號核准目前 head。
