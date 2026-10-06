@@ -59,6 +59,7 @@ def test_live_approval_resolves_reviewer_permission_through_github(monkeypatch, 
     review = {"id": 3, "state": "APPROVED", "commit_id": "h" * 40, "user": {"login": reviewer}}
     requested = []
     def fake(args, **kwargs):
+        assert kwargs.get("encoding") == "utf-8" and "text" not in kwargs
         path = args[2].split("/", 3)[3]
         requested.append(path)
         if path.startswith("pulls/7/reviews"):

@@ -67,3 +67,13 @@ def test_forged_or_manual_sources_block(attack, code):
 def test_closed_pr_is_not_verified():
     with pytest.raises(checker.Denied, match="PR_NOT_OPEN"):
         checker.verify(fake_api([check(1, 10)], {10: [run(100)]}, pr_state="closed"), "owner/repo", 5)
+
+
+def test_gh_output_is_decoded_as_utf8_not_the_locale_codec(monkeypatch):
+    seen = {}
+    def fake(args, **kwargs):
+        seen.update(kwargs)
+        return '{"title": "可信安全閘門"}'
+    monkeypatch.setattr(checker.subprocess, "check_output", fake)
+    assert checker.gh_api("repos/owner/repo/pulls/6")["title"] == "可信安全閘門"
+    assert seen["encoding"] == "utf-8" and "text" not in seen
