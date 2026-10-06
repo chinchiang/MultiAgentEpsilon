@@ -1,0 +1,40 @@
+"""Keep model CLI tests from leaving advisory reports in the evaluator's uploaded artifacts/."""
+import contextlib
+import json
+import re
+import shutil
+from pathlib import Path
+
+RUN_ID = re.compile(r"[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}")
+
+
+@contextlib.contextmanager
+def remove_new_model_evidence(root: Path):
+    artifacts = root / "artifacts"
+    before = {p.name for p in artifacts.iterdir()} if artifacts.is_dir() else set()
+    try:
+        yield
+    finally:
+        for path in (artifacts.iterdir() if artifacts.is_dir() else ()):
+            if path.name in before or not RUN_ID.fullmatch(path.name) or path.is_symlink() or not path.is_dir():
+                continue
+            try:
+                operation = json.loads((path / "report.json").read_text()).get("operation")
+            except (OSError, ValueError):
+                continue
+            if operation == "model-smoke":  # never gate evidence
+                shutil.rmtree(path)
+
+
+def provider_answer(report, check):
+    """Make `check` look as if its provider had returned exactly check['review'].
+
+    Reviews are bound to the raw provider text and that call's response digest, so
+    a test simulating another model answer must change all three together.
+    """
+    from security_harness.llm.gateway import digest
+    text = json.dumps(check["review"])
+    check["response_text"] = text
+    check["review_sha256"] = digest(json.dumps(check["review"], sort_keys=True))
+    call = next(c for c in report["calls"] if c["call_id"] == check["call_id"])
+    call["response_sha256"] = digest(text)

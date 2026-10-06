@@ -27,13 +27,34 @@
 - 發布程式：負例綁定 evaluator 摘要與 evaluator SHA；run 綁定 PR head；以 head SHA 判定較新的 run，外部 fork PR 不能再阻斷發布；結果改變才發布 completed 檢查；blob 快取、節流退避、用後撤銷安裝權杖；設定須由 root 擁有、私鑰經 systemd `LoadCredential` 提供，unit 加強隔離。
 - 合併保護稽核：看不到 `bypass_actors` 時視為未知而非沒有；必要檢查須核對 integration ID；另查專用 App 檢查與 base 分支 CODEOWNERS。
 - G2：二進位內容須經審查列入 `security/binary-allowlist.json`（以 SHA-256 識別），之後仍以可讀字串掃描內嵌機密；未審查者照樣阻擋。
-- janitor 單一 run 回收失敗不再中斷其他 run；容器清理逾時放寬為 30 秒。
+- janitor 單一 run 回收失敗不再中斷其他 run；模型 supervisor 回收逾時不再跳過收尾；容器清理逾時放寬為 30 秒。
+- 模型：review 須能由原始回應重新導出並符合該次呼叫的回應雜湊；拒絕控制、格式（bidi、零寬）與分隔字元；補 Gemini 推理用量缺口；記錄供應商回報的服務模型以偵測別名漂移，模型識別改為每 run 金鑰化；AWS 子程序只取得 allowlist 環境變數；人工裁決須核對儲存的分析；live 呼叫另需 `security/model-roe.json`。
 
 ### 仍待完成
 
 - **需擁有者操作：** 邀請獨立審查者並取得寫入權限、執行擁有者授權的首次基準遷移（見 [可信執行文件](trusted-execution.zh-TW.md)）、建立並部署專用 App、把 `epsilon/trusted-merge` 加入規則集，並以普通開發者身分完成繞過驗收。
-- **功能面：** G3、完整 G5、SBOM／SCA／CVE、ASVS 產品適用性判定、證據簽章與正式發布、多模型 gateway 與盲測（後續 PR），以及 W15–W25。
+- **功能面：** G3、完整 G5、SBOM／SCA／CVE、ASVS 產品適用性判定、證據簽章與正式發布、GLM 真實推論與結構化輸出、兩個模型家族的多輪穩定性與偏誤實驗，以及 W15–W25。
 - 本地完整流程僅支援 Linux x86_64 與 Docker；Windows 需使用 WSL。
+
+## 2026-10-05 固定預算多輪盲測與診斷
+
+已加入不含原文的錯誤分類、一至四輪共用總預算的盲測、逐輪與合併指標、失敗分母及跨輪穩定性。新增 32 項回歸；Gemini 兩案各兩輪取得四個有效且符合標準答案的結果。AWS 暫時憑證已到期，因此未做雙模型重複驗收。詳見 [多輪盲測與限制](repeated-review.zh-TW.md)。
+
+## 2026-10-05 第二個真實模型與合併保護前置驗收
+
+Bedrock Claude 固定回覆已成功。修正真實 AWS CLI 的管線 JSON 解析問題，改用封存的匿名記憶體檔案，並移除模型不接受的固定溫度參數。Gemini／Claude 四案配對取得七個有效回應，整批保留未完成；Claude 的一案獨立診斷通過，不覆蓋原始失敗。詳見 [盲測驗收](blind-review.zh-TW.md) 與 [介面修正](model-gateway.zh-TW.md)。獨立審查者設定已加入候選分支，但遠端管理權限、審查者寫入權限、可信必要檢查來源及實際核准仍未完成。
+
+## 2026-10-05 多模型盲測與裁決框架
+
+已加入 12 個合成案例（預設注入組及新增邊界組各 6 案）及獨立 oracle、盲測 payload、嚴格 JSON／引用驗證、誤報／漏報／定位／覆蓋率及分歧指標，並提供綁定 report digest 的追加人工註記流程。模型多數決不影響安全 gate；只有單一真實模型或 mock 結果不代表偏誤降低。原有 43 項盲測回歸加上 44 項邊界案例回歸；ASVS 條文均只標記部分涵蓋，見 [覆蓋對照](asvs-coverage.zh-TW.md)。操作界線見 [盲測文件](blind-review.zh-TW.md)。
+
+## 2026-10-05 模型取消與孤兒回收
+
+模型 runner 已接入 supervisor 與共用 janitor，登記後才啟動 worker／AWS CLI，成功結果須待清理完成才發布。新增 29 項離線生命週期回歸；報告 schema 2 與中斷恢復方式見 [模型 gateway 文件](model-gateway.zh-TW.md)。本輪只處理生命週期，不新增付費模型呼叫；Bedrock／GLM 真實串接及合併保護仍分別待驗收。
+
+## 2026-10-04 模型 gateway 更新
+
+已加入共用 gateway、離線 mock、Gemini／Bedrock／GLM adapter，以及 56 項離線契約／安全回歸。Gemini 實際合成 ACK 推論成功；GLM 的 proxy CONNECT 403 與 Bedrock 的 AWS profile／模型設定仍阻擋真實推論。模型輸出僅供參考，不改變既有安全 gate 或候選容器權限。操作、證據及後續盲測界線見 [模型 gateway 文件](model-gateway.zh-TW.md)。下方多模型尚未實作的敘述為先前批次的歷史狀態。
 
 ## 2026-10-04 掃描覆蓋與生命週期更新
 
@@ -96,7 +117,7 @@ ruleset 管理 API 再次回覆 HTTP 403，main 仍未受保護；獨立可信�
 | W05、W09 | 授權 fixture 子集已實作 | 缺陷與修正版使用相同 oracle；完整 G5 尚待擴充。 |
 | W06、W20 | G1 metadata 與 G2 已實作 | G1 行為分析、SBOM／SCA、G3 尚未實作。 |
 | W08 | 遠端 main／PR 正反例與 guard 證據已驗證；main 已由規則集 24512048 保護 | 專用可信檢查來源、具寫入權限的獨立審查者、首次基準遷移及普通開發者繞過驗收仍未完成。 |
-| W10–W14 | 端點盤點範本已記錄；受限 gateway、adapter 與合成盲測在後續的多模型 PR | 模型推論、gateway、兩個模型家族的多輪穩定性及偏誤實驗仍未併入本 PR。 |
+| W10–W14 | 受限 gateway、三種 adapter、合成盲測與多輪框架已實作；Gemini／Claude 已有真實推論 | GLM 真實推論與結構化輸出、兩個模型家族的多輪穩定性及偏誤實驗仍未完成。 |
 | W15–W19 | 待完成 | 產品適用性、簽章證據、完整 release、營運與正式資料／預算治理。 |
 | W21 | 限縮本地 RoE 已實作 | 任意網路掃描、redirect／DNS／工具委派與外部資產授權尚未實作。 |
 | W22–W25 | 待完成 | 一手來源查核、組織成熟度評分、供應商驗收及產品弱點處理。 |

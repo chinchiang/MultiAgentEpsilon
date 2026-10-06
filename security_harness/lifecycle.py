@@ -114,6 +114,11 @@ def sweep_stale(root):
             if marker['run_id'] != work.name or marker['uid'] != os.getuid():
                 raise ValueError('invalid run owner')
             if not owner_alive(marker):
+                if marker.get('operation') == 'model-smoke':
+                    from .llm.lifecycle import recover
+                    if recover(root, work.name):
+                        cleaned.append(work.name)
+                    continue
                 if 'worker_pid' in marker:
                     try:
                         same_worker = identity(marker['worker_pid']) == marker['worker_start']
