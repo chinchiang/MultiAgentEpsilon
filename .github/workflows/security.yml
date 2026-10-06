@@ -23,6 +23,9 @@ concurrency:
 
 jobs:
   trusted-security-pilot:
+    # A manual run evaluates a maintainer-selected ref (possibly the candidate
+    # itself), so it must never report under the required check name.
+    name: ${{ github.event_name == 'workflow_dispatch' && 'manual-security-evaluation' || 'trusted-security-pilot' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
@@ -88,7 +91,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
-          name: trusted-security-${{ github.run_id }}-${{ github.run_attempt }}
+          name: ${{ github.event_name == 'workflow_dispatch' && 'manual-security' || 'trusted-security' }}-${{ github.run_id }}-${{ github.run_attempt }}
           path: |
             trusted/artifacts/
             audit/
