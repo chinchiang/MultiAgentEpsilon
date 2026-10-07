@@ -25,7 +25,7 @@
 
 ## 2026-10-07 審查修正
 
-深入審查後修正的項目（均附回歸測試）：
+深入審查後修正的項目（均附回歸測試）。驗收：commit `607b8c6` 的遠端手動 [run 37567019081](https://github.com/chinchiang/MultiAgentEpsilon/actions/runs/37567019081)（`manual-security-evaluation`）共 610 項測試全過、0 失敗；修正版 18／0 ALLOW、缺陷版恰好 6 個 seeded findings BLOCK，兩者的 G2 `history_head` 都是候選自己的 commit；證據自我檢查 PUBLISHABLE（610 項）。之後的 commit 只改文件。
 
 - **候選 git 設定不能在 host 執行程式：** 所有對候選 repository 的 git 呼叫改經 `security_harness/candidate_git.py`，停用 fsmonitor／hooks／transport、清除 `GIT_*` 環境變數，並以明確 `--git-dir` 限定候選自己的 `.git` 目錄。
 - **G2 必須涵蓋候選自己的歷史：** 政策新增 `history_required`；沒有 `.git`、沒有 commit，或位於外層 repo 內的子目錄都不能 ALLOW。
