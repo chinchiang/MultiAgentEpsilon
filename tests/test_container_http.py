@@ -33,3 +33,12 @@ def test_bridge_nonreading_child_is_timed_out():
     with pytest.raises(TimeoutError):
         container_http.bounded_output([sys.executable, '-c', 'import time; time.sleep(30)'],
                                       b'x' * 16384, timeout=0.2)
+
+
+def test_every_docker_call_targets_the_isolation_daemon():
+    from pathlib import Path
+    root = Path(__file__).resolve().parents[1]
+    sources = [*root.glob("security_harness/*.py"), *root.glob("scripts/*.py")]
+    offenders = [p.name for p in sources if p.name != "processes.py"
+                 and ("['docker'" in p.read_text() or '["docker"' in p.read_text())]
+    assert offenders == []

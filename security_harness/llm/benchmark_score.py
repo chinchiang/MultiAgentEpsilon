@@ -213,7 +213,8 @@ def summarize(report, expected_plan=None):
 
 def error_categories(checks):
     labels = []
-    allowed = ModelError.CODES | {'DEADLINE', 'CANCELLED', 'BUDGET_EXHAUSTED', 'ROUTING_DENIED', 'INPUT_LIMIT'}
+    allowed = ModelError.CODES | {'DEADLINE', 'CANCELLED', 'BUDGET_EXHAUSTED', 'ROUTING_DENIED', 'INPUT_LIMIT',
+                                  'TIMEOUT', 'SUPERVISOR_FAILED', 'WORKER_FAILED', 'PROVIDER_INCOMPLETE'}
     for check in checks:
         if check['status'] == 'SUCCESS':
             if check['review']['verdict'] == 'ABSTAIN':

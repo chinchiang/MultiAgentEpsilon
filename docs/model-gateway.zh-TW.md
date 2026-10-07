@@ -14,7 +14,7 @@ gateway 提供共用 `Request`／`Reply`、離線 mock、Gemini `generateContent
 .venv/bin/python -I scripts/model_smoke.py --live --provider bedrock --provider glm
 ```
 
-`--live` 之外，live 呼叫還必須通過受保護的 `security/model-roe.json`：只限合成資料、`security_gate_effect` 為 NONE、每 run 最多 16 次呼叫，且所選供應商都在 `allowed_live_providers` 內；不符合時在建立任何報告或預留預算前就拒絕。安全閘門使用的 `security/roe.json` 維持 `llm_calls: false`，兩者互不取代。
+`--live` 之外，live 呼叫還必須通過受保護的 `security/model-roe.json`：只限合成資料、`security_gate_effect` 為 NONE、每 run 規劃的 live 呼叫數（供應商 × 案例 × 輪數）不得超過 `max_calls_per_run`（上限 16），且所選供應商都在 `allowed_live_providers` 內；不符合時在建立任何報告或預留預算前就拒絕。安全閘門使用的 `security/roe.json` 維持 `llm_calls: false`，兩者互不取代。
 
 Bedrock 透過 AWS CLI 子程序呼叫時，只傳入 `AWS_*`（不含 endpoint 覆寫）與基本程序、代理及 CA 環境變數；`GH_TOKEN` 或其他供應商金鑰等無關權杖不會進入 CLI 或其 `credential_process`。Gemini 若回報推理詞元卻缺少可見輸出計數，視為用量格式錯誤，不能略過輸出預算檢查。
 
@@ -39,7 +39,7 @@ Bedrock 透過 AWS CLI 子程序呼叫時，只傳入 `AWS_*`（不含 endpoint 
 - HTTP 禁止 redirects，保留 proxy 與 CA trust；回應 envelope 最多 128 KiB、文字最多 64 KiB。拒絕壓縮回應、非 JSON、重複 key、非有限數值、截斷與不支援的結束原因。
 - tool／function 呼叫、code-execution payload 與 content-filter 拒答均產生失敗證據。任何文字輸出都只當資料，沒有 shell、工具分派或網路委派入口。system 與 user 在供應商協定中分開傳送。
 - AWS CLI 使用封存的 Linux 匿名記憶體檔案傳送 JSON，子程序只繼承指定的檔案描述元；不將內容放入命令列參數或具名暫存檔。stdin 只傳遞登記後的放行字元。禁止 shell、互動提示、重試及 configured endpoint overrides；stdout 有上限，stderr 不寫入證據。取消／逾時時終止 process group 並回收 CLI。
-- 證據保存 call ID、模型／輸入／輸出 digest、耗時、固定錯誤碼與供應商回報 token 數。缺 usage 為 null，不記作免費或零消耗。原始 prompt、回答、HTTP body、憑證、端點及例外文字都不進報告。
+- 證據保存 call ID、模型／輸入／輸出 digest、可讀的模型標籤（`model_label`；ARN 及任何 12 位數帳號樣式一律遮蔽）、耗時、固定錯誤碼與供應商回報 token 數。缺 usage 為 null，不記作免費或零消耗。ACK smoke 的原始 prompt、回答，以及所有呼叫的 HTTP body、憑證、端點及例外文字都不進報告；盲測則另外保存模型原始回答文字（`response_text`），以便由原文重新導出 review。
 
 synthetic 標籤是可信呼叫者的分類聲明，並不是 DLP 或機密偵測。模型輸出仍是不可信資料；分離角色不保證模型本身不受 prompt injection 影響。token 限制不是精確的金額預算，供應商計價、hidden reasoning 與取消後的遠端運算可能另有費用。回應超限時只能拒絕本次結果，無法追回供應商已收取的費用。
 

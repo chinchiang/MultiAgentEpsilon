@@ -3,13 +3,15 @@
 import json
 import os
 import re
-import subprocess
+import sys
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from security_harness import candidate_git
 
 
 def commit(path):
-    value = subprocess.check_output(["git", "-C", str(path), "rev-parse", "HEAD"],
-                                    text=True, timeout=10).strip()
+    value = candidate_git.head(path)
     if not re.fullmatch(r"[0-9a-f]{40}", value):
         raise ValueError("invalid commit")
     return value

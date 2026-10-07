@@ -8,9 +8,13 @@ import argparse
 import json
 import re
 import subprocess
+import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
+from security_harness import candidate_git
+from security_harness.trusted_publisher import identities, pr_commit_identities
 
 
 def protected_changes(names):
@@ -65,8 +69,8 @@ def live_approval(number, head, base):
     # Commit identities are self-asserted, so they are used only to exclude reviewers;
     # the ruleset's native last-push approval remains the authoritative pusher check.
     commit = api(f"commits/{head}")
-    excluded = {person["login"] for person in (commit.get("author"), commit.get("committer"))
-                if isinstance(person, dict) and person.get("login")}
+    excluded = (identities(commit.get("author"), commit.get("committer"))
+                | pr_commit_identities(api(f"pulls/{number}/commits?per_page=100", pages=True), head))
     return approved_review(pr, reviews, head, base, policy["baseline_reviewers"], permissions, excluded)
 
 
@@ -79,10 +83,10 @@ def main():
     args = parser.parse_args()
     if not re.fullmatch(r"[0-9a-f]{40}", args.base):
         raise ValueError("base must be an immutable commit SHA")
-    run = subprocess.run(["git", "-C", str(args.candidate), "diff", "--no-renames", "--name-only", "-z", args.base, "HEAD"],
-                         capture_output=True, check=True, timeout=20)
+    run = candidate_git.run(args.candidate, "diff", "--no-ext-diff", "--no-textconv", "--no-renames",
+                            "--name-only", "-z", args.base, "HEAD", capture_output=True, check=True, timeout=20)
     changed = protected_changes([name for name in run.stdout.decode().split("\0") if name])
-    head = subprocess.check_output(["git", "-C", str(args.candidate), "rev-parse", "HEAD"], text=True, timeout=10).strip()
+    head = candidate_git.head(args.candidate)
     approval = None
     approval_error = None
     if changed and args.pr:

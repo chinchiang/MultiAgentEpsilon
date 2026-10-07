@@ -4,6 +4,7 @@ import hashlib
 import hmac
 import json
 import math
+import re
 import secrets
 import time
 import uuid
@@ -100,13 +101,24 @@ class Gateway:
         # an account ID cannot be recovered by brute-forcing an unsalted digest.
         self._identity_key = secrets.token_bytes(32)
 
+    @staticmethod
+    def label(value):
+        """Readable model name for reports; ARNs and account-like digits never appear."""
+        if not isinstance(value, str) or re.search(r"\d{12}", value):
+            return "redacted"
+        if value.startswith("arn:"):
+            resource = value.split(":", 5)[-1].split("/", 1)[0]
+            return "arn-redacted:" + (resource if re.fullmatch(r"[a-z-]{1,40}", resource) else "unknown")
+        return value if re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}", value) else "redacted"
+
     def identity(self, value):
         return "hmac-sha256:" + hmac.new(self._identity_key, value.encode("utf-8"), hashlib.sha256).hexdigest()
 
     async def generate(self, adapter: Adapter, request: Request) -> Reply | None:
         evidence = {"schema_version": 1, "call_id": str(uuid.uuid4()),
                     "provider": adapter.provider, "family": adapter.family,
-                    "model_sha256": self.identity(adapter.model), "reported_model_sha256": None,
+                    "model_sha256": self.identity(adapter.model), "model_label": self.label(adapter.model),
+                    "reported_model_sha256": None,
                     "status": "ERROR", "code": None,
                     "request_sha256": None, "response_sha256": None, "diagnostic": None,
                     "input_tokens": None, "output_tokens": None, "advisory_only": True}

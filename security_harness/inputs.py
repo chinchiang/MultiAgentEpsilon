@@ -1,7 +1,7 @@
 """One worktree scope for scanning and subject binding; never follow symlinks."""
 import os
-import subprocess
 from pathlib import Path
+from . import candidate_git
 from .limits import LIMITS, ResourceLimit
 
 ROOT_GENERATED = {".git", ".venv", ".tools", ".state", "artifacts", ".pytest_cache"}
@@ -16,9 +16,8 @@ def input_files(root: Path) -> list[Path]:
     if root.is_symlink() or not root.is_dir():
         raise ValueError("input root must be a real directory")
     # A tracked file in a reserved generated area is not silently omitted.
-    if (root / ".git").exists():
-        tracked = subprocess.run(["git", "-C", str(root), "ls-files", "-z"],
-                                 capture_output=True, check=True, timeout=10)
+    if candidate_git.git_dir(root):
+        tracked = candidate_git.run(root, "ls-files", "-z", capture_output=True, check=True, timeout=10)
         if any(excluded(Path(n)) for n in tracked.stdout.decode().split("\0") if n):
             raise ValueError("tracked input uses a reserved generated path")
     paths = []

@@ -30,9 +30,10 @@ def main():
     providers = args.provider or ['mock-review-a', 'mock-review-b']
     if any(not p.startswith('mock-') for p in providers) and not args.live:
         parser.error('live providers require --live')
-    if args.live:
-        require_model_roe(parser, providers)
     cases = args.case or (list(load_cases()) if args.suite == 'all' else list(SUITES[args.suite or 'injection']))
+    if args.live:
+        live = sum(not p.startswith('mock-') for p in providers)
+        require_model_roe(parser, providers, live * len(cases) * args.rounds)
     try:
         report = initial_report(providers, cases, str(uuid.uuid4()), args.output_tokens, args.rounds)
     except ValueError:

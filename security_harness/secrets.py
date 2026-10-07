@@ -7,32 +7,39 @@ import subprocess
 import tempfile
 from pathlib import Path
 
-from .results import digest_file
+from . import candidate_git
+from .results import digest_file, read_regular
 from .inputs import input_files
 from .limits import LIMITS, ResourceLimit
 from .processes import bounded_output
 from .scan_content import ContentInventory, load_binary_allowlist
 
 
-def history_blobs(root):
-    head = subprocess.run(['git', '-C', str(root), 'rev-parse', '--verify', 'HEAD'],
-                          capture_output=True, text=True, timeout=10)
+def history_blobs(root, required=False):
+    """HEAD-reachable blobs of the input root's own repository; `required` refuses to
+    report complete coverage for an input without history."""
+    if candidate_git.git_dir(root) is None:
+        if required:
+            raise ValueError('history coverage required but input root is not a repository')
+        return None, []
+    head = candidate_git.run(root, 'rev-parse', '--verify', 'HEAD', capture_output=True, text=True, timeout=10)
     if head.returncode:
-        if (root / '.git').exists():
-            ref = subprocess.run(['git', '-C', str(root), 'symbolic-ref', '-q', 'HEAD'],
-                                 capture_output=True, text=True, timeout=10)
-            if ref.returncode or subprocess.run(['git', '-C', str(root), 'show-ref', '--verify', '--quiet',
-                                                ref.stdout.strip()], timeout=10).returncode != 1:
-                raise ValueError('Git history unavailable for an existing repository')
+        ref = candidate_git.run(root, 'symbolic-ref', '-q', 'HEAD', capture_output=True, text=True, timeout=10)
+        if ref.returncode or candidate_git.run(root, 'show-ref', '--verify', '--quiet', ref.stdout.strip(),
+                                               timeout=10).returncode != 1:
+            raise ValueError('Git history unavailable for an existing repository')
+        if required:
+            raise ValueError('history coverage required but repository has no commits')
         return None, []
     tip = head.stdout.strip()
     if not re.fullmatch('[a-f0-9]{40}|[a-f0-9]{64}', tip):
         raise ValueError('invalid history identity')
-    shallow = bounded_output(['git', '-C', str(root), 'rev-parse', '--is-shallow-repository'], b'')
+    shallow = bounded_output(candidate_git.command(root, 'rev-parse', '--is-shallow-repository'), b'',
+                             env=candidate_git.environment())
     if shallow.strip() != b'false':
         raise ValueError('shallow repository cannot establish history coverage')
-    objects = bounded_output(['git', '-C', str(root), 'rev-list', '--objects', tip], b'',
-                             timeout=30, limit=4*1024*1024).decode().splitlines()
+    objects = bounded_output(candidate_git.command(root, 'rev-list', '--objects', tip), b'', timeout=30,
+                             limit=4*1024*1024, env=candidate_git.environment()).decode().splitlines()
     names = {}
     for row in objects:
         oid, _, name = row.partition(' ')
@@ -46,9 +53,9 @@ def history_blobs(root):
     ids = list(names)
     for offset in range(0, len(ids), 128):
         chunk = ids[offset:offset+128]
-        output = bounded_output(['git', '-C', str(root), 'cat-file',
-                                 '--batch-check=%(objectname) %(objecttype) %(objectsize)'],
-                                ('\n'.join(chunk)+'\n').encode(), timeout=20).decode().splitlines()
+        output = bounded_output(candidate_git.command(root, 'cat-file',
+                                                       '--batch-check=%(objectname) %(objecttype) %(objectsize)'),
+                                ('\n'.join(chunk)+'\n').encode(), timeout=20, env=candidate_git.environment()).decode().splitlines()
         if len(output) != len(chunk):
             raise ValueError('incomplete history metadata')
         for expected, row in zip(chunk, output):
@@ -66,7 +73,7 @@ def history_blobs(root):
 
 
 def scan(root: Path, binary: Path, config: Path, expected_hash: str, *, history=True,
-         binary_allowlist: Path | None = None) -> dict:
+         require_history=False, binary_allowlist: Path | None = None) -> dict:
     if digest_file(binary) != expected_hash:
         raise ValueError('scanner integrity mismatch')
     # The allowlist sits next to the trusted scanner config, never in the scanned tree.
@@ -75,7 +82,7 @@ def scan(root: Path, binary: Path, config: Path, expected_hash: str, *, history=
     if not paths:
         raise ValueError('empty scan scope')
     findings = []
-    tip, blobs = history_blobs(root) if history else (None, [])
+    tip, blobs = history_blobs(root, require_history) if history else (None, [])
     with tempfile.TemporaryDirectory(prefix='epsilon-gitleaks-') as temp:
         temp = Path(temp)
         snapshot = temp / 'snapshot'
@@ -83,13 +90,15 @@ def scan(root: Path, binary: Path, config: Path, expected_hash: str, *, history=
         inventory = ContentInventory(snapshot, LIMITS, reviewed)
         selected_bytes = 0
         for path in paths:
-            with path.open('rb') as stream:
-                data = inventory.read(stream)
+            data = read_regular(path, LIMITS.max_file_bytes)
+            inventory.expanded_bytes += len(data)
+            if inventory.expanded_bytes > LIMITS.max_expanded_bytes:
+                raise ResourceLimit('combined scan content limit exceeded')
             selected_bytes += len(data)
             inventory.add(data, path.relative_to(root).as_posix(), scope='worktree')
         for oid, name, size in blobs:
-            data = bounded_output(['git', '-C', str(root), 'cat-file', 'blob', oid], b'',
-                                  timeout=20, limit=LIMITS.max_file_bytes)
+            data = bounded_output(candidate_git.command(root, 'cat-file', 'blob', oid), b'', timeout=20,
+                                  limit=LIMITS.max_file_bytes, env=candidate_git.environment())
             if len(data) != size:
                 raise ValueError('history content size mismatch')
             inventory.expanded_bytes += len(data)

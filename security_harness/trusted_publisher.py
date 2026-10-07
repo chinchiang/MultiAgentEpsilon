@@ -221,8 +221,9 @@ def validate_bundle(settings, gate_policy, pr, run, newer_runs, jobs, files, rev
     validate_pr(pr, settings)
     need(run["repository"]["id"] == settings["repository_id"]
          and run["repository"]["full_name"] == settings["repository"], "RUN_REPOSITORY")
-    # GitHub-attested: a pull_request_target run of this path always executes the
-    # default branch's workflow file, whatever the PR changes.
+    # A pull_request_target run executes this path from the PR's *base* branch, and the
+    # run does not record which base: workflow_id/path also match a modified copy on
+    # another branch. validate_run_base binds the run to this PR before collection.
     need(run["workflow_id"] == settings["workflow_id"] and run["path"] == settings["workflow_path"]
          and run["event"] == "pull_request_target", "RUN_SOURCE")
     need(run["status"] == "completed" and run["conclusion"] == "success", "RUN_NOT_SUCCESS")
@@ -383,6 +384,35 @@ def identities(*people):
     return {p["login"] for p in people if isinstance(p, dict) and isinstance(p.get("login"), str)}
 
 
+def validate_run_base(run, pr, pull_requests, base_branch):
+    """Bind a pull_request_target run to this PR's base without trusting run evidence.
+
+    The same head can be opened against another branch whose copy of the workflow writes
+    its own green evidence. PRs cannot be deleted, so any PR in any state that shares
+    the head with another base is visible here; and a twin from a different head branch
+    yields a run whose head branch differs from this PR's.
+    """
+    head = pr["head"]["sha"]
+    head_repo = (pr["head"].get("repo") or {}).get("id")
+    need(head_repo is not None and run.get("head_branch") == pr["head"].get("ref")
+         and (run.get("head_repository") or {}).get("id") == head_repo, "RUN_HEAD_BRANCH")
+    need(isinstance(pull_requests, list) and any(p.get("number") == pr["number"] for p in pull_requests),
+         "PR_LISTING_INCOMPLETE")
+    need(all(p["base"]["ref"] == base_branch and p["base"]["repo"]["id"] == pr["base"]["repo"]["id"]
+             for p in pull_requests if p["head"]["sha"] == head), "FOREIGN_BASE_PR")
+
+
+PR_COMMIT_LIMIT = 250  # GitHub lists at most 250 commits for a pull request.
+
+
+def pr_commit_identities(commits, head):
+    """Accounts GitHub attributes any PR commit to. Self-asserted, so only ever used to
+    exclude approvers: a reviewer who pushed earlier commits is not independent."""
+    need(isinstance(commits, list) and 0 < len(commits) < PR_COMMIT_LIMIT, "PR_COMMITS_TRUNCATED")
+    need(all(isinstance(c, dict) for c in commits) and commits[-1].get("sha") == head, "PR_COMMITS_HEAD")
+    return set().union(*(identities(c.get("author"), c.get("committer")) for c in commits))
+
+
 def collect(client, settings, number, run_id, gate_policy, blob_cache=None):
     repo = settings["repository"]
     prefix = f"/repos/{repo}"
@@ -411,8 +441,10 @@ def collect(client, settings, number, run_id, gate_policy, blob_cache=None):
     permissions = {login: client.api(f"{prefix}/collaborators/{urllib.parse.quote(login, safe='')}/permission")["role_name"] for login in logins}
     twins = client.pages(f"{prefix}/commits/{head}/pulls")
     need([p["number"] for p in twins if p["state"] == "open" and p["head"]["sha"] == head] == [number], "SHARED_PR_HEAD")
+    validate_run_base(run, pr, client.pages(f"{prefix}/pulls?state=all"), settings["base_branch"])
     commit = client.api(f"{prefix}/commits/{head}")
-    commit_identities = identities(commit.get("author"), commit.get("committer"))
+    commit_identities = (identities(commit.get("author"), commit.get("committer"))
+                         | pr_commit_identities(client.pages(f"{prefix}/pulls/{number}/commits"), head))
     subject = remote_subject(client, repo, head, blob_cache)
     proof = validate_bundle(settings, gate_policy, pr, run, runs, jobs["jobs"], unpack_evidence(raw), reviews,
                             permissions, subject, datetime.now(timezone.utc), commit_identities)

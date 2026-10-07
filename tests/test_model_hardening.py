@@ -137,3 +137,39 @@ def test_chatty_cli_stderr_cannot_block_the_response_or_be_stored(tmp_path):
     cli = cli_fixture(tmp_path, "import json, sys\nsys.stderr.write('x' * 1000000)\nsys.stderr.flush()\n"
                                 "print(json.dumps({'ok': True}))\n")
     assert asyncio.run(cli.converse('ap-southeast-1', {'modelId': 'synthetic'})) == {'ok': True}
+
+
+@pytest.mark.parametrize("provider,overrides", [
+    ("glm", {"GLM_MODEL_ID": "replace-with-deployed-model-id", "GLM_CHAT_URL": "https://glm.internal.test/v1/chat/completions"}),
+    ("glm", {"GLM_MODEL_ID": "synthetic-glm", "GLM_CHAT_URL": "https://local.example.invalid/v1/chat/completions"}),
+    ("gemini", {"GEMINI_MODEL_ID": "gemini-synthetic", "GEMINI_API_KEY": ""}),
+    ("bedrock", {"BEDROCK_MODEL_ID": "", "BEDROCK_REGION": "ap-southeast-1"}),
+])
+def test_example_placeholders_are_configuration_errors(monkeypatch, provider, overrides):
+    from scripts.model_smoke import configured_adapter
+    from security_harness.llm.gateway import ModelError
+    for name, value in overrides.items():
+        monkeypatch.setenv(name, value)
+    with pytest.raises(ModelError) as caught:
+        configured_adapter(provider)
+    assert caught.value.code == "CONFIGURATION"
+
+
+def test_empty_optional_glm_key_means_no_key(monkeypatch):
+    from scripts.model_smoke import configured_adapter
+    monkeypatch.setenv("GLM_MODEL_ID", "synthetic-glm")
+    monkeypatch.setenv("GLM_CHAT_URL", "https://glm.internal.test/v1/chat/completions")
+    monkeypatch.setenv("GLM_API_KEY", "")
+    assert configured_adapter("glm")._api_key is None
+
+
+@pytest.mark.parametrize("model,label", [
+    ("global.anthropic.claude-sonnet-4-5-20250929-v1:0", "global.anthropic.claude-sonnet-4-5-20250929-v1:0"),
+    ("gemini-3.8-flash", "gemini-3.8-flash"),
+    ("arn:aws:bedrock:ap-southeast-1:123456789012:inference-profile/x", "redacted"),
+    ("arn:aws:bedrock:ap-southeast-1::foundation-model/x", "arn-redacted:foundation-model"),
+    ("model with spaces", "redacted"),
+])
+def test_model_label_is_readable_without_account_identity(model, label):
+    from security_harness.llm.gateway import Gateway
+    assert Gateway.label(model) == label

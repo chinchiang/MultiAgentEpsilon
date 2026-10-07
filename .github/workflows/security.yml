@@ -18,7 +18,8 @@ permissions:
   pull-requests: read
 
 concurrency:
-  group: trusted-security-${{ github.event.pull_request.number || github.ref }}
+  # The event keeps a manual evaluation from cancelling the trusted push run on main.
+  group: trusted-security-${{ github.event_name }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 jobs:

@@ -5,6 +5,15 @@ import subprocess
 import time
 
 
+# Every Docker call targets one daemon: an image built or a database started elsewhere
+# (DOCKER_HOST, contexts, rootless) would not be the one the isolated run uses.
+DOCKER_SOCKET = 'unix:///var/run/docker.sock'
+
+
+def docker_command(*args):
+    return ['docker', '--host=' + DOCKER_SOCKET, *args]
+
+
 def docker_environment():
     return {k: v for k, v in os.environ.items() if k not in
             ('DOCKER_HOST', 'DOCKER_CONTEXT', 'DOCKER_TLS', 'DOCKER_TLS_VERIFY', 'DOCKER_CERT_PATH')}

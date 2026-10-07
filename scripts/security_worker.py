@@ -9,17 +9,19 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 from security_harness.audit import AuditRun
 from security_harness.lifecycle import run_directory
+from security_harness.limits import WORKER_RLIMITS
 from scripts.run_security import main
 
 
 if __name__ == '__main__':
     run_id, candidate, variant = sys.argv[1:]
     run_directory(ROOT, run_id)  # validate before resolving evidence paths
-    resource.setrlimit(resource.RLIMIT_AS, (8*1024**3, 8*1024**3))
-    resource.setrlimit(resource.RLIMIT_DATA, (512*1024**2, 512*1024**2))
-    resource.setrlimit(resource.RLIMIT_FSIZE, (64*1024**2, 64*1024**2))
-    resource.setrlimit(resource.RLIMIT_CPU, (120, 125))
-    resource.setrlimit(resource.RLIMIT_NOFILE, (256, 256))
+    limits = WORKER_RLIMITS
+    resource.setrlimit(resource.RLIMIT_AS, (limits["address_space_bytes"],) * 2)
+    resource.setrlimit(resource.RLIMIT_DATA, (limits["per_process_data_bytes"],) * 2)
+    resource.setrlimit(resource.RLIMIT_FSIZE, (limits["per_file_output_bytes"],) * 2)
+    resource.setrlimit(resource.RLIMIT_CPU, (limits["per_process_cpu_seconds"], limits["per_process_cpu_seconds"] + 5))
+    resource.setrlimit(resource.RLIMIT_NOFILE, (limits["file_descriptors"],) * 2)
     resource.setrlimit(resource.RLIMIT_CORE, (0, 0))
     audit = AuditRun.__new__(AuditRun)
     audit.output = ROOT / 'artifacts' / run_id

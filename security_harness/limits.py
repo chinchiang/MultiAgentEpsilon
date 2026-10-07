@@ -16,6 +16,15 @@ class Limits:
 
 LIMITS = Limits()
 
+# Security worker rlimits; the report records exactly what the worker applies.
+WORKER_RLIMITS = {
+    "address_space_bytes": 8 * 1024**3,
+    "per_process_data_bytes": 512 * 1024**2,
+    "per_process_cpu_seconds": 120,
+    "per_file_output_bytes": 64 * 1024**2,
+    "file_descriptors": 256,
+}
+
 
 class ResourceLimit(ValueError):
     pass

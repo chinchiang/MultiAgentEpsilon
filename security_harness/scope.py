@@ -18,11 +18,12 @@ def validate_roe(roe: dict) -> dict:
 MODEL_PROVIDERS = ("gemini", "bedrock", "glm")
 
 
-def validate_model_roe(roe: dict, providers) -> dict:
+def validate_model_roe(roe: dict, providers, planned_calls: int = 0) -> dict:
     """Separate rules of engagement for advisory model calls.
 
     security/roe.json governs the security gates and keeps llm_calls false; live model
-    calls need this explicit, reviewed scope instead of a bare --live flag.
+    calls need this explicit, reviewed scope instead of a bare --live flag. The planned
+    live call count must fit the reviewed per-run cap, not only the code's ceiling.
     """
     allowed = roe.get("allowed_live_providers")
     live = [p for p in providers if p in MODEL_PROVIDERS]
@@ -30,10 +31,11 @@ def validate_model_roe(roe: dict, providers) -> dict:
             or roe.get("data_class") != "synthetic" or roe.get("security_gate_effect") != "NONE"
             or not isinstance(allowed, list) or not allowed or len(set(allowed)) != len(allowed)
             or not set(allowed) <= set(MODEL_PROVIDERS) or not set(live) <= set(allowed)
-            or type(roe.get("max_calls_per_run")) is not int or not 1 <= roe["max_calls_per_run"] <= 16):
+            or type(roe.get("max_calls_per_run")) is not int or not 1 <= roe["max_calls_per_run"] <= 16
+            or type(planned_calls) is not int or not 0 <= planned_calls <= roe["max_calls_per_run"]):
         raise ValueError("live model calls are outside the approved model RoE")
     return roe
 
 
-def load_model_roe(root, providers) -> dict:
-    return validate_model_roe(json.loads((root / "security/model-roe.json").read_text()), providers)
+def load_model_roe(root, providers, planned_calls: int = 0) -> dict:
+    return validate_model_roe(json.loads((root / "security/model-roe.json").read_text()), providers, planned_calls)

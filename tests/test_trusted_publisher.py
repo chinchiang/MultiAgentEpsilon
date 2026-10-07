@@ -409,3 +409,31 @@ def test_publication_rechecks_mutable_state_before_green(bundle, monkeypatch, ch
     assert len(writes) == 1 and writes[0]["status"] == "completed"
     assert writes[-1]["conclusion"] == ("success" if change == "none" else "failure")
     assert report["decision"] == ("ALLOW" if change == "none" else "BLOCK")
+
+
+def base_binding(twin=None, branch="feature", listed=True):
+    pr = {"number": 5, "base": {"ref": "main", "repo": {"id": 10}},
+          "head": {"sha": "b"*40, "ref": "feature", "repo": {"id": 10}}}
+    run = {"head_branch": branch, "head_repository": {"id": 10}}
+    prs = ([pr] if listed else []) + ([twin] if twin else [])
+    return run, pr, prs
+
+
+@pytest.mark.parametrize("twin,branch,code", [
+    ({"number": 6, "base": {"ref": "evil", "repo": {"id": 10}}, "head": {"sha": "b"*40}}, "feature", "FOREIGN_BASE_PR"),
+    ({"number": 6, "base": {"ref": "main", "repo": {"id": 77}}, "head": {"sha": "b"*40}}, "feature", "FOREIGN_BASE_PR"),
+    (None, "twin", "RUN_HEAD_BRANCH"),
+])
+def test_run_from_a_same_head_pr_into_another_base_is_refused(twin, branch, code):
+    with pytest.raises(publisher.Denied, match=code):
+        publisher.validate_run_base(*base_binding(twin, branch), "main")
+
+
+def test_run_base_binding_accepts_the_only_pr_and_fails_closed_on_missing_listing():
+    publisher.validate_run_base(*base_binding(), "main")
+    with pytest.raises(publisher.Denied, match="PR_LISTING_INCOMPLETE"):
+        publisher.validate_run_base(*base_binding(listed=False), "main")
+    run, pr, prs = base_binding()
+    pr["head"]["repo"] = None  # deleted fork: the head repository cannot be bound
+    with pytest.raises(publisher.Denied, match="RUN_HEAD_BRANCH"):
+        publisher.validate_run_base(run, pr, prs, "main")

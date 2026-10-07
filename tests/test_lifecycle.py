@@ -92,3 +92,30 @@ def test_janitor_never_reaps_live_supervisor(tmp_path, monkeypatch):
     assert sweep_stale(tmp_path) == []
     assert work.exists()
     cleanup(tmp_path, audit.data['run_id'])
+
+
+@pytest.mark.parametrize('execution,code', [('COMPLETED', 0), ('ERROR', 1), ('CANCELLED', 0)])
+def test_worker_decision_without_cleanup_handoff_is_not_published(tmp_path, monkeypatch, execution, code):
+    monkeypatch.setattr(isolation, 'cleanup_run', lambda run: None)
+    audit = AuditRun(tmp_path, 'security')
+    report = audit.output / 'report.json'
+    command = [sys.executable, '-c',
+        'import json,sys; p=sys.argv[1]; d=json.load(open(p)); '
+        'd.update(execution=sys.argv[2], decision="ALLOW", reasons=[]); '
+        'json.dump(d, open(p, "w")); raise SystemExit(int(sys.argv[3]))', str(report), execution, str(code)]
+    assert supervise(tmp_path, audit, command, 10) == 1
+    assert audit.data['decision'] == 'BLOCK' and audit.data['execution'] == 'ERROR'
+    assert audit.data['errors'][-1]['error_type'] == 'RuntimeError'
+
+
+def test_janitor_keeps_latest_pointer_on_the_newer_run(tmp_path, monkeypatch):
+    from security_harness import lifecycle
+    monkeypatch.setattr(isolation, 'cleanup_run', lambda run: None)
+    stale = AuditRun(tmp_path, 'security')
+    lifecycle.prepare_run(tmp_path, stale.data['run_id'])
+    newer = AuditRun(tmp_path, 'security')
+    newer.finish()
+    monkeypatch.setattr(lifecycle, 'owner_alive', lambda marker: False)
+    assert sweep_stale(tmp_path) == [stale.data['run_id']]
+    assert json.loads((stale.output / 'report.json').read_text())['execution'] == 'CANCELLED'
+    assert (tmp_path / 'artifacts/latest.txt').read_text().strip() == newer.data['run_id']

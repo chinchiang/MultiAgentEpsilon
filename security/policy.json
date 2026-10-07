@@ -40,7 +40,8 @@
     },
     "G2": {
       "kind": "scan",
-      "coverage_required": true
+      "coverage_required": true,
+      "history_required": true
     },
     "AUTH": {
       "kind": "test",

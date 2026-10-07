@@ -2,6 +2,7 @@
 import asyncio
 import copy
 import json
+import os
 import signal
 import sqlite3
 import subprocess
@@ -248,8 +249,13 @@ def test_review_cli_supervision_and_explicit_live_opt_in():
     assert data['status'] == 'COMPLETE' and data['cleanup']['completed'] and data['analysis']
     denied = subprocess.run([sys.executable, '-I', str(script), '--provider', 'gemini'], capture_output=True, timeout=10)
     assert denied.returncode == 2
+    # No credentials or provider settings reach this process, so a regression cannot spend real calls.
+    offline = {k: v for k, v in os.environ.items()
+               if not k.startswith(('GEMINI_', 'GLM_', 'BEDROCK_', 'AWS_', 'HTTP_PROXY', 'HTTPS_PROXY'))
+               and k.lower() not in ('http_proxy', 'https_proxy', 'all_proxy')}
+    offline['AWS_CONFIG_FILE'] = offline['AWS_SHARED_CREDENTIALS_FILE'] = os.devnull
     excessive = subprocess.run([sys.executable, '-I', str(script), '--provider', 'gemini', '--provider', 'glm',
-                               '--provider', 'bedrock', '--live'], capture_output=True, timeout=10)
+                               '--provider', 'bedrock', '--live'], capture_output=True, timeout=10, env=offline)
     assert excessive.returncode == 2  # 18 calls rejected before any provider configuration/network I/O.
 
 

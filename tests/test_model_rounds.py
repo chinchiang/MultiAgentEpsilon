@@ -171,3 +171,21 @@ def test_diagnostic_rejects_untrusted_details_and_sampling_changes(tmp_path):
 def test_review_stage_limit_is_not_misclassified_as_unassessed():
     assert score.error_categories([{'status':'ERROR','code':'REVIEW_RESPONSE_LIMIT'},
                                    {'status':'ERROR','code':'private-raw-error'}]) == {'RESPONSE_LIMIT':1,'UNASSESSED':1}
+
+
+def test_changed_case_catalog_spends_no_calls(tmp_path, monkeypatch):
+    report = runner.initial_report(['mock-review-a'], ['B01'], str(uuid.uuid4()), 512, 1)
+    report['case_catalog_sha256'] = '0' * 64  # catalog edited after the plan was bound
+    path = tmp_path/'artifacts'/report['run_id']/'report.json'
+    life.persist(path, report); prepare_run(tmp_path, report['run_id'], operation='model-smoke')
+    async def forbidden(self, request): raise AssertionError('call spent against an unbound catalog')
+    monkeypatch.setattr(bench.MockReviewer, 'generate', forbidden)
+    assert asyncio.run(runner.run_worker(tmp_path, report['run_id'])) == 1
+    data = json.loads(path.read_text())
+    assert data['code'] == 'CONFIGURATION' and data['calls'] == []
+    assert [c['code'] for c in data['checks']] == ['CONFIGURATION']
+
+
+@pytest.mark.parametrize('code', ['TIMEOUT', 'SUPERVISOR_FAILED', 'WORKER_FAILED', 'PROVIDER_INCOMPLETE'])
+def test_supervisor_stop_reasons_are_known_categories(code):
+    assert score.error_categories([{'status': 'ERROR', 'code': code}]) == {code: 1}

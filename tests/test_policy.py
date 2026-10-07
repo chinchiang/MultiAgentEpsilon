@@ -18,7 +18,7 @@ def records():
     output[-1]["coverage_count"] = len(output[-1]["cases"])
     output[1]['evidence'] = {'coverage': {'status': 'COMPLETE', 'selected_files': 3,
         'selected_bytes': 30, 'scanned_leaves': 3, 'scanned_bytes': 30, 'expanded_bytes': 30,
-        'archives': 0, 'history_blobs': 0, 'unsupported_files': 0}}
+        'archives': 0, 'history_blobs': 0, 'unsupported_files': 0, 'history_head': 'a' * 40}}
     for row in output:
         row["created_at"] = NOW.isoformat()
     return output
@@ -30,6 +30,15 @@ def judge(rows, policy=POLICY):
 
 def test_zero_findings_with_coverage_is_allowed():
     assert judge(records()) == "ALLOW"
+
+
+@pytest.mark.parametrize('head', [None, '', 'HEAD', 'A' * 40, 'a' * 39])
+def test_history_required_scan_without_history_identity_blocks(head):
+    rows = records()
+    rows[1]['evidence']['coverage']['history_head'] = head
+    assert judge(rows) == "BLOCK"
+    del rows[1]['evidence']['coverage']['history_head']
+    assert judge(rows) == "BLOCK"
 
 
 @pytest.mark.parametrize('field,value', [('status','INCOMPLETE'), ('selected_files',1),

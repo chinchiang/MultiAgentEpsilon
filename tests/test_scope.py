@@ -59,3 +59,15 @@ def test_live_review_cli_refuses_without_a_valid_model_roe(tmp_path, monkeypatch
         review.main()
     # argparse error before any report, budget reservation or provider call exists.
     assert exit_info.value.code == 2 and created == []
+
+
+@pytest.mark.parametrize("cap,planned,allowed", [(16, 16, True), (4, 4, True), (4, 5, False), (1, 12, False),
+                                                 (4, -1, False), (4, True, False)])
+def test_planned_live_calls_must_fit_the_reviewed_per_run_cap(cap, planned, allowed):
+    from security_harness.scope import validate_model_roe
+    roe = {**MODEL_ROE, "max_calls_per_run": cap}
+    if allowed:
+        assert validate_model_roe(roe, ["gemini"], planned) is roe
+    else:
+        with pytest.raises(ValueError):
+            validate_model_roe(roe, ["gemini"], planned)

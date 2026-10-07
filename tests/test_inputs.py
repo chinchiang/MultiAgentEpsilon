@@ -91,3 +91,20 @@ def test_unreadable_directory_blocks_inventory_digest_and_scan(tmp_path, monkeyp
                 operation(tmp_path)
     finally:
         hidden.chmod(0o700)
+
+
+def test_file_swapped_for_symlink_after_inventory_is_not_followed(tmp_path):
+    from security_harness.results import read_regular
+    outside = tmp_path / "outside-secret"
+    outside.write_text("host-only content\n")
+    root = tmp_path / "candidate"
+    root.mkdir()
+    (root / "app.py").write_text("print('synthetic')\n")
+    paths = input_files(root)
+    (root / "app.py").unlink()
+    (root / "app.py").symlink_to(outside)  # swapped between inventory and read
+    with pytest.raises(OSError):
+        read_regular(paths[0], 1024)
+    with pytest.raises(ValueError, match="read limit"):
+        (root / "big.py").write_bytes(b"x" * 2048)
+        read_regular(root / "big.py", 1024)

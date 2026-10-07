@@ -34,7 +34,7 @@ class AuditRun:
         self.data["errors"].append({"stage": self.data["stage"], "error_type": type(exc).__name__})
         self.data.update(execution="ERROR", decision="BLOCK", reasons=["run failed; see redacted errors"])
 
-    def finish(self, required=()):
+    def finish(self, required=(), *, update_pointer=True):
         seen = {r["gate"] for r in self.data["records"]}
         for gate, kind in required:
             if gate not in seen:
@@ -42,6 +42,7 @@ class AuditRun:
         if self.data["execution"] == "RUNNING":
             self.data["execution"] = "COMPLETED"
         self.save()
-        pointer = "latest.txt" if self.data["operation"] == "security" else self.data["operation"] + "-latest.txt"
-        (self.output.parent / pointer).write_text(self.data["run_id"] + "\n")
+        if update_pointer:
+            pointer = "latest.txt" if self.data["operation"] == "security" else self.data["operation"] + "-latest.txt"
+            (self.output.parent / pointer).write_text(self.data["run_id"] + "\n")
         return 0 if self.data["decision"] == "ALLOW" else 1
