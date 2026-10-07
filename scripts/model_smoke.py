@@ -11,6 +11,7 @@ import uuid
 from datetime import datetime, timezone
 from dataclasses import asdict
 from pathlib import Path
+from urllib.parse import urlsplit
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
@@ -27,14 +28,27 @@ FIXTURE = Request(
     user="Reply with exactly EPSILON_SYNTHETIC_OK and no other text.", max_output_tokens=256)
 
 
+PLACEHOLDER_HOSTS = {"local.example.invalid"}
+
+
+def setting(name, required=True):
+    """Unset values and the documented .env.example placeholders are configuration
+    errors, not transport failures after a reserved call."""
+    value = os.environ[name] if required else (os.environ.get(name) or None)
+    if value is not None and (not value.strip() or value.startswith("replace-with-")
+                              or urlsplit(value).hostname in PLACEHOLDER_HOSTS):
+        raise ModelError("CONFIGURATION")
+    return value
+
+
 def configured_adapter(provider, work=None, http=None):
     if provider == "mock":
         return MockAdapter()
     if provider == "gemini":
-        return GeminiAdapter(os.environ["GEMINI_MODEL_ID"], os.environ["GEMINI_API_KEY"], http=http)
+        return GeminiAdapter(setting("GEMINI_MODEL_ID"), setting("GEMINI_API_KEY"), http=http)
     if provider == "glm":
-        return GLMAdapter(os.environ["GLM_MODEL_ID"], os.environ["GLM_CHAT_URL"], os.getenv("GLM_API_KEY"), http=http)
-    return BedrockAdapter(os.environ["BEDROCK_MODEL_ID"], os.environ["BEDROCK_REGION"],
+        return GLMAdapter(setting("GLM_MODEL_ID"), setting("GLM_CHAT_URL"), setting("GLM_API_KEY", False), http=http)
+    return BedrockAdapter(setting("BEDROCK_MODEL_ID"), setting("BEDROCK_REGION"),
                           AwsCLI(os.getenv("AWS_CLI_PATH", "aws"), run_directory=work))
 
 
@@ -101,9 +115,9 @@ async def run_worker(root, run_id):
     return 0 if report['pending_status'] == 'COMPLETE' else 1
 
 
-def require_model_roe(parser, providers):
+def require_model_roe(parser, providers, planned_calls):
     try:
-        load_model_roe(ROOT, providers)
+        load_model_roe(ROOT, providers, planned_calls)
     except (OSError, ValueError):
         parser.error("live model calls are outside the approved model RoE (security/model-roe.json)")
 
@@ -120,7 +134,7 @@ def main():
     if any(p != "mock" for p in providers) and not args.live:
         parser.error("live providers require --live")
     if args.live:
-        require_model_roe(parser, providers)
+        require_model_roe(parser, providers, sum(p != "mock" for p in providers))
     run_id = str(uuid.uuid4())
     canonical = ROOT / 'artifacts' / run_id / 'report.json'
     output = args.output or canonical

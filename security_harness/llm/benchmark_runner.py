@@ -55,7 +55,15 @@ async def run_worker(root, run_id):
         persist(path, report)
 
     try:
+        from .benchmark_score import file_digest
+        if file_digest(CASES_PATH) != report['case_catalog_sha256']:
+            # Calls must review the catalog the plan was bound to; never spend first, detect later.
+            report['code'] = 'CONFIGURATION'
+            for check in report['checks']:
+                check.update(status='ERROR', code='CONFIGURATION')
         for check in report['checks']:
+            if check['status'] != 'NOT_RUN':
+                continue
             check['status'] = 'RUNNING'
             save()
             provider, case = check['provider'], cases[check['case_id']]

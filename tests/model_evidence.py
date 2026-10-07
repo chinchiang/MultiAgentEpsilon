@@ -19,10 +19,13 @@ def remove_new_model_evidence(root: Path):
             if path.name in before or not RUN_ID.fullmatch(path.name) or path.is_symlink() or not path.is_dir():
                 continue
             try:
-                operation = json.loads((path / "report.json").read_text()).get("operation")
+                report = json.loads((path / "report.json").read_text())
             except (OSError, ValueError):
                 continue
-            if operation == "model-smoke":  # never gate evidence
+            providers = report.get("providers")
+            # Never gate evidence, and never a concurrent live run's advisory evidence.
+            if (report.get("operation") == "model-smoke" and isinstance(providers, list) and providers
+                    and all(isinstance(p, str) and p.startswith("mock") for p in providers)):
                 shutil.rmtree(path)
 
 
