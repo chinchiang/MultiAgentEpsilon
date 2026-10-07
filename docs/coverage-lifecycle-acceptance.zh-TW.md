@@ -61,4 +61,4 @@
 
 2026-10-05 再次查核：主分支仍未受保護，沒有啟用的規則集或可用的獨立審查者。以停用狀態建立供審查的規則草稿仍收到 GitHub API 的 `403 Resource not accessible by integration`。本次未建立或啟用任何遠端規則；這是 GitHub 連線的權限限制，不是工具自動核准審查拒絕。
 
-使用者指定的獨立審查者 `CatGrocery` 已加入候選分支的 `security/trust-policy.json` 與 `.github/CODEOWNERS`。GitHub 查得其目前只有讀取權限；管理者仍須授予適當的寫入審查權限並完成可信基準的審核與部署。候選分支的設定不會自動改變主分支所使用的可信政策，也不等同已取得核准。本輪沒有寄送邀請或審查通知。
+（歷史紀錄；CatGrocery 已於 2026-10-07 接受邀請，現為具 write 權限的協作者。）使用者指定的獨立審查者 `CatGrocery` 已加入候選分支的 `security/trust-policy.json` 與 `.github/CODEOWNERS`。GitHub 查得其目前只有讀取權限；管理者仍須授予適當的寫入審查權限並完成可信基準的審核與部署。候選分支的設定不會自動改變主分支所使用的可信政策，也不等同已取得核准。本輪沒有寄送邀請或審查通知。

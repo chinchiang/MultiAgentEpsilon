@@ -9,7 +9,7 @@
 - main 由規則集 24512048 保護：沒有 bypass、須經 PR 與 code owner 核准、推送新 commit 後舊核准失效、最後推送須另獲核准，必要檢查為 GitHub Actions App 15368 的 `trusted-security-pilot`。2026-10-06 為首次基準遷移由擁有者暫時停用，本文件合併後恢復為 active；最新狀態以 `python3 scripts/audit_merge_protection.py` 讀回為準。
 - 這個必要檢查仍可由任何 workflow 以同名產生。專用 App 的 `epsilon/trusted-merge` 尚未建立、部署或綁定；過渡期間，審查者在核准或合併前以 `scripts/verify_required_check.py --pr <編號>` 核對檢查來源。
 - **首次基準遷移已完成（2026-10-06）：** 擁有者暫時停用規則集後，以 merge commit 合併 [#6](https://github.com/chinchiang/MultiAgentEpsilon/pull/6)（`da567d8`）與 [#7](https://github.com/chinchiang/MultiAgentEpsilon/pull/7)（`0ac31cb`）。之後的 PR 由 main 上的新 evaluator 以 `pull_request_target` 評估。
-- **仍缺獨立審查者：** CODEOWNERS 已列 chinchiang 與 CatGrocery，但 CatGrocery 尚不是具寫入權限的協作者。規則集恢復後，作者為 chinchiang 的 PR 仍需另一位具寫入權限的 code owner 核准才能合併；涉及受保護路徑的 PR 另需 `security/trust-policy.json` 中非作者的基準審查者核准，guard 才會放行。
+- **獨立審查者已就位（2026-10-07）：** CatGrocery 已接受協作邀請，具 write 權限，並列於 base 分支的 CODEOWNERS 與 `security/trust-policy.json`；`scripts/audit_merge_protection.py` 讀回「base 分支 CODEOWNERS 有獨立審查者」與「有可用的獨立審查者」皆為 true。作者為 chinchiang 的 PR，由 CatGrocery 對目前 head 核准、`verify_required_check.py` 為 ALLOW 後即可依規則合併，不需再停用規則集；涉及受保護路徑的變更，guard 也只採計這類非作者、具寫入權限的基準核准。
 
 ### 遷移後的真實流程驗收（2026-10-06）
 
@@ -44,7 +44,7 @@
 
 ### 仍待完成
 
-- **需擁有者操作：** 邀請獨立審查者並取得寫入權限（之後的 PR 才能依規則合併）、建立並部署專用 App、把 `epsilon/trusted-merge` 加入規則集，並以普通開發者身分完成繞過驗收。首次基準遷移已於 2026-10-06 完成。
+- **需擁有者操作：** 建立並部署專用 App、把 `epsilon/trusted-merge` 加入規則集，並由非管理者開發者（CatGrocery）實際完成繞過驗收。首次基準遷移（2026-10-06）與獨立審查者（2026-10-07）已完成。
 - **功能面：** G3、完整 G5、SBOM／SCA／CVE、ASVS 產品適用性判定、證據簽章與正式發布、GLM 真實推論與結構化輸出、較大樣本的跨家族穩定性與偏誤實驗（2026-10-06 已完成 B07／B08 兩輪的雙模型小樣本驗收，見 [多輪盲測](repeated-review.zh-TW.md)），以及 W15–W25。
 - 本地完整流程僅支援 Linux x86_64 與 Docker；Windows 需使用 WSL。
 
