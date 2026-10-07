@@ -27,6 +27,8 @@
 
 深入審查後修正的項目（均附回歸測試）。驗收：commit `607b8c6` 的遠端手動 [run 37567019081](https://github.com/chinchiang/MultiAgentEpsilon/actions/runs/37567019081)（`manual-security-evaluation`）共 610 項測試全過、0 失敗；修正版 18／0 ALLOW、缺陷版恰好 6 個 seeded findings BLOCK，兩者的 G2 `history_head` 都是候選自己的 commit；證據自我檢查 PUBLISHABLE（610 項）。之後的 commit 只改文件。
 
+PR #12 已由 CatGrocery 對最新 head `58d9bc0` 獨立核准，正式 [run 37568335787／attempt 2](https://github.com/chinchiang/MultiAgentEpsilon/actions/runs/37568335787/attempts/2) 執行舊 main 基準的 532 項測試全過，來源／digest／18 個正例及 6 個指定缺陷／清理均已核對。2026-10-07 在規則集維持 active、無 bypass 的情況下合併為 `41339c6`；合併後 main [run 37598381087](https://github.com/chinchiang/MultiAgentEpsilon/actions/runs/37598381087) 執行新基準的 610 項測試全過，證據自我檢查 PUBLISHABLE。532 與 610 分別屬於舊基準與新基準，不能混用。
+
 - **候選 git 設定不能在 host 執行程式：** 所有對候選 repository 的 git 呼叫改經 `security_harness/candidate_git.py`，停用 fsmonitor／hooks／transport、清除 `GIT_*` 環境變數，並以明確 `--git-dir` 限定候選自己的 `.git` 目錄。
 - **G2 必須涵蓋候選自己的歷史：** 政策新增 `history_required`；沒有 `.git`、沒有 commit，或位於外層 repo 內的子目錄都不能 ALLOW。
 - **壓縮檔中繼資料：** zip／gzip 的註解、檔名與 extra 欄位一併掃描；zip 中未列出的位元組、帶資料的目錄項目，以及 tar 結尾後的資料一律阻擋。
@@ -37,6 +39,13 @@
 - **模型 RoE：** `max_calls_per_run` 實際與規劃的 live 呼叫數比較；worker 在送出任何呼叫前核對案例目錄雜湊；supervisor 停止原因列入固定錯誤分類；`.env.example` 的佔位值判為 `CONFIGURATION`；報告新增遮蔽 ARN／帳號的 `model_label`。
 - **測試安全：** CLI 超額測試改以不含任何模型憑證的環境執行；測試清理只刪除全為 mock 供應商的證據。
 - **其他：** workflow 的 concurrency 依事件分組，手動執行不會取消 main 的 push run；掃描與隔離複製以不跟隨 symlink 的方式讀檔；所有 Docker 呼叫固定同一 daemon；worker 資源限額只定義一次；移除未使用的 `scripts/auth_worker.py`；公開文件移除 AWS 帳號識別資訊。
+
+## 2026-10-07 部署準備補強
+
+- 發布成功檢查前再次讀取所有 PR，核對 head 分支、repository 與 base 綁定；驗證途中新增同 head、不同 base 的 PR（包含已關閉者）也不能放行。
+- live 設定使用逐層目錄 descriptor，拒絕可替換上層目錄與中途 symlink，保留 root 持有、唯讀的檔案要求。
+- `scripts/prepare_publisher_deployment.py` 產生固定 SHA 的部署封存、評估器／政策摘要與 SHA256SUMS；工作樹須乾淨，既有輸出不可覆寫，封存實際清冊須與評估器相同。App 識別值未提供時保留缺值。
+- 本輪新增 17 項回歸，完整基準下限為 627。部署資料產生、離線測試及手動 CI 均不能代替獨立審查、正式 App 部署或遠端繞過驗收。
 
 ## 仍待完成
 

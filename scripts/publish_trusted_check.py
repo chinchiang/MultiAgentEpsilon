@@ -24,7 +24,7 @@ def read_config(path, live, owner_uid=0):
     if live:
         need(not path.resolve(strict=True).is_relative_to(ROOT.resolve())
              and not path.is_symlink(), "CONFIG_MUST_BE_EXTERNAL")
-    fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+    fd = open_config(path, owner_uid) if live else os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
     with os.fdopen(fd, "rb") as stream:
         info = os.fstat(stream.fileno())
         need(stat.S_ISREG(info.st_mode) and info.st_size <= 1024**2, "CONFIG_FILE")
@@ -32,6 +32,28 @@ def read_config(path, live, owner_uid=0):
             # The service account must not be able to rewrite its own trust policy.
             need(not info.st_mode & 0o022 and info.st_uid == owner_uid, "CONFIG_WRITABLE")
         return stream.read(1024**2 + 1)
+
+
+def open_config(path, owner_uid):
+    """Walk trusted directory descriptors; a file's owner alone cannot protect it
+    from replacement through a writable parent or an intermediate symlink."""
+    need(".." not in path.parts, "CONFIG_PARENT")
+    directory = os.open("/", os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    try:
+        for part in path.parts[1:-1]:
+            try:
+                next_directory = os.open(part, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=directory)
+            except OSError:
+                raise Denied("CONFIG_PARENT") from None
+            os.close(directory)
+            directory = next_directory
+            info = os.fstat(directory)
+            # Root-owned sticky directories (e.g. /tmp) protect root-owned children.
+            sticky_root = info.st_uid == 0 and info.st_mode & stat.S_ISVTX
+            need(info.st_uid in (0, owner_uid) and (not info.st_mode & 0o022 or sticky_root), "CONFIG_PARENT")
+        return os.open(path.name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=directory)
+    finally:
+        os.close(directory)
 
 
 def load_state(path):
