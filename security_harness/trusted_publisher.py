@@ -486,6 +486,7 @@ def publish(client, settings, gate_policy, number, run_id=None, state=None):
         run = client.api(f"{prefix}/actions/runs/{run_id}")
         need(run["run_attempt"] == proof["run_attempt"] and run["status"] == "completed"
              and run["conclusion"] == "success" and run["head_sha"] == head, "RUN_CHANGED")
+        validate_run_base(run, fresh, client.pages(f"{prefix}/pulls?state=all"), settings["base_branch"])
         reject_newer_runs(run, head_runs(client, settings, head), head)
         reviews = client.pages(f"{prefix}/pulls/{number}/reviews")
         permissions = {r["user"]["login"]: client.api(f"{prefix}/collaborators/{urllib.parse.quote(r['user']['login'], safe='')}/permission")["role_name"]

@@ -22,6 +22,19 @@
 
 先完成可信基準的獨立審查、首次遷移與完整驗證。不能直接採用 PR 分支或手動 CI 成功當成核准。首次基準遷移已於 2026-10-06 完成，CatGrocery 也已於 2026-10-07 成為具寫入權限的審查者；部署前仍須確認設定中的 `evaluator_sha` 是已經審查合併的 main commit，基準不會自動授權評分器更新。涉及規則例外的遷移須經擁有者明確授權，本程式不會移除既有規則。
 
+選定已審查合併、測試完成的乾淨 checkout 後，可先產生不含憑證的部署資料：
+
+```bash
+python3.12 -I scripts/prepare_publisher_deployment.py \
+  --evaluator-sha <已核准的完整-main-SHA> \
+  --app-id <真正-App-ID> --installation-id <真正-Installation-ID> \
+  --output-dir /受控目錄/epsilon-deployment
+```
+
+輸出包含 `app.tar`、`publisher.json`、原樣複製的 `gate-policy.json`、`preparation.json` 與 `SHA256SUMS`。工作樹有修改、未追蹤檔案、HEAD 與指定 SHA 不一致、輸出位於 checkout 內，或輸出目錄已存在時均拒絕；不會覆寫正式設定。也會核對封存的實際逐檔內容、執行權限與評估器清冊一致，`export-ignore` 或 `export-subst` 造成的刪減或替換均拒絕。還沒有 App 時可省略兩個 ID，先準備其餘資料，缺值仍保持 `null`，live 模式不能使用。
+
+本工具只固定本地輸入，不查證獨立核准、不部署服務、不授權基準更新。部署管理者仍須確認此 SHA 的 GitHub 審查與正式驗收。傳送至受控主機後先執行 `sha256sum -c SHA256SUMS`，再由 root 將程式封存解至 `/opt/epsilon-publisher/app`、設定裝至 `/etc/epsilon-publisher`；程式及設定的上層目錄也須由 root 持有且不可供服務帳號寫入，不能經由中途 symlink。live 模式以逐層目錄 descriptor 核對後開啟設定，避免只保護檔案卻可從上層替換。root 持有的 sticky 目錄可作祖先，但其下仍必須是受保護目錄。
+
 | 位置 | 用途與權限 |
 |---|---|
 | `/opt/epsilon-publisher/app` | 已審查版本的程式；管理者持有，服務帳號唯讀 |
@@ -71,7 +84,7 @@ python3.12 -I /opt/epsilon-publisher/app/scripts/publish_trusted_check.py \
 ```bash
 systemd-analyze verify /etc/systemd/system/epsilon-publisher@.service /etc/systemd/system/epsilon-publisher@.timer
 systemctl daemon-reload
-systemctl enable --now epsilon-publisher@5.timer
+systemctl enable --now epsilon-publisher@<驗收-PR-編號>.timer
 ```
 
 同一儲存庫的所有實例共用執行鎖。每次完成後等待 120 秒；每個 PR 需啟用對應 timer。已驗證的 blob 摘要以內容位址快取在狀態檔，每個週期約 20 次 API 請求，遠低於安裝權杖的速率上限。程式限制 300 次 API 請求與 API 階段 240 秒；unit 限制總執行 300 秒、256 MiB 記憶體及 64 個工作項目。來源核對限 200 個檔案、單檔 1 MiB、總計 20 MiB；超限保持失敗，不能縮減清冊後放行。

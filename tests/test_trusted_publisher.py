@@ -375,15 +375,19 @@ def test_seeded_defect_must_have_real_complete_negative_evidence(bundle, attack)
     with pytest.raises(ValueError): publisher.validate_bundle(**bundle)
 
 
-@pytest.mark.parametrize("change", ["none", "head", "rerun", "new_run", "review_dismissed", "review_permission"])
+@pytest.mark.parametrize("change", ["none", "head", "rerun", "new_run", "review_dismissed", "review_permission",
+                                    "foreign_base", "run_branch"])
 def test_publication_rechecks_mutable_state_before_green(bundle, monkeypatch, change):
     writes = []
     gets = 0
     run = copy.deepcopy(bundle["run"])
     reviews = copy.deepcopy(bundle["reviews"])
     fresh = copy.deepcopy(bundle["pr"])
+    fresh["head"].update(ref="feature", repo={"id": 10})
+    run.update(head_branch="feature", head_repository={"id": 10})
     if change == "head": fresh["head"]["sha"] = "d"*40
     if change == "rerun": run["run_attempt"] = 2
+    if change == "run_branch": run["head_branch"] = "other-feature"
     if change == "review_dismissed": reviews.append({**reviews[0], "id": 12, "state": "DISMISSED"})
     class Client:
         def api(self, path, method="GET", payload=None):
@@ -401,7 +405,13 @@ def test_publication_rechecks_mutable_state_before_green(bundle, monkeypatch, ch
                 return {"total_count": len(listing), "workflow_runs": listing}
             if "/permission" in path: return {"role_name": "read" if change == "review_permission" else "write"}
             raise AssertionError("unexpected request")
-        def pages(self, path): return reviews
+        def pages(self, path):
+            if path.endswith("/pulls?state=all"):
+                twin = copy.deepcopy(fresh)
+                twin.update(number=6, state="closed")
+                twin["base"]["ref"] = "untrusted"
+                return [fresh, twin] if change == "foreign_base" else [fresh]
+            return reviews
     monkeypatch.setattr(publisher, "collect", lambda *args: {
         "head_sha": "b"*40, "base_sha": "a"*40, "run_id": 100, "run_attempt": 1, "review_ids": [11],
         "excluded_identities": []})
@@ -409,6 +419,32 @@ def test_publication_rechecks_mutable_state_before_green(bundle, monkeypatch, ch
     assert len(writes) == 1 and writes[0]["status"] == "completed"
     assert writes[-1]["conclusion"] == ("success" if change == "none" else "failure")
     assert report["decision"] == ("ALLOW" if change == "none" else "BLOCK")
+
+
+@pytest.mark.parametrize("attack", ["writable_parent", "symlink_parent"])
+def test_live_config_rejects_replaceable_parent(tmp_path, attack):
+    import os
+    from scripts.publish_trusted_check import read_config
+    folder = tmp_path / "config"
+    folder.mkdir()
+    config = folder / "publisher.json"
+    config.write_text("{}")
+    config.chmod(0o444)
+    if attack == "writable_parent":
+        folder.chmod(0o777)
+    else:
+        link = tmp_path / "linked"
+        link.symlink_to(folder, target_is_directory=True)
+        config = link / config.name
+    with pytest.raises(publisher.Denied, match="CONFIG_PARENT"):
+        read_config(config, live=True, owner_uid=os.getuid())
+
+
+def test_config_validation_is_available_before_installing_root_owned_paths(tmp_path):
+    from scripts.publish_trusted_check import read_config
+    config = tmp_path / "publisher.json"
+    config.write_text("{}")
+    assert read_config(config, live=False) == b"{}"
 
 
 def base_binding(twin=None, branch="feature", listed=True):
