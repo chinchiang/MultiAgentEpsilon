@@ -6,7 +6,7 @@ import re
 import httpx
 
 
-from .processes import bounded_output, docker_environment
+from .processes import bounded_output, docker_command, docker_environment
 
 
 class BoundedClient:
@@ -17,8 +17,7 @@ class BoundedClient:
 
     def request(self, method, path, *, headers=None, json=None):
         payload = json_codec.dumps({'method': method, 'path': path, 'headers': headers or {}, 'json': json}).encode()
-        command = ['docker', '--host=unix:///var/run/docker.sock', 'exec', '-i', self.container,
-                   'python', '-I', '/opt/epsilon/request.py']
+        command = docker_command('exec', '-i', self.container, 'python', '-I', '/opt/epsilon/request.py')
         data = json_codec.loads(bounded_output(command, payload, env=docker_environment()))
         if (not isinstance(data, dict) or set(data) != {'status', 'body'} or
                 type(data['status']) is not int or not 100 <= data['status'] <= 599 or

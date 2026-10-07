@@ -40,7 +40,8 @@ def test_archived_secret_is_scanned_even_with_wrong_extension(tmp_path, kind):
     assert result['findings'][0]['file'].startswith('ordinary.py!')
     assert canary.decode() not in json.dumps(result)
     assert result['coverage']['archives'] == 1
-    assert result['coverage']['scanned_leaves'] == 1
+    # The member payload plus the container's own readable strings.
+    assert result['coverage']['scanned_leaves'] == 2
     assert result['coverage']['status'] == 'COMPLETE'
 
 
@@ -159,3 +160,105 @@ def test_repository_binary_allowlist_is_valid_and_reviewed():
     from security_harness.scan_content import load_binary_allowlist
     from tests.test_gitleaks import ROOT
     assert isinstance(load_binary_allowlist(ROOT / 'security/binary-allowlist.json'), frozenset)
+
+
+def canary_bytes():
+    return ('VIBE_TEST_' + 'SECRET_' + secrets.token_hex(16)).encode()
+
+
+def zipped(build):
+    stream = io.BytesIO()
+    with zipfile.ZipFile(stream, 'w', compression=zipfile.ZIP_DEFLATED) as output:
+        build(output)
+    return stream.getvalue()
+
+
+def hidden_in_zip_comment(canary):
+    def build(output):
+        output.writestr('clean.txt', 'synthetic')
+        output.comment = canary
+    return zipped(build)
+
+
+def hidden_in_member_comment(canary):
+    def build(output):
+        item = zipfile.ZipInfo('clean.txt')
+        item.comment = canary
+        output.writestr(item, 'synthetic')
+    return zipped(build)
+
+
+def hidden_in_comment_only_zip(canary):
+    return zipped(lambda output: setattr(output, 'comment', canary))
+
+
+def hidden_in_gzip_name(canary):
+    stream = io.BytesIO()
+    with gzip.GzipFile(filename=canary.decode(), mode='wb', fileobj=stream) as output:
+        output.write(b'synthetic')
+    return stream.getvalue()
+
+
+@pytest.mark.parametrize('build', [hidden_in_zip_comment, hidden_in_member_comment,
+                                   hidden_in_comment_only_zip, hidden_in_gzip_name])
+def test_secret_in_archive_metadata_is_scanned(tmp_path, build):
+    canary = canary_bytes()
+    (tmp_path / 'bundle.bin').write_bytes(build(canary))
+    result = run(tmp_path)
+    assert [f['file'] for f in result['findings']] == ['bundle.bin!container-strings']
+    assert canary.decode() not in json.dumps(result)
+
+
+def zip_directory_with_data(canary):
+    def build(output):
+        output.writestr(zipfile.ZipInfo('notes/'), canary)
+    return zipped(build)
+
+
+def zip_with_unlisted_payload(canary):
+    data = zipped(lambda output: output.writestr('clean.txt', 'synthetic'))
+    hidden = zipped(lambda output: output.writestr('secret.txt', canary))
+    # Prepend a compressed, unlisted local entry; offsets in the central directory still resolve.
+    with zipfile.ZipFile(io.BytesIO(data)) as archive:
+        start = archive.start_dir
+    local = hidden[:hidden.index(b'PK\x01\x02')]
+    central = bytearray(data[start:])
+    central[42:46] = len(local).to_bytes(4, 'little')
+    end = bytearray(central[central.index(b'PK\x05\x06'):])
+    end[16:20] = (len(local) + start).to_bytes(4, 'little')
+    return local + data[:start] + bytes(central[:central.index(b'PK\x05\x06')]) + bytes(end)
+
+
+def tar_with_trailing_data(canary):
+    stream = io.BytesIO()
+    with tarfile.open(fileobj=stream, mode='w', format=tarfile.USTAR_FORMAT) as output:
+        item = tarfile.TarInfo('clean.txt')
+        item.size = 9
+        output.addfile(item, io.BytesIO(b'synthetic'))
+    return stream.getvalue() + gzip.compress(canary)
+
+
+def tar_directory_with_data(canary):
+    stream = io.BytesIO()
+    with tarfile.open(fileobj=stream, mode='w', format=tarfile.USTAR_FORMAT) as output:
+        item = tarfile.TarInfo('notes')
+        item.type = tarfile.DIRTYPE
+        item.size = len(canary)
+        output.addfile(item, io.BytesIO(canary))
+    return stream.getvalue()
+
+
+@pytest.mark.parametrize('build', [zip_directory_with_data, zip_with_unlisted_payload,
+                                   tar_with_trailing_data, tar_directory_with_data])
+def test_unaccounted_archive_bytes_block(tmp_path, build):
+    (tmp_path / 'bundle.bin').write_bytes(build(canary_bytes()))
+    with pytest.raises(UnsupportedContent):
+        run(tmp_path)
+
+
+def test_stored_zip_member_is_not_double_counted(tmp_path):
+    stream = io.BytesIO()
+    with zipfile.ZipFile(stream, 'w', compression=zipfile.ZIP_STORED) as output:
+        output.writestr('credential.txt', canary_bytes())
+    (tmp_path / 'bundle.zip').write_bytes(stream.getvalue())
+    assert [f['file'] for f in run(tmp_path)['findings']] == ['bundle.zip!credential.txt']

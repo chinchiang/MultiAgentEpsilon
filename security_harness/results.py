@@ -4,6 +4,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 import stat
 import tempfile
 from datetime import datetime, timezone
@@ -29,6 +30,20 @@ def file_identity(path: Path) -> tuple[os.stat_result, str]:
     if identity(before) != identity(after) or identity(after) != identity(current):
         raise ValueError("input changed while hashing")
     return before, digest
+
+
+def read_regular(path: Path, limit: int) -> bytes:
+    """Bytes of a regular file read without following a final symlink, so content
+    swapped in after the inventory was taken cannot be scanned or copied instead."""
+    fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+    with os.fdopen(fd, "rb") as stream:
+        info = os.fstat(stream.fileno())
+        if not stat.S_ISREG(info.st_mode):
+            raise ValueError("non-regular input")
+        data = stream.read(limit + 1)
+    if len(data) > limit:
+        raise ValueError("input exceeds read limit")
+    return data
 
 
 def digest_file(path: Path) -> str:
@@ -155,6 +170,9 @@ def decide(records: list[dict], policy: dict, subject: str, policy_digest: str,
                         coverage['selected_files'] != record['coverage_count'] or coverage['unsupported_files'] != 0 or
                         type(coverage.get('reviewed_binaries', 0)) is not int or coverage.get('reviewed_binaries', 0) < 0):
                     raise ValueError('incomplete scan coverage')
+                if (policy['gate_contracts'][gate].get('history_required') and
+                        not re.fullmatch('[0-9a-f]{40}|[0-9a-f]{64}', str(coverage.get('history_head')))):
+                    raise ValueError('history coverage missing')
             if record["kind"] == "test":
                 validate_cases(record["cases"], policy["gate_contracts"][gate])
                 if (record["coverage_count"] != len(record["cases"]) or

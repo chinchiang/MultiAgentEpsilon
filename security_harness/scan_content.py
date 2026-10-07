@@ -50,6 +50,39 @@ def printable_strings(data):
     return b"\n".join(runs) + b"\n"
 
 
+def zip_payloads(data, archive):
+    """Payload ranges of the listed members. Every byte before the central directory
+    must belong to one, so no compressed payload can hide between or before entries."""
+    position = 0
+    payloads = []
+    for member in sorted(archive.infolist(), key=lambda m: m.header_offset):
+        if member.header_offset != position or data[position:position+4] != b'PK\x03\x04':
+            raise UnsupportedContent("unaccounted zip bytes")
+        names = int.from_bytes(data[position+26:position+28], 'little')
+        extra = int.from_bytes(data[position+28:position+30], 'little')
+        position += 30 + names + extra
+        payloads.append((position, member.compress_size))
+        position += member.compress_size
+        if member.flag_bits & 0x08:
+            sizes = (16, 24) if data[position:position+4] == b'PK\x07\x08' else (12, 20)
+            following = [m.header_offset for m in archive.infolist() if m.header_offset > member.header_offset]
+            target = min(following, default=archive.start_dir)
+            if target - position not in sizes:
+                raise UnsupportedContent("unaccounted zip bytes")
+            position = target
+    if position != archive.start_dir:
+        raise UnsupportedContent("unaccounted zip bytes")
+    return payloads
+
+
+def outside(data, payloads):
+    """Container bytes with member payloads (scanned as their own leaves) blanked."""
+    masked = bytearray(data)
+    for start, size in payloads:
+        masked[start:start+size] = bytes(size)
+    return bytes(masked)
+
+
 class ContentInventory:
     def __init__(self, directory, limits=LIMITS, reviewed_binaries=frozenset()):
         self.directory = directory
@@ -87,17 +120,21 @@ class ContentInventory:
             if depth >= self.limits.max_archive_depth:
                 raise ResourceLimit("archive recursion depth exceeded")
             self.archives += 1
+        payloads = []
         if is_gzip:
             self.member('gzip-stream')
             with gzip.GzipFile(fileobj=io.BytesIO(data)) as stream:
                 self.add(self.read(stream), origin + '!gzip', scope=scope, depth=depth+1, object_id=object_id)
         elif is_zip:
             with zipfile.ZipFile(io.BytesIO(data)) as archive:
+                payloads = zip_payloads(data, archive)
                 for member in archive.infolist():
                     self.member(member.filename)
                     if member.flag_bits & 1 or (member.external_attr >> 16) & 0o170000 == 0o120000:
                         raise UnsupportedContent("encrypted or symlink archive member")
                     if member.is_dir():
+                        if member.file_size or member.compress_size > 2:
+                            raise UnsupportedContent("directory archive member carries data")
                         continue
                     if member.file_size > self.limits.max_file_bytes:
                         raise ResourceLimit("archive member too large")
@@ -108,7 +145,10 @@ class ContentInventory:
             with tarfile.open(fileobj=io.BytesIO(data), mode='r:') as archive:
                 for member in archive:
                     self.member(member.name)
+                    payloads.append((member.offset_data, member.size))
                     if member.isdir():
+                        if member.size:
+                            raise UnsupportedContent("directory archive member carries data")
                         continue
                     if not member.isfile():
                         raise UnsupportedContent("non-regular tar member")
@@ -117,6 +157,12 @@ class ContentInventory:
                     with archive.extractfile(member) as stream:
                         self.add(self.read(stream), origin + '!' + member.name,
                                  scope=scope, depth=depth+1, object_id=object_id)
+                # Bytes after the last member (end-of-archive padding included) must be zero.
+                if data[archive.offset:].strip(b'\x00'):
+                    raise UnsupportedContent("data after tar end-of-archive")
+        if is_gzip or is_zip or is_tar:
+            # Headers, names, comments and extra fields are not member payloads.
+            self.leaf(printable_strings(outside(data, payloads)), origin + '!container-strings', scope, object_id)
         else:
             if not is_text(data):
                 if hashlib.sha256(data).hexdigest() not in self.reviewed_binaries:
@@ -124,8 +170,11 @@ class ContentInventory:
                 # A reviewed asset is still scanned for embedded plaintext secrets.
                 self.reviewed += 1
                 data, origin = printable_strings(data), origin + '!strings'
-            if len(self.entries) >= self.limits.max_files:
-                raise ResourceLimit("scan leaf count exceeded")
-            name = f'input-{len(self.entries):06d}.txt'
-            (self.directory / name).write_bytes(data)
-            self.entries[name] = {'file': origin, 'scope': scope, 'bytes': len(data), 'object_id': object_id}
+            self.leaf(data, origin, scope, object_id)
+
+    def leaf(self, data, origin, scope, object_id):
+        if len(self.entries) >= self.limits.max_files:
+            raise ResourceLimit("scan leaf count exceeded")
+        name = f'input-{len(self.entries):06d}.txt'
+        (self.directory / name).write_bytes(data)
+        self.entries[name] = {'file': origin, 'scope': scope, 'bytes': len(data), 'object_id': object_id}

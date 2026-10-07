@@ -8,7 +8,9 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
+from security_harness import candidate_git
 from security_harness.audit import AuditRun
+from security_harness.limits import WORKER_RLIMITS
 from security_harness.results import decide, digest_file, subject_digest, validate_cases, validate_policy
 from security_harness.preflight import verify
 from security_harness.secrets import scan
@@ -45,7 +47,8 @@ def main(audit=None, defer_final=False):
         audit.stage("G2")
         try:
             scanner = json.loads((ROOT / "security/tools.lock.json").read_text())["gitleaks"]
-            data = scan(candidate, ROOT / ".tools/gitleaks", ROOT / "security/gitleaks.toml", scanner["binary_sha256"])
+            data = scan(candidate, ROOT / ".tools/gitleaks", ROOT / "security/gitleaks.toml", scanner["binary_sha256"],
+                        require_history=True)
             audit.add("G2", "COMPLETED", "scan", data["targets"], len(data["findings"]),
                       "real redacted Gitleaks scan", evidence=data, scanner_version=scanner["version"])
         except Exception as exc:
@@ -84,8 +87,7 @@ def main(audit=None, defer_final=False):
             raise ValueError("source changed during execution")
         for record in audit.data['records']:
             head = record.get('evidence', {}).get('coverage', {}).get('history_head')
-            if head and subprocess.check_output(['git', '-C', str(candidate), 'rev-parse', 'HEAD'],
-                                                text=True, timeout=10).strip() != head:
+            if head and candidate_git.head(candidate) != head:
                 raise ValueError('history changed during execution')
         audit.data["limitations"] = ["unsigned local evidence", "G1 metadata only, no SCA",
                                      "no full ASVS verification", "no real LLM calls"]
@@ -111,9 +113,7 @@ def supervised_main():
         parser.add_argument("--candidate", type=Path, default=ROOT)
         args = parser.parse_args()
         roe = validate_roe(json.loads((ROOT / "security/roe.json").read_text()))
-        audit.data["resource_limits"] = {"total_seconds": roe["max_total_seconds"],
-            "address_space_bytes": 8*1024**3, "per_process_data_bytes": 512*1024**2, "per_process_cpu_seconds": 120,
-            "per_file_output_bytes": 64*1024**2, "file_descriptors": 256}
+        audit.data["resource_limits"] = {"total_seconds": roe["max_total_seconds"], **WORKER_RLIMITS}
         audit.save()
         code = supervise(ROOT, audit,
             [sys.executable, "-I", str(ROOT / "scripts/security_worker.py"), audit.data["run_id"],

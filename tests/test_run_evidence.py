@@ -29,7 +29,7 @@ def test_orchestrator_blocks_incomplete_worker_output(tmp_path, monkeypatch, cas
     monkeypatch.setattr(run_security, "ROOT", fixture_root(tmp_path))
     monkeypatch.setattr(sys, "argv", ["run_security"])
     monkeypatch.setattr(run_security, "verify", lambda *a: ["synthetic"])
-    monkeypatch.setattr(run_security, "scan", lambda *a: {"targets": 1, "findings": []})
+    monkeypatch.setattr(run_security, "scan", lambda *a, **k: {"targets": 1, "findings": []})
     monkeypatch.setattr(isolation, "cleanup_run", lambda *a: None)
     with patch.object(run_security.subprocess, "run", return_value=subprocess.CompletedProcess([], 0, json.dumps({"cases": cases, "isolation": {}}), "")):
         assert run_security.main() == 1
@@ -67,7 +67,7 @@ def test_timeout_cleans_owned_isolation_and_records_timeout(tmp_path, monkeypatc
     monkeypatch.setattr(run_security, "ROOT", fixture_root(tmp_path))
     monkeypatch.setattr(sys, "argv", ["run_security"])
     monkeypatch.setattr(run_security, "verify", lambda *a: ["synthetic"])
-    monkeypatch.setattr(run_security, "scan", lambda *a: {"targets": 1, "findings": []})
+    monkeypatch.setattr(run_security, "scan", lambda *a, **k: {"targets": 1, "findings": []})
     cleaned = []
     monkeypatch.setattr(isolation, "cleanup_run", cleaned.append)
     with patch.object(run_security.subprocess, "run", side_effect=subprocess.TimeoutExpired("worker", 120)):

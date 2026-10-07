@@ -5,10 +5,8 @@ This is Linux container isolation, not protection against host-kernel exploits.
 """
 import hashlib
 import json
-import os
 import re
 import secrets
-import shutil
 import subprocess
 import tempfile
 import time
@@ -21,7 +19,8 @@ from .authorization import evaluate
 from .fixture_database import connect, seed
 from .inputs import input_files
 from .container_http import BoundedClient, docker_environment
-from .results import digest_file
+from .processes import docker_command
+from .results import digest_file, read_regular
 
 ROOT = Path(__file__).resolve().parents[1]
 PROXY_NAMES = ("HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "NO_PROXY", "http_proxy", "https_proxy", "all_proxy", "no_proxy")
@@ -29,7 +28,7 @@ PROXY_NAMES = ("HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "NO_PROXY", "http_proxy
 
 def docker(*args, check=True, timeout=45):
     env = docker_environment()
-    return subprocess.run(["docker", "--host=unix:///var/run/docker.sock", *args],
+    return subprocess.run(docker_command(*args),
                           capture_output=True, text=True, check=check, timeout=timeout, env=env)
 
 
@@ -38,8 +37,8 @@ def run_flags(name, run_id):
              "--label", "epsilon.run=" + run_id,
              "--network=none", "--read-only", "--cap-drop=ALL", "--security-opt=no-new-privileges",
              "--cpus=1", "--memory=512m", "--pids-limit=128", "--log-driver=none"]
-    for name in PROXY_NAMES:
-        flags.extend(("--env", name + "="))
+    for variable in PROXY_NAMES:
+        flags.extend(("--env", variable + "="))
     return flags
 
 
@@ -78,14 +77,13 @@ def run_isolated(candidate: Path, variant="fixed", run_id=None) -> dict:
     with tempfile.TemporaryDirectory(prefix="epsilon-iso-") as directory:
         work = Path(directory)
         work.chmod(0o755)
-        for name in ("db",):
-            (work / name).mkdir(mode=0o777)
-            (work / name).chmod(0o777)
+        (work / "db").mkdir(mode=0o777)
+        (work / "db").chmod(0o777)
         (work / "candidate/fixture_app").mkdir(parents=True)
         for path in paths:
             target = work / "candidate/fixture_app" / path.relative_to(source)
             target.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copyfile(path, target)
+            target.write_bytes(read_regular(path, 1024 * 1024))
             target.chmod(0o444)
         for path in [work / "candidate", *list((work / "candidate").rglob("*"))]:
             if path.is_dir():

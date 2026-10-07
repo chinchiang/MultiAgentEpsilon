@@ -11,7 +11,6 @@ import hashlib
 import io
 import json
 import os
-import subprocess
 import sys
 import zipfile
 from datetime import datetime, timezone
@@ -19,12 +18,13 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
+from security_harness import candidate_git
 from security_harness.results import subject_digest, write_json
 from security_harness.trusted_publisher import Denied, strict_json, unpack_evidence, validate_evidence
 
 
 def commit(path):
-    return subprocess.check_output(["git", "-C", str(path), "rev-parse", "HEAD"], text=True, timeout=10).strip()
+    return candidate_git.head(path)
 
 
 def artifact_zip(workspace):

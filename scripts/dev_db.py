@@ -6,10 +6,14 @@ import os
 import secrets
 import socket
 import subprocess
+import sys
 import time
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
+from security_harness.processes import docker_command, docker_environment
+
 STATE = ROOT / ".state/db.json"
 NAME = "epsilon-fixture-db"
 NETWORK = "epsilon-fixture-internal"
@@ -17,7 +21,8 @@ LABEL = "epsilon.fixture=synthetic-only"
 
 
 def docker(*args, check=True):
-    return subprocess.run(["docker", *args], check=check, capture_output=True, text=True, timeout=90)
+    return subprocess.run(docker_command(*args), check=check, capture_output=True, text=True, timeout=90,
+                          env=docker_environment())
 
 
 def owned():
