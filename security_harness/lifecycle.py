@@ -136,7 +136,8 @@ def sweep_stale(root):
                     audit.data.update(execution='CANCELLED', decision='BLOCK', reasons=['orphaned supervisor reaped'],
                                       cleanup={'completed': True, 'recovered_by_janitor': True,
                                                'run_directory_removed': True, 'temporary_directory_removed': True})
-                    audit.finish((('G1', 'scan'), ('G2', 'scan'), ('AUTH', 'test')))
+                    # A reaped old run must not displace the index of a newer run.
+                    audit.finish((('G1', 'scan'), ('G2', 'scan'), ('AUTH', 'test')), update_pointer=False)
                 cleaned.append(work.name)
         except Exception as exc:
             # Keep reaping the remaining runs; report every failure, without its text.
@@ -190,8 +191,10 @@ def supervise(root, audit, command, max_seconds):
             signal.signal(signum, handler)
     # Read the worker's last atomically persisted progress, not a stale parent copy.
     audit.data = json.loads((audit.output / 'report.json').read_text())
+    finalized = False
     if (reason is None and not cancelled and cleanup_error is None and process is not None
             and process.returncode in (0, 1) and audit.data['execution'] == 'AWAITING_CLEANUP'):
+        finalized = True
         pending = audit.data.pop('pending_decision')
         if process.returncode != (0 if pending == 'ALLOW' else 1):
             audit.fail(RuntimeError('worker exit/decision mismatch'))
@@ -209,7 +212,8 @@ def supervise(root, audit, command, max_seconds):
         if stage in ('G1', 'G2', 'AUTH') and not any(r['gate'] == stage for r in audit.data['records']):
             audit.add(stage, reason, 'test' if stage == 'AUTH' else 'scan', 0, 0, 'supervisor stopped run')
         audit.data.update(execution=reason, decision='BLOCK', reasons=['supervisor ' + reason.lower()])
-    elif process is None or process.returncode not in (0, 1) or audit.data['execution'] == 'RUNNING':
+    elif not finalized:
+        # Only the cleanup-gated handoff may publish a worker decision.
         audit.fail(RuntimeError('worker did not complete'))
     if cleanup_error:
         audit.data.update(execution='ERROR', decision='BLOCK', reasons=['cleanup incomplete'])

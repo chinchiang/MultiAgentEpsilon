@@ -19,12 +19,12 @@ def main():
         parser = argparse.ArgumentParser()
         parser.add_argument("--output", type=Path)
         output = parser.parse_args().output
-        audit.data["stage"] = "configuration"
+        audit.stage("configuration")
         policy_file = ROOT / "security/policy.json"
         policy = json.loads(policy_file.read_text())
         audit.data["policy_digest"] = digest_file(policy_file)
         audit.data["subject_digest"] = subject_digest(ROOT)
-        audit.data["stage"] = "G1"
+        audit.stage("G1")
         packages = verify(ROOT / "requirements.lock", policy)
         audit.add("G1", "COMPLETED", "scan", len(packages), 0, "metadata checks only", packages=packages)
         audit.data.update(decision="ALLOW", reasons=[])
