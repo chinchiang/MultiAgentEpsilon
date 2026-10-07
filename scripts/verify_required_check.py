@@ -6,16 +6,25 @@ check named trusted-security-pilot from the shared GitHub Actions app. Before
 approving or merging, confirm through GitHub's own run metadata that every such
 check on the PR head came from a pull_request_target run of the trusted workflow
 for exactly that head. One foreign or manual run on the head blocks.
+
+Such a run executes the workflow file from the PR's base branch, which run metadata
+does not record; each run is therefore also bound to this PR's head branch, and any
+PR in any state that shares the head but targets another branch blocks.
 """
 import argparse
 import json
 import re
 import subprocess
 import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from security_harness.trusted_publisher import validate_run_base
 
 REQUIRED_CHECK = "trusted-security-pilot"
 ACTIONS_APP_ID = 15368
 WORKFLOW_PATH = ".github/workflows/security.yml"
+BASE_BRANCH = "main"
 SHA = re.compile(r"[0-9a-f]{40}")
 
 
@@ -28,7 +37,7 @@ def need(condition, code):
         raise Denied(code)
 
 
-def verify(api, repo, number):
+def verify(api, repo, number, pages):
     pr = api(f"repos/{repo}/pulls/{number}")
     head = pr["head"]["sha"]
     need(pr["state"] == "open" and SHA.fullmatch(head), "PR_NOT_OPEN")
@@ -37,6 +46,7 @@ def verify(api, repo, number):
     checks = [c for c in listing["check_runs"] if c["name"] == REQUIRED_CHECK]
     need(checks, "REQUIRED_CHECK_MISSING")
     sources = []
+    pull_requests = pages(f"repos/{repo}/pulls?state=all&per_page=100")
     for check in checks:
         # A same-named check from another app is not what the ruleset counts, but it
         # still signals tampering on this head.
@@ -46,6 +56,10 @@ def verify(api, repo, number):
         run = runs[0]
         need(run["event"] == "pull_request_target" and run["path"] == WORKFLOW_PATH
              and run["head_sha"] == head, "UNTRUSTED_CHECK_SOURCE")
+        try:
+            validate_run_base(run, pr, pull_requests, BASE_BRANCH)
+        except ValueError as exc:
+            raise Denied(str(exc)) from None
         sources.append({"check_run_id": check["id"], "run_id": run["id"], "run_attempt": run["run_attempt"],
                         "status": check["status"], "conclusion": check["conclusion"]})
     latest = max(checks, key=lambda c: (c.get("started_at") or "", c["id"]))
@@ -59,6 +73,13 @@ def gh_api(path):
     return json.loads(output)
 
 
+def gh_pages(path):
+    # One JSON object per line across all pages (gh 2.46 lacks --slurp).
+    output = subprocess.check_output(["gh", "api", "--paginate", "--jq", ".[] | @json", path],
+                                     encoding="utf-8", timeout=60, stderr=subprocess.DEVNULL)
+    return [json.loads(line) for line in output.splitlines() if line]
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--repo", default="chinchiang/MultiAgentEpsilon")
@@ -67,7 +88,7 @@ def main():
     if not re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", args.repo) or args.pr <= 0:
         raise SystemExit("invalid repository or PR number")
     try:
-        result = verify(gh_api, args.repo, args.pr)
+        result = verify(gh_api, args.repo, args.pr, gh_pages)
     except Denied as exc:
         result = {"decision": "BLOCK", "code": str(exc)}
     except Exception as exc:

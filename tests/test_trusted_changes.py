@@ -57,6 +57,7 @@ def test_live_approval_resolves_reviewer_permission_through_github(monkeypatch, 
         "commits/" + "h" * 40: {"author": {"login": "someone-else"}, "committer": {"login": "web-flow"}},
     }
     review = {"id": 3, "state": "APPROVED", "commit_id": "h" * 40, "user": {"login": reviewer}}
+    commits = [{"sha": "h" * 40, "author": {"login": "someone-else"}, "committer": {"login": "web-flow"}}]
     requested = []
     def fake(args, **kwargs):
         assert kwargs.get("encoding") == "utf-8" and "text" not in kwargs
@@ -64,6 +65,8 @@ def test_live_approval_resolves_reviewer_permission_through_github(monkeypatch, 
         requested.append(path)
         if path.startswith("pulls/7/reviews"):
             return json.dumps(review) + "\n"
+        if path.startswith("pulls/7/commits"):
+            return "".join(json.dumps(c) + "\n" for c in commits)
         return json.dumps(responses[path])
     monkeypatch.setattr(guard.subprocess, "check_output", fake)
     result = guard.live_approval(7, "h" * 40, "b" * 40)
@@ -128,3 +131,41 @@ def test_git_rename_checks_both_sides(tmp_path, old, new, blocked):
     assert process.returncode == int(blocked)
     assert data["decision"] == ("BLOCK" if blocked else "ALLOW")
     assert data["protected_changes"] == protected_changes(sorted([old, new]))
+
+
+def guard_with_commits(monkeypatch, commits):
+    import scripts.check_trusted_changes as guard
+    reviewer = json.loads((Path(__file__).resolve().parents[1] / "security/trust-policy.json").read_text())["baseline_reviewers"][-1]
+    responses = {
+        "pulls/7": {"state": "open", "head": {"sha": "h" * 40}, "base": {"sha": "b" * 40}, "user": {"login": "someone-else"}},
+        f"collaborators/{reviewer}/permission": {"role_name": "write"},
+        "commits/" + "h" * 40: {"author": {"login": "someone-else"}, "committer": {"login": "web-flow"}},
+    }
+    review = {"id": 3, "state": "APPROVED", "commit_id": "h" * 40, "user": {"login": reviewer}}
+    def fake(args, **kwargs):
+        path = args[2].split("/", 3)[3]
+        if path.startswith("pulls/7/reviews"):
+            return json.dumps(review) + "\n"
+        if path.startswith("pulls/7/commits"):
+            return "".join(json.dumps(c) + "\n" for c in commits(reviewer))
+        return json.dumps(responses[path])
+    monkeypatch.setattr(guard.subprocess, "check_output", fake)
+    return lambda: guard.live_approval(7, "h" * 40, "b" * 40)
+
+
+def test_reviewer_who_pushed_an_earlier_pr_commit_cannot_approve(monkeypatch):
+    approve = guard_with_commits(monkeypatch, lambda reviewer: [
+        {"sha": "e" * 40, "author": {"login": reviewer}, "committer": {"login": reviewer}},
+        {"sha": "h" * 40, "author": {"login": "someone-else"}, "committer": {"login": "web-flow"}}])
+    assert approve() is None
+
+
+@pytest.mark.parametrize("commits", [
+    lambda reviewer: [],
+    lambda reviewer: [{"sha": "e" * 40}],                                  # list does not end at the head
+    lambda reviewer: [{"sha": f"{i:040x}"} for i in range(249)] + [{"sha": "h" * 40}],  # API truncates at 250
+])
+def test_incomplete_pr_commit_listing_fails_closed(monkeypatch, commits):
+    from security_harness.trusted_publisher import Denied
+    with pytest.raises(Denied):
+        guard_with_commits(monkeypatch, commits)()

@@ -31,3 +31,9 @@ def test_only_the_guard_step_receives_a_token():
     assert WORKFLOW.count("GH_TOKEN") == 1
     assert WORKFLOW.count("persist-credentials: false") == 2
     assert "secrets." not in WORKFLOW
+
+
+def test_manual_and_push_runs_never_share_a_cancellation_group():
+    group = re.search(r"^concurrency:\n(?:  #.*\n)*  group: (.+)$", WORKFLOW, re.MULTILINE).group(1)
+    assert "${{ github.event_name }}" in group
+    assert "cancel-in-progress: true" in WORKFLOW
