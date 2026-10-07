@@ -20,7 +20,7 @@
 
 選用管理者控制的 Linux 主機，具備 Python 3.12、OpenSSL、systemd，能驗證 TLS 並連線至 `api.github.com` 與 artifact 儲存服務 `*.blob.core.windows.net`。保留既有代理伺服器與 CA 設定，不得停用 TLS 驗證。此服務不需要 Docker、Gemini、Bedrock 或 GLM 憑證。
 
-先完成可信基準的獨立審查與完整驗證。不能直接採用 PR 分支或手動 CI 成功當成核准。首次基準遷移已於 2026-10-06 完成；main 的 CODEOWNERS 列有 chinchiang 與 CatGrocery，CatGrocery 已具 write 權限。舊基準不會自動授權評分器更新。涉及規則例外的遷移須經擁有者明確授權，本程式不會移除既有規則。
+先完成可信基準的獨立審查、首次遷移與完整驗證。不能直接採用 PR 分支或手動 CI 成功當成核准。首次基準遷移已於 2026-10-06 完成，CatGrocery 也已於 2026-10-07 成為具寫入權限的審查者；部署前仍須確認設定中的 `evaluator_sha` 是已經審查合併的 main commit，基準不會自動授權評分器更新。涉及規則例外的遷移須經擁有者明確授權，本程式不會移除既有規則。
 
 | 位置 | 用途與權限 |
 |---|---|
