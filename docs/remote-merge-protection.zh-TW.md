@@ -1,6 +1,6 @@
 # 遠端合併保護：設定與驗收缺口
 
-2026-10-06 更新：首次基準遷移已完成（擁有者暫時停用規則集後合併 #6、#7，驗收後恢復），真實 `pull_request_target` 流程的正反例結果見 [里程碑狀態](milestone-status.zh-TW.md)。CatGrocery 仍不在協作者名單，專用 App 仍未部署。
+**現況（2026-10-07 讀回）：** 規則集 24512048 為 active、無 bypass；CatGrocery 已是具 write 權限的協作者；首次基準遷移已於 2026-10-06 完成（擁有者暫時停用規則集後合併 #6、#7，驗收後恢復；#10 也在停用期間合併，沒有審查紀錄）。專用 App 仍未部署，普通開發者的負向驗收仍未執行。真實 `pull_request_target` 流程的正反例結果見 [里程碑狀態](milestone-status.zh-TW.md)。下方各段保留當時的觀測紀錄。
 
 更新：擁有者已啟用規則集 24512048，API 讀回 active、main.protected=true、無 bypass，必要檢查仍綁定共用 GitHub Actions App 15368。下列 403 為整合程式操作的歷史結果；手動啟用不會擴充整合程式權限。發布程式與部署範本見[可信檢查來源部署準備](trusted-check-publisher.zh-TW.md)，App 尚未部署。
 
@@ -18,13 +18,13 @@
 
 這是 GitHub 的整合程式授權不足，不是執行環境的自動核准審查拒絕。沒有建立邀請或規則，也沒有測試合併或修改 main。
 
-儲存庫擁有者須在 [GitHub App 安裝設定](https://github.com/settings/installations) 確认目前連線允許存取本儲存庫，並接受該 App 要求的 Administration 讀寫權限。若 App 本身沒有要求該權限，使用者不能單憑儲存庫管理者角色擴充其權杖；需由連線提供者調整 App 權限，或改用支援該權限的管理連線。不要將權杖或 App 私鑰貼到聊天、issue 或儲存庫。
+儲存庫擁有者須在 [GitHub App 安裝設定](https://github.com/settings/installations) 確認目前連線允許存取本儲存庫，並接受該 App 要求的 Administration 讀寫權限。若 App 本身沒有要求該權限，使用者不能單憑儲存庫管理者角色擴充其權杖；需由連線提供者調整 App 權限，或改用支援該權限的管理連線。不要將權杖或 App 私鑰貼到聊天、issue 或儲存庫。
 
 權限生效後，再以 `PUT /repos/chinchiang/MultiAgentEpsilon/collaborators/CatGrocery`、`{"permission":"push"}` 新增協作者。若回傳邀請，CatGrocery 必須先接受；需重新查核協作者名單與 `write`／`maintain`／`admin` 角色後，才算具備有效審查權限。獨立審查者須不同於 PR 作者；普通開發者繞過驗收應使用非管理者的 `write` 身分。
 
 ## 必要檢查的可信來源
 
-目前儲存庫位於個人帳號，不能假設可使用組織層級 required workflows。現有 `trusted-security-pilot` 檢查由共用 GitHub Actions App（15368）發布；只綁定該 App 與名稱無法辨認是哪一個工作流程。
+目前儲存庫位於個人帳號，不能假設可使用組織層級 required workflows。現有 `trusted-security-pilot` 檢查由共用 GitHub Actions App（15368）發布；只綁定該 App 與名稱無法辨認是哪一個工作流程。即使來源是 `pull_request_target`，執行的也是 PR base 分支上的 workflow 檔案；開到其他分支的同 head PR 可以執行修改過的副本。發布程式與 `verify_required_check.py` 因此另外把 run 綁定到此 PR 的 head 分支，並拒絕任何共用同一 head、卻以其他分支為 base 的 PR（含已關閉者）。fork PR 的回訪貢獻者也能以 `on: pull_request` 產生同名檢查；建議把 fork PR 核准政策設為所有外部貢獻者都需核准。
 
 建議部署專用 GitHub App，發布另一個必要檢查（例如 `epsilon/trusted-merge`），並把規則綁定到該專用 App 的真實 ID；不得填入虛構 ID，也不能把 15368 當成已完成來源綁定。App 最小權限應依實作使用 Actions、Contents、Pull requests 讀取及 Checks 寫入；一般候選工作流程不得取得 App 私鑰或安裝權杖。
 
@@ -39,7 +39,7 @@ App 身分與執行位置尚未提供；已準備受控主機的發布程式與�
 
 ## 部署順序與負向驗收
 
-1. 完成管理連線授權、CatGrocery 接受協作邀請，並對目前候選提交做真正的獨立審查。
+1. 完成管理連線授權（CatGrocery 已具 write 權限），並對目前候選提交做真正的獨立審查。
 2. 依 `trusted-execution.zh-TW.md` 完成首次可信基準遷移；候選政策新增 reviewer 不會自動取得舊基準的信任。
 3. 部署並驗證專用檢查來源，確認會對正確 PR head 發布結果，且能在條件失效時撤銷通過狀態。
 4. 在隔離的遠端驗收分支套用預定規則：至少一位獨立 CODEOWNER 核准、推送後撤銷舊核准、最後一次推送需他人核准、討論已解決、嚴格必要檢查、禁止刪除與強推、沒有 bypass。
@@ -47,4 +47,4 @@ App 身分與執行位置尚未提供；已準備受控主機的發布程式與�
 6. 記錄每次操作的身分角色、規則 ID、base/head、核准與檢查身分、HTTP 回應及測試前後分支 SHA。意外放行視為失敗，不刪掉證據；避免以不安全的 main 合併探測取得證據。
 7. 驗收通過後啟用 main 規則並完整讀回。區分「隔離分支的行為驗證」與「main 規則讀回」，不以草稿 PR、本地 BLOCK、CI 成功或管理者角色代替普通開發者遠端驗收。
 
-遠端行為驗收仍未執行。main 規則讀回與 PR #5 草稿顯示 blocked，不能代替普通開發者的負向驗收；先在隔離驗收分支確認規則及來源，避免對 main 做可能真的合併成功的探測。
+遠端行為驗收仍未執行。main 規則讀回與先前 PR #5（草稿，已關閉）顯示 blocked，不能代替普通開發者的負向驗收；先在隔離驗收分支確認規則及來源，避免對 main 做可能真的合併成功的探測。

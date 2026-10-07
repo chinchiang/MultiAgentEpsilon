@@ -20,7 +20,7 @@
 
 選用管理者控制的 Linux 主機，具備 Python 3.12、OpenSSL、systemd，能驗證 TLS 並連線至 `api.github.com` 與 artifact 儲存服務 `*.blob.core.windows.net`。保留既有代理伺服器與 CA 設定，不得停用 TLS 驗證。此服務不需要 Docker、Gemini、Bedrock 或 GLM 憑證。
 
-先完成可信基準的獨立審查、首次遷移與完整驗證。不能直接採用 PR 分支或手動 CI 成功當成核准。main 的舊 CODEOWNERS 只有作者 chinchiang、CatGrocery 尚無寫入權限，舊基準也不會自動授權評分器更新；首次遷移需另外安排。涉及規則例外的遷移須經擁有者明確授權，本程式不會移除既有規則。
+先完成可信基準的獨立審查與完整驗證。不能直接採用 PR 分支或手動 CI 成功當成核准。首次基準遷移已於 2026-10-06 完成；main 的 CODEOWNERS 列有 chinchiang 與 CatGrocery，CatGrocery 已具 write 權限。舊基準不會自動授權評分器更新。涉及規則例外的遷移須經擁有者明確授權，本程式不會移除既有規則。
 
 | 位置 | 用途與權限 |
 |---|---|
@@ -30,7 +30,7 @@
 | `/etc/epsilon-publisher/github-app.pem` | App 私鑰；**root 持有、0600**，放在程式 checkout 之外。unit 以 systemd `LoadCredential` 提供服務一份私有唯讀副本，服務帳號無法讀取或替換原檔 |
 | `/var/lib/epsilon-publisher` | 執行鎖、固定格式結果與每個 PR 的狀態檔（已驗證 blob 摘要快取、上次發布結果、節流退避期限）；服務帳號持有，0700 |
 
-範本 repository ID 是 1403706385、workflow ID 是 374309318；部署前讀回確認。填入真正 App ID、Installation ID、已核准 `evaluator_sha`、該 evaluator 的 worktree manifest digest，以及 gate policy 原檔 SHA-256。reviewers 須與 `security/trust-policy.json` 的 `baseline_reviewers` 一致（範本為 chinchiang、CatGrocery）；PR 作者、該 run 的觸發者及 head commit 的作者／提交者一律不計，且只採計具寫入權限者；minimum_regression_tests 設為核准基準的完整測試數；範本值即為本版基準的完整測試數，CI 的證據自我檢查也以它為下限，測試被刪減會直接失敗。
+範本 repository ID 是 1403706385、workflow ID 是 374309318；部署前讀回確認。填入真正 App ID、Installation ID、已核准 `evaluator_sha`、該 evaluator 的 worktree manifest digest，以及 gate policy 原檔 SHA-256。reviewers 須與 `security/trust-policy.json` 的 `baseline_reviewers` 一致（範本為 chinchiang、CatGrocery）；PR 作者、該 run 的觸發者及 PR 中任一 commit 的作者／提交者一律不計（rerun 請由非核准者執行），且只採計具寫入權限者；minimum_regression_tests 設為核准基準的完整測試數；範本值即為本版基準的完整測試數，CI 的證據自我檢查也以它為下限，測試被刪減會直接失敗。
 
 範本缺值會回傳 SETTINGS_INCOMPLETE，不產生權杖或檢查。main 基準 SHA 改變後服務會阻擋；新基準需審查及驗證，再由部署管理者更新設定，不能自動追蹤 main。
 
@@ -52,11 +52,11 @@ python3.12 -I /opt/epsilon-publisher/app/scripts/publish_trusted_check.py \
   --gate-policy /etc/epsilon-publisher/gate-policy.json \
   --private-key /etc/epsilon-publisher/github-app.pem \
   --lock-file /var/lib/epsilon-publisher/publisher.lock \
-  --state-file /var/lib/epsilon-publisher/pr-5-state.json \
-  --pr 5 --output /var/lib/epsilon-publisher/pr-5.json
+  --state-file /var/lib/epsilon-publisher/pr-<編號>-state.json \
+  --pr <編號> --output /var/lib/epsilon-publisher/pr-<編號>.json
 ```
 
-PR #5 目前是草稿，不能用它宣稱正向發布成功。手動 workflow_dispatch 不授權。
+請使用非草稿的驗收 PR；草稿 PR 不能用來宣稱正向發布成功。手動 workflow_dispatch 不授權。發布程式會讀取整個 repository 的 PR 清單（`pulls?state=all`，上限 1,000 筆）來排除開到其他 base 的同 head PR；超過上限即拒絕發布。
 
 **來源綁定（2026-10-06 依實際 GitHub 資料修正）：** `pull_request_target` 的 run 與其 check suite 由 GitHub 記錄在 **PR head commit** 上（已以公開的 nodejs/node run 核對：`run.head_sha` 等於 PR head；fork PR 的 `pull_requests` 為空陣列），workflow 檔案與 evaluator 則來自預設分支。因此發布程式要求 `run.head_sha` 等於 PR head、事件為 `pull_request_target`、路徑為 `.github/workflows/security.yml`（皆由 GitHub 提供），evaluator commit 則由預設分支 workflow 寫入的來源紀錄與設定中的 `evaluator_sha` 綁定。預設查找同一 head SHA 的最新 run；可指定 `--run-id`，但仍須是該 head 的 `pull_request_target` run，且沒有同一 head 的較新 run。較新的 run 只依 head SHA 比對，外部 fork PR 產生的無關 run 不能阻斷發布。
 

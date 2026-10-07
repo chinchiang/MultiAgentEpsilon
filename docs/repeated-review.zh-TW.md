@@ -58,7 +58,7 @@ AWS 身分重驗回傳 `ExpiredToken`，本輪沒有送出 Bedrock 推論請求�
 
 ## 2026-10-06 雙模型多輪驗收
 
-使用者重新以 AWS IAM Identity Center 登入後，先以相同的憑證選取方式執行 `sts get-caller-identity`，核對為帳號 576607007707、Inventec-IT-Bedrock01 權限集；暫時憑證只經由程序標準輸入傳給執行環境，不寫入命令列、儲存庫或對話。評估程式為可信閘門 #6 之上的多模型分支 `30c959b`，指令與上方「真實配對」相同：Gemini／Bedrock、B07／B08、兩輪、每次 1,024 個輸出詞元，共八次請求。
+使用者重新以 AWS IAM Identity Center 登入後，先以相同的憑證選取方式執行 `sts get-caller-identity`，核對帳號與權限集符合預期（識別資訊不記錄於公開文件）；暫時憑證只經由程序標準輸入傳給執行環境，不寫入命令列、儲存庫或對話。評估程式為可信閘門 #6 之上的多模型分支 `30c959b`，指令與上方「真實配對」相同：Gemini／Bedrock、B07／B08、兩輪、每次 1,024 個輸出詞元，共八次請求。
 
 **第一次（報告 `792ef595-81f1-484b-8d8f-818b921b1036`，INCOMPLETE）：** Bedrock 使用 `global.anthropic.claude-opus-5-5`，四次皆為 `PROVIDER_FAILURE`；Gemini 四次有效且正確。以兩次最小合成請求個別診斷：同一模型的純文字 Converse 成功，加入 `outputConfig.textFormat` 後回報 `ValidationException`（`output_config.format: Extra inputs are not permitted`）。也就是此模型不接受 Bedrock 的原生 JSON schema 輸出，不是權限或憑證問題。報告保留，未被下一批覆蓋。之後 Bedrock CLI 的失敗會依固定分類記錄（結構化輸出被拒為 `OUTPUT_CONFIGURATION`，權限／權杖為 `AUTHENTICATION`，節流為 `RATE_LIMIT`），不保存 CLI 或供應商原文。
 

@@ -41,9 +41,11 @@
 .venv/bin/python -I scripts/expect_block.py
 ```
 
-本輪本地回歸：125 passed，0 failures/errors/skips，1 項既有 Starlette 棄用警告。包含壓縮機密、已刪除的壓縮歷史機密、壓縮炸彈／巢狀／路徑穿越、完整狀態 AUTH 變體、真實程序群組 timeout，以及帶真實無網路容器的 SIGTERM／SIGINT／SIGKILL 回收。
+2026-10-04 當時的本地回歸：125 passed，0 failures/errors/skips，1 項既有 Starlette 棄用警告。包含壓縮機密、已刪除的壓縮歷史機密、壓縮炸彈／巢狀／路徑穿越、完整狀態 AUTH 變體、真實程序群組 timeout，以及帶真實無網路容器的 SIGTERM／SIGINT／SIGKILL 回收。
 
-## 遠端合併保護：尚未完成
+## 遠端合併保護（2026-10-04～05 歷史紀錄）
+
+> 本節記錄當時的觀測，已不是現況：main 現由規則集 24512048 保護，CatGrocery 已具 write 權限，首次基準遷移已於 2026-10-06 完成。現況與剩餘工作以[里程碑狀態](milestone-status.zh-TW.md)為準。
 
 `scripts/audit_merge_protection.py` 是唯讀設定稽核，**不是行為驗收通過證明**。它保留六種尚未執行的 probe，回傳 BLOCK，不用管理員讀取結果代替普通開發者實測。
 

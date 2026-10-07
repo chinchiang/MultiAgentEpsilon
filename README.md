@@ -52,21 +52,27 @@ python3 scripts/dev_db.py stop
 
 模型 runner 也由 supervisor 管理，成功結果需待清理完成才發布；SIGKILL 後使用 `scripts/cleanup_runs.py` 回收登記的 worker／AWS 程序群組。正式證據位於 `artifacts/<run-id>/report.json`，模型結果仍僅供參考。
 
-G2 與 subject digest 共用輸入清冊：生成物名稱只在 repository 根目錄排除，巢狀同名來源仍納入；Python／pytest 快取另行排除，任何已追蹤的保留生成路徑會拒絕執行。來源 symlink、不可讀目錄、輸入超限及雜湊時檔案變動會拒絕。Gitleaks 的掃描快照重新命名並映射回原路徑，避免工具的隱含目錄排除縮減範圍，且不接受候選的 inline allow 註解。Git 歷史以候選 HEAD 可達的全部 blobs 為範圍，淺層 clone 會失敗。gzip／zip／tar 依限額展開；不支援、損壞、加密或超限內容會阻擋。二進位檔預設阻擋；需先把內容的 SHA-256 經審查加入 evaluator 端受保護的 `security/binary-allowlist.json`，之後仍以 ASCII／UTF-16LE 可讀字串掃描內嵌機密，內容一改就需重新審查。排除的依賴／暫存內容與其他 refs 不宣稱已掃描。
+G2 與 subject digest 共用輸入清冊：生成物名稱只在 repository 根目錄排除，巢狀同名來源仍納入；Python／pytest 快取另行排除，任何已追蹤的保留生成路徑會拒絕執行。來源 symlink、不可讀目錄、輸入超限及雜湊時檔案變動會拒絕。Gitleaks 的掃描快照重新命名並映射回原路徑，避免工具的隱含目錄排除縮減範圍，且不接受候選的 inline allow 註解。Git 歷史以候選 repository 自己的 HEAD 可達的全部 blobs 為範圍，且為必要條件：淺層 clone、沒有 `.git`、沒有 commit，或位於外層 repo 中的子目錄都會阻擋。對候選的 git 呼叫停用 fsmonitor、hooks 與 transport，候選的 `.git/config` 不能讓 host 執行程式。gzip／zip／tar 依限額展開，容器本身的註解、檔名與 extra 欄位也一併掃描；不支援、損壞、加密、超限，或含有未列出成員位元組的內容會阻擋。二進位檔預設阻擋；需先把內容的 SHA-256 經審查加入 evaluator 端受保護的 `security/binary-allowlist.json`，之後仍以 ASCII／UTF-16LE 可讀字串掃描內嵌機密，內容一改就需重新審查。排除的依賴／暫存內容與其他 refs 不宣稱已掃描。
 
 ## CI 啟用界線
 
-[security.yml](.github/workflows/security.yml) 改用 `pull_request_target`，只執行 base SHA 的 evaluator、安裝程序與測試；候選 checkout 僅作資料，只有限定的 `fixture_app` 來源會送入無網路容器。token 權限為 contents/read 與 pull-requests/read，不提供模型或部署金鑰。main push 與手動執行亦使用同一評分路徑；手動選取的 workflow ref 代表維護者選定的 evaluator，不能自動當成已核准基準。因此手動執行的檢查名稱固定為 `manual-security-evaluation`、artifact 為 `manual-security-*`，永遠不會滿足必要檢查 `trusted-security-pilot`。執行完畢前，CI 會用發布程式的同一套證據契約自我檢查（`check_publishable_evidence.py`），證據與契約不一致時該 run 直接失敗。
+[security.yml](.github/workflows/security.yml) 改用 `pull_request_target`，只執行 base SHA 的 evaluator、安裝程序與測試；候選 checkout 僅作資料，只有限定的 `fixture_app` 來源會送入無網路容器。token 權限為 contents/read 與 pull-requests/read，不提供模型或部署金鑰。main push 與手動執行亦使用同一評分路徑；手動選取的 workflow ref 代表維護者選定的 evaluator，不能自動當成已核准基準。因此 main 上的 workflow 手動執行時，檢查名稱固定為 `manual-security-evaluation`、artifact 為 `manual-security-*`。`workflow_dispatch` 使用所選 ref 的 YAML，有推送權限者在自己分支改掉 job 名稱仍可產生同名檢查，所以審查者仍須以下述工具核對來源。執行完畢前，CI 會用發布程式的同一套證據契約自我檢查（`check_publishable_evidence.py`），證據與契約不一致時該 run 直接失敗。
 
 新執行入口預設受保護。基準更新需由可信 reviewer 對目前 head SHA 獨立核准；guard 即時查核 GitHub PR／reviews，撤回核准、換版或作者自行核准皆不放行。此 run 仍以舊基準判定，合併後才成為下一輪基準。
 
-**main 規則集 24512048 已啟用並讀回確認。** 必要檢查仍使用共用 GitHub Actions App 15368；名稱與 App ID 無法唯一識別可信 workflow，任何有推送權限者都能以自己的 workflow 產生同名綠燈。專用 App 綁定前，審查者在核准或合併前應執行 `python3 scripts/verify_required_check.py --pr <編號>`：它以 GitHub 的 run 中繼資料確認 PR head 上每一個 `trusted-security-pilot` 都來自可信 workflow 路徑的 `pull_request_target` run，有任何一個來源不符即 BLOCK。[專用 App 發布程式與部署範本](docs/trusted-check-publisher.zh-TW.md)已準備，App 與服務尚未部署。基準遷移程序見 [操作文件](docs/trusted-execution.zh-TW.md)，先前遠端基線見 [驗收紀錄](docs/remote-ci-validation.zh-TW.md)。
+**main 規則集 24512048 已啟用並讀回確認。** 必要檢查仍使用共用 GitHub Actions App 15368；名稱與 App ID 無法唯一識別可信 workflow：有推送權限者可以用自己的 workflow，回訪的 fork 貢獻者也能以 `on: pull_request` 產生同名綠燈。`pull_request_target` 執行的是 PR **base 分支**上的 workflow，同一路徑在其他分支的修改版本有相同 workflow ID。專用 App 綁定前，審查者在核准或合併前應執行 `python3 scripts/verify_required_check.py --pr <編號>`：它以 GitHub 的 run 中繼資料確認 PR head 上每一個 `trusted-security-pilot` 都來自可信 workflow 路徑的 `pull_request_target` run，run 的 head 分支與此 PR 相同，且沒有任何（含已關閉）共用同一 head、卻開到其他分支的 PR；任一條件不符即 BLOCK。[專用 App 發布程式與部署範本](docs/trusted-check-publisher.zh-TW.md)已準備，App 與服務尚未部署。基準遷移程序見 [操作文件](docs/trusted-execution.zh-TW.md)，先前遠端基線見 [驗收紀錄](docs/remote-ci-validation.zh-TW.md)。
 
 ## 文件與來源
 
 - [試點範圍、授權矩陣與限制](docs/pilot-scope.zh-TW.md)
-- [實際執行與剩餘待辦](docs/milestone-status.zh-TW.md)
+- [實作現況與剩餘待辦](docs/milestone-status.zh-TW.md)（[歷史紀錄](docs/milestone-history.zh-TW.md)）
+- [可信執行、基準更新與合併保護](docs/trusted-execution.zh-TW.md)
+- [遠端合併保護：設定與驗收缺口](docs/remote-merge-protection.zh-TW.md)
+- [專用檢查發布程式與部署範本](docs/trusted-check-publisher.zh-TW.md)
 - [遠端 CI 驗收及可套用的保護規則](docs/remote-ci-validation.zh-TW.md)
+- [覆蓋與生命週期驗收](docs/coverage-lifecycle-acceptance.zh-TW.md)
+- [ASVS 覆蓋對照](docs/asvs-coverage.zh-TW.md)
+- 多模型：[gateway](docs/model-gateway.zh-TW.md)、[盲測與裁決](docs/blind-review.zh-TW.md)、[多輪盲測](docs/repeated-review.zh-TW.md)、[結構化輸出](docs/structured-output.zh-TW.md)
 
 公開版本只包含程式碼、合成測試及操作文件。使用者提供的附件、內部研究／治理文件及其衍生表單保留於本地，不包含於公開 Git 歷史。當前完成度以 milestone status 為準；少量示範案例不代表符合完整 [OWASP ASVS](https://owasp.org/www-project-application-security-verification-standard/)。
 
