@@ -7,7 +7,7 @@
 | 問題 | 修正後行為 | 回歸或驗收 |
 |---|---|---|
 | PR 改 base 後沿用舊 run | 比對完整 timeline；同一 SHA／head repository／分支曾改 base 即拒絕；`edited` 會觸發檢查 | 缺失、畸形、改走再改回的歷程皆拒絕；發布前再次讀回 |
-| 報告或檢查名稱冒充來源 | 獨立工作簽署 ZIP 摘要；固定 CLI 驗證簽章、workflow SHA／main ref／GitHub runner／run／attempt／digest | 官方公開樣本的合法簽章通過，五種竄改或缺失拒絕；此儲存庫仍待遠端驗收 |
+| 報告或檢查名稱冒充來源 | 獨立工作簽署 ZIP 摘要；固定 CLI 驗證簽章、workflow SHA／main ref／GitHub runner／run／attempt／digest | 官方樣本六種驗收符合預期；遠端 run 37731214649 的實際簽章／digest 通過分支驗證，main 來源政策拒絕該手動分支證據 |
 | fixture／文件排除可信審查 | 所有變更路徑均須可信、具寫入權限的精確 head 核准 | fixture 改名、README 與文件均納入保護 |
 | 混合核准／要求修改、重跑者核准 | guard 與 publisher 共用審查契約；寫入者要求修改會阻擋；排除 run actor／triggering actor 及所有 PR commit 身分 | 寫入／維護／管理／唯讀角色與完整 API 查詢回歸 |
 | 相同 SHA 的其他 fork 或分支造成誤擋 | 相關 PR、最新 run 依 repository ID 與分支分開判定 | 不同 fork／分支不取代此 run，同範圍仍嚴格拒絕 |
@@ -31,14 +31,16 @@
 
 ## 本機驗收
 
-- 完整回歸：703 項通過、0 失敗／錯誤／跳過，包含資料庫、無網路容器與真實取消清理；保留一項既有 Starlette 棄用警告。結果由 JUnit 記錄，遠端 CI 另行核對。
+- 最新完整回歸：704 項通過、0 失敗／錯誤／跳過，包含資料庫、無網路容器、真實取消清理與 Bedrock 四項合法 finding 超額拒絕；保留一項既有 Starlette 棄用警告。結果由 JUnit 記錄，遠端 CI 另行核對。先前提交 6005ebb 的 703 項本機及遠端 run 37731214649 均通過。
 - 第一輪完整回歸：686 項通過；後續增加註記消費、seed 契約、GLM 全路徑、缺少 CLI、映像 pin、owner、重跑者、預留竄改及安裝封存變體。
 - 修正版安全測試：18 個授權案例、0 findings、ALLOW；缺陷版恰好政策指定 6 個 findings、BLOCK，G1／G2 無 findings，兩者清理完成。
 - HTTP smoke：資料庫健康、登入、合法讀取與跨 owner 拒絕通過。
 - 官方 CLI 簽章樣本：合法、竄改 artifact、錯誤 signer digest、錯誤 ref、無效簽章及缺少驗證材料，六種結果符合預期。此為驗證工具驗收，不是專用 App 已部署的證明。
 - 模型新版目錄一輪八次呼叫（報告 `a7b33efc-9e72-44bf-944e-eb2a1d132690`）：Gemini 三個回答通過，一個 DEADLINE；Claude 受重建後缺少 CLI／profile 影響，未取得有效推論。該報告 INCOMPLETE、預留八次／8192 輸出權杖、用量不完整、清理完成。不能作為配對成功或偏誤降低證據。
 - 新的單案 Gemini B09 驗收（報告 `ca84cbef-0829-4fe3-8f00-74f4bfdeb112`）成功且清理完成；為另一次有界驗收，不把不同批次拼接成完整配對。
-- AWS CLI 已安裝並補回非機密 profile；STS 後續確認 ExpiredToken。需安全環境更新臨時憑證後才能完成 Claude 新 schema 真實驗收。沒有自動重試或模型切換。
+- AWS CLI 已安裝並補回非機密 profile；STS 最初確認 ExpiredToken。使用者更新臨時憑證後，STS 已確認指定帳號與角色有效。
+- 更新後第一批 `66d86091-639e-4b25-b74f-94c2d6c0358f`：Gemini 四次有效，Claude 四次 `OUTPUT_CONFIGURATION`，報告 INCOMPLETE、清理完成。移除 Bedrock 不支援的 `maxItems`，保持本機三項 finding 上限；Claude B10 單案 `2fcffea2-53a1-4c02-8697-04009d240950` 成功。
+- 修正後同批 B09～B12 的 Gemini／Claude 真實配對 `edf879a8-390d-4bc0-bcfb-0234325871c3`：八次全部有效，每家兩個真陽性、兩個真陰性、零誤報／漏報，弱點行號全部命中；四組配對無分歧，預留八次／8192 輸出詞元，清理完成。詳見[結構化輸出驗收](structured-output.zh-TW.md)。不混算舊目錄或失敗批次，不宣稱偏誤降低。
 
 ## 部署與外部待辦
 

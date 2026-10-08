@@ -273,12 +273,29 @@ def test_provider_schema_bounds_match_supported_keywords(provider):
     schema = request_schema(request, provider)
     findings = schema['properties']['findings']
     line = findings['items']['properties']['line']
-    assert findings['maxItems'] == 3
     count = len(bench.load_cases()['B09']['source'].splitlines())
     if provider == 'bedrock':
         assert line['enum'] == list(range(1, count + 1))
-        assert not any(keyword in json.dumps(schema) for keyword in ('minimum', 'maximum', 'minLength', 'maxLength'))
-    else: assert line['minimum'] == 1 and line['maximum'] == count
+        assert not any(keyword in json.dumps(schema) for keyword in ('minimum', 'maximum', 'minLength', 'maxLength', 'maxItems'))
+    else:
+        assert findings['maxItems'] == 3
+        assert line['minimum'] == 1 and line['maximum'] == count
+
+
+def test_bedrock_array_keyword_omission_keeps_local_finding_limit():
+    from security_harness.llm.gateway import ModelError
+    case = bench.load_cases()['B09']
+    review = {'review_id': 'opaque-id', 'verdict': 'VULNERABLE',
+              'reason': 'Synthetic evidence.', 'findings': [
+                  {'cwe': cwe, 'line': 3, 'evidence': case['source'].splitlines()[2].strip(),
+                   'rationale': 'Synthetic claim.'}
+                  for cwe in ('CWE-22', 'CWE-918', 'CWE-89', 'CWE-78')]}
+    # Each finding passes the independent shape/evidence rules. The combined
+    # answer must fail specifically because there are four findings.
+    for finding in review['findings']:
+        bench.validate_review({**review, 'findings': [finding]}, case, 'opaque-id')
+    with pytest.raises(ModelError):
+        bench.validate_review(review, case, 'opaque-id')
 
 
 def test_core_worker_cannot_execute_before_durable_registration(tmp_path, monkeypatch):

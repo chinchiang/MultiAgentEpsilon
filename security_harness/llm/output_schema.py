@@ -18,13 +18,13 @@ def review_schema(provider='bedrock', source_lines=None):
     elif source_lines is not None:
         # Bedrock rejects minimum/maximum, but enum expresses the permitted lines.
         line['enum'] = list(range(1, source_lines + 1))
-    return {
+    schema = {
         'type': 'object', 'additionalProperties': False,
         'required': ['review_id', 'verdict', 'findings', 'reason'],
         'properties': {
             'review_id': {'type': 'string'},
             'verdict': {'type': 'string', 'enum': ['VULNERABLE', 'CLEAN', 'ABSTAIN']},
-            'findings': {'type': 'array', 'maxItems': 3, 'items': {
+            'findings': {'type': 'array', 'description': 'At most three findings; empty for CLEAN or ABSTAIN.', 'items': {
                 'type': 'object', 'additionalProperties': False,
                 'required': ['cwe', 'line', 'evidence', 'rationale'],
                 'properties': {
@@ -36,6 +36,11 @@ def review_schema(provider='bedrock', source_lines=None):
             'reason': {'type': 'string', 'description': 'One concise sentence, nonempty, at most 400 characters; preferably under 120.'},
         },
     }
+    # Bedrock documents only minItems=0/1 among array constraints. Its live
+    # validator rejects maxItems; retain the three-finding limit locally.
+    if provider == 'gemini':
+        schema['properties']['findings']['maxItems'] = 3
+    return schema
 
 
 def request_schema(request, provider):
