@@ -26,7 +26,7 @@ def signature(review):
 def reference():
     data = strict_json(ORACLE_PATH.read_bytes())
     cases = load_cases()
-    if data['version'] != 'synthetic-review-v2' or set(data['cases']) != set(cases):
+    if data['version'] != 'synthetic-review-v3' or set(data['cases']) != set(cases):
         raise ValueError('reference does not match catalog')
     for key, value in data['cases'].items():
         if (set(value) != {'verdict', 'findings'} or value['verdict'] not in ('VULNERABLE', 'CLEAN') or

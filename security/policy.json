@@ -36,7 +36,8 @@
   ],
   "gate_contracts": {
     "G1": {
-      "kind": "scan"
+      "kind": "scan",
+      "sca_required": true
     },
     "G2": {
       "kind": "scan",
@@ -63,7 +64,21 @@
         "same-tenant admin write allowed",
         "admin cross-tenant write denied without side effect",
         "owner field cannot be reassigned",
-        "logout revokes session"
+        "logout revokes session",
+        "expired session read denied",
+        "expired session logout denied",
+        "anonymous delete denied",
+        "forged bearer delete denied",
+        "expired session delete denied",
+        "bob: unauthorized delete denied without side effect",
+        "carol: unauthorized delete denied without side effect",
+        "admin cross-tenant delete denied without side effect",
+        "forged bearer logout denied",
+        "SQL-like username denied without session",
+        "SQL-like update remains literal data",
+        "owner deletes own data",
+        "repeated delete denied without side effect",
+        "same-tenant admin delete allowed"
       ],
       "seeded_defect_case_ids": [
         "bob: unauthorized read denied without data",
@@ -71,7 +86,10 @@
         "carol: unauthorized read denied without data",
         "carol: unauthorized write denied without side effect",
         "admin cross-tenant denied",
-        "admin cross-tenant write denied without side effect"
+        "admin cross-tenant write denied without side effect",
+        "bob: unauthorized delete denied without side effect",
+        "carol: unauthorized delete denied without side effect",
+        "admin cross-tenant delete denied without side effect"
       ]
     }
   }

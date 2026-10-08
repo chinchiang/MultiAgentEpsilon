@@ -37,3 +37,6 @@ class BoundedClient:
 
     def patch(self, path, **kwargs):
         return self.request('PATCH', path, **kwargs)
+
+    def delete(self, path, **kwargs):
+        return self.request('DELETE', path, **kwargs)

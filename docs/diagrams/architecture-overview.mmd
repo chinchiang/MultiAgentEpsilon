@@ -4,8 +4,8 @@ flowchart TB
 
     subgraph Evaluator["受信任評估端：本機或 GitHub runner"]
         Run["run_security.py<br/>supervisor／限額 worker"]
-        Scan["G1／G2<br/>套件驗證與機密掃描"]
-        Oracle["AUTH：容器外 oracle<br/>18 個授權案例與副作用查核"]
+        Scan["G1／G2<br/>來源／SBOM／OSV 與機密掃描"]
+        Oracle["AUTH：容器外 oracle<br/>32 個授權案例與副作用查核"]
         Decision["確定性政策判定<br/>ALLOW／BLOCK，故障即阻擋"]
         Report["run-bound report.json<br/>摘要綁定與清理結果"]
         Run --> Scan --> Oracle --> Decision --> Report
@@ -20,8 +20,8 @@ flowchart TB
     subgraph ModelPath["獨立模型審查路徑：目前僅固定合成案例"]
         direction TB
         Cases["review-cases.json<br/>盲測請求，不含標準答案"]
-        Gateway["model_review.py／Gateway<br/>呼叫前持久化預留；有界循序呼叫"]
-        Live["Gemini API／Claude Sonnet<br/>adapter 與真實推論已驗收"]
+        Gateway["model_review.py<br/>Gateway；呼叫前持久化預留<br/>有界循序呼叫"]
+        Live["Gemini／Claude Sonnet<br/>adapter／v2 真實推論已驗收<br/>v3 配對待憑證"]
         GLM["GLM adapter<br/>離線回歸；真實連線暫停"]
         Score["嚴格輸出驗證＋本機評分<br/>比較、分歧與失敗分母"]
         Advisory["模型報告僅供參考<br/>COMPLETE／INCOMPLETE"]
@@ -40,13 +40,14 @@ flowchart TB
     Publisher["專用 trusted publisher：程式已備妥<br/>App／主機／Ruleset 綁定尚未部署"]
     Report -->|"評估工作保存證據"| CI
     CI --> Signed
-    CI -->|"來源核對與核准均必要"| Rules
+    Signed --> Completion["最終必要關卡<br/>評估＋簽章全成功才放行<br/>候選版已修正，main 待合併"]
+    Completion -->|"來源核對與核准均必要"| Rules
     Signed -.->|"待受控主機驗證簽章與來源"| Publisher
     Publisher -.->|"未啟用的 epsilon/trusted-merge"| Rules
 
     classDef implemented fill:#e8f4ff,stroke:#28629b,color:#153958;
     classDef isolated fill:#edf8ef,stroke:#3a8051,color:#21472e;
     classDef pending fill:#fff4dc,stroke:#a67822,stroke-dasharray:5 5,color:#664708;
-    class Run,Scan,Oracle,Decision,Report,Cases,Gateway,Live,Score,Advisory,CI,Signed,Rules implemented;
+    class Run,Scan,Oracle,Decision,Report,Cases,Gateway,Live,Score,Advisory,CI,Signed,Completion,Rules implemented;
     class Isolation isolated;
     class GLM,Publisher pending;

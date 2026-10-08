@@ -84,7 +84,7 @@ def check_metadata(record: dict, metadata: dict, policy: dict, now: datetime) ->
             raise PreflightError(f"{name}: artifact inside cooling period")
     if not any(f["packagetype"] == "bdist_wheel" for f in matched):
         raise PreflightError(f"{name}: no approved wheel; source builds forbidden")
-    return {"name": name, "version": version, "approved_hash_count": len(matched),
+    return {"name": name, "version": version, "approved_hash_count": len(matched), "approved_hashes": sorted(record["hashes"]),
             "registry": "https://pypi.org", "wheel_only_required": True}
 
 

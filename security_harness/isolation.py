@@ -126,7 +126,7 @@ def run_isolated(candidate: Path, variant="fixed", run_id=None) -> dict:
                 conn.execute("REVOKE ALL ON SCHEMA public FROM PUBLIC")
                 conn.execute(sql.SQL("GRANT USAGE ON SCHEMA {} TO epsilon_app").format(sql.Identifier(schema)))
                 conn.execute("GRANT SELECT ON users TO epsilon_app")
-                conn.execute("GRANT SELECT, UPDATE ON items TO epsilon_app")
+                conn.execute("GRANT SELECT, UPDATE, DELETE ON items TO epsilon_app")
                 conn.execute("GRANT SELECT, INSERT, DELETE ON sessions TO epsilon_app")
             settings = work / "fixture.json"
             settings.write_text(json.dumps({"dsn": f"postgresql://epsilon_app:{app_password}@/epsilon_fixture?host=/run/epsilon-db",

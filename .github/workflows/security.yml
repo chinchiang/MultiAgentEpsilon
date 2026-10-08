@@ -27,7 +27,7 @@ jobs:
   trusted-security-pilot:
     # A manual run evaluates a maintainer-selected ref (possibly the candidate
     # itself), so it must never report under the required check name.
-    name: ${{ github.event_name == 'workflow_dispatch' && 'manual-security-evaluation' || 'trusted-security-pilot' }}
+    name: ${{ github.event_name == 'workflow_dispatch' && 'manual-security-evaluation' || 'trusted-security-evaluation' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     outputs:
@@ -126,3 +126,20 @@ jobs:
         with:
           subject-name: ${{ github.event_name == 'workflow_dispatch' && 'manual-security' || 'trusted-security' }}-${{ github.run_id }}-${{ github.run_attempt }}
           subject-digest: sha256:${{ needs.trusted-security-pilot.outputs.evidence-digest }}
+
+  security-completion:
+    # The ruleset counts this final job; evaluator success alone cannot satisfy it.
+    name: ${{ github.event_name == 'workflow_dispatch' && 'manual-security-completion' || 'trusted-security-pilot' }}
+    needs: [trusted-security-pilot, attest-evidence]
+    if: always()
+    runs-on: ubuntu-24.04
+    timeout-minutes: 2
+    permissions: {}
+    steps:
+      - name: Require evaluator and attestation success
+        env:
+          EVALUATOR_RESULT: ${{ needs.trusted-security-pilot.result }}
+          ATTESTATION_RESULT: ${{ needs.attest-evidence.result }}
+        run: |
+          test "$EVALUATOR_RESULT" = success
+          test "$ATTESTATION_RESULT" = success

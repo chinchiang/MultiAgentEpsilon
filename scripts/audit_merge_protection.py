@@ -3,7 +3,6 @@
 import argparse
 import base64
 import json
-import subprocess
 import sys
 from pathlib import Path
 
@@ -91,12 +90,11 @@ def main():
     try:
         trust = json.loads((ROOT/'security/trust-policy.json').read_text())
         repo = trust['repository']
+        from security_harness.github_readonly import ReadOnlyGitHub
+        client = ReadOnlyGitHub()
         def api(path, pages=False):
-            args = ['gh','api',f'repos/{repo}/{path}']
-            if pages:
-                args += ['--paginate', '--jq', '.[] | @json']
-            raw = subprocess.check_output(args, encoding='utf-8', stderr=subprocess.DEVNULL, timeout=60)
-            return [json.loads(line) for line in raw.splitlines() if line] if pages else json.loads(raw)
+            full = f'/repos/{repo}/{path}'
+            return client.pages(full) if pages else client.api(full)
         branch = api('branches/main')
         brief = api('rulesets?includes_parents=true&per_page=100', pages=True)
         rules = [api('rulesets/'+str(r['id'])) for r in brief]
@@ -105,7 +103,7 @@ def main():
         try:
             owners_file = api('contents/.github/CODEOWNERS?ref=main')
             codeowners = base64.b64decode(owners_file['content']).decode('utf-8')
-        except subprocess.CalledProcessError:
+        except Exception:
             codeowners = None
         evidence.update(inspect_configuration(branch, rules, pr, collaborators, trust['baseline_reviewers'],
                                               codeowners, args.publisher_app_id))

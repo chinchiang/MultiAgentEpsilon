@@ -2,12 +2,12 @@ flowchart TB
     Start["啟動 run_security.py"] --> Initial["建立 run ID 與初始 BLOCK 報告<br/>解析前就留下證據"]
     Initial --> Parent["supervisor 登記擁有者／程序群組<br/>持久化握手後啟動限額 worker"]
     Parent --> Config["核對 RoE／政策／案例清單<br/>計算 subject、evaluator、policy 摘要"]
-    Config --> G1["G1：候選 requirements.lock<br/>PyPI 來源／版本／hash／冷卻期／wheel"]
+    Config --> G1["G1：候選 requirements.lock<br/>PyPI 來源／版本／hash／冷卻期／wheel<br/>鎖定檔 SBOM／每個版本 OSV 查詢"]
     G1 --> G2["G2：真實 Gitleaks<br/>完整輸入清冊、必要 HEAD 歷史與覆蓋證據"]
     G2 --> Precondition{"G1／G2 完成且零 finding？"}
     Precondition -->|"是"| Containers["核對 runtime pin 與候選 lock<br/>建立無網路 app／DB 容器"]
     Precondition -->|"否"| Skip["AUTH = NOT_RUN<br/>保留掃描錯誤與覆蓋缺口"]
-    Containers --> Auth["容器外 oracle 執行 18 個必要授權案例<br/>核對 HTTP 完整契約與資料庫副作用"]
+    Containers --> Auth["容器外 oracle 執行 32 個必要授權案例<br/>核對 HTTP 完整契約與資料庫副作用"]
     Auth --> Pending["確定性判定＋來源摘要再核對<br/>完成結果先保持 AWAITING_CLEANUP"]
     Skip --> Pending
     Config -->|"設定或來源錯誤"| Error["錯誤證據／BLOCK"]

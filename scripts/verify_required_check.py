@@ -16,7 +16,6 @@ check; the dedicated publisher additionally requires cryptographic attestations.
 import argparse
 import json
 import re
-import subprocess
 import sys
 from pathlib import Path
 
@@ -68,20 +67,31 @@ def verify(api, repo, number, pages):
                         "status": check["status"], "conclusion": check["conclusion"]})
     latest = max(checks, key=lambda c: (c.get("started_at") or "", c["id"]))
     need(latest["status"] == "completed" and latest["conclusion"] == "success", "LATEST_CHECK_NOT_SUCCESS")
+    latest_source = next(s for s in sources if s['check_run_id'] == latest['id'])
+    complete = api(f"repos/{repo}/actions/runs/{latest_source['run_id']}")
+    need(complete.get('status') == 'completed' and complete.get('conclusion') == 'success'
+         and complete.get('head_sha') == head
+         and complete.get('run_attempt') == latest_source['run_attempt'], 'WORKFLOW_NOT_SUCCESS')
     return {"decision": "ALLOW", "head_sha": head, "sources": sources}
 
 
 def gh_api(path):
-    # gh emits UTF-8; the locale codec (e.g. cp950 on zh-TW Windows) cannot decode PR titles.
-    output = subprocess.check_output(["gh", "api", path], encoding="utf-8", timeout=30, stderr=subprocess.DEVNULL)
-    return json.loads(output)
+    return reader().api('/' + path)
 
 
 def gh_pages(path):
-    # One JSON object per line across all pages (gh 2.46 lacks --slurp).
-    output = subprocess.check_output(["gh", "api", "--paginate", "--jq", ".[] | @json", path],
-                                     encoding="utf-8", timeout=60, stderr=subprocess.DEVNULL)
-    return [json.loads(line) for line in output.splitlines() if line]
+    return reader().pages('/' + path)
+
+
+_reader = None
+
+
+def reader():
+    global _reader
+    if _reader is None:
+        from security_harness.github_readonly import ReadOnlyGitHub
+        _reader = ReadOnlyGitHub()
+    return _reader
 
 
 def main():

@@ -147,4 +147,15 @@ def create_app(dsn: str, schema: str, *, variant: str = "fixed") -> FastAPI:
         with connect(dsn, schema) as conn:
             return conn.execute("SELECT * FROM items WHERE tenant=%s ORDER BY id", (user["tenant"],)).fetchall()
 
+    @app.delete("/items/{item_id}", status_code=204)
+    def delete_item(item_id: int, user=Depends(principal)):
+        with connect(dsn, schema) as conn:
+            if variant == "vulnerable":
+                row = conn.execute("DELETE FROM items WHERE id=%s RETURNING *", (item_id,)).fetchone()
+            else:
+                row = conn.execute("DELETE FROM items WHERE id=%s AND tenant=%s AND (owner=%s OR %s='admin') RETURNING *",
+                                   (item_id, user["tenant"], user["id"], user["role"])).fetchone()
+        if not row:
+            raise HTTPException(404, "item not found")
+
     return app

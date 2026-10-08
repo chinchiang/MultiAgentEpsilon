@@ -51,12 +51,12 @@ PR #12 已由 CatGrocery 對最新 head `58d9bc0` 獨立核准，正式 [run 375
 
 1. **決定是否清除 git 歷史中的 AWS 帳號識別資訊。** 目前文件已移除，但 commit `2158448` 起的歷史仍含該帳號 ID 與權限集名稱；帳號 ID 不是 API 金鑰；完全移除需另行核准的歷史改寫與協作安排，本輪不暫停規則集或強推，且公開期間可能已被快取。清除後可加入針對帳號 ID 的 Gitleaks 規則（歷史仍含該值時，加入規則會使每次掃描 BLOCK）。
 2. **開啟 repository 的 Secret scanning、Push Protection、Dependabot alerts 與 Private vulnerability reporting**（`SECURITY.md` 指向此回報管道）。
-3. **合併並驗收本輪簽章與固定 Actions 更新。** 獨立工作與消費端驗證已備妥；仍須透過受保護 PR 審查、確認真實遠端簽章與專用 App 消費結果，見[本輪修正](security-boundaries-20261008.zh-TW.md)。
-5. 把 fork PR 的 workflow 核准政策改為所有外部貢獻者都需核准；開啟 Actions 的 SHA pinning 強制。
-6. 建立並部署專用 App、把 `epsilon/trusted-merge` 加入規則集，並以普通開發者身分完成繞過驗收。
-7. 選定授權條款（目前沒有 LICENSE，公開程式碼等同保留所有權利）。
+3. **完成專用 App 消費與部署驗收。** PR #15 已經獨立核准並合併；main `a5d1ba1` 的 704 項測試及真實遠端簽章已驗證。待辦是受控主機上的 App 消費、必要檢查來源綁定及普通開發者拒絕探測，不能與已完成的簽章生成混為一談。
+4. 把 fork PR 的 workflow 核准政策改為所有外部貢獻者都需核准；開啟 Actions 的 SHA pinning 強制。
+5. 建立並部署專用 App、把 `epsilon/trusted-merge` 加入規則集，並以普通開發者身分完成繞過驗收。
+6. 選定授權條款（目前沒有 LICENSE，公開程式碼等同保留所有權利）。
 
-**功能面：** G3、完整 G5、SBOM／SCA／CVE、ASVS 產品適用性判定、證據簽章與正式發布、GLM 真實推論與結構化輸出（依使用者指示暫停）、較大樣本的跨家族穩定性與偏誤實驗，以及 W15–W25。
+**功能面：** G3、完整 G5、其他生態系的 SBOM／SCA／CVE、ASVS 產品適用性判定、正式發布、GLM 真實推論與結構化輸出（依使用者指示暫停）、較大樣本的跨家族穩定性與偏誤實驗，以及 W15–W25。
 
 **已知限制：** 本地完整流程僅支援 Linux x86_64、Python 3.12 與 Docker（Windows 需使用 WSL）；Starlette TestClient 仍有一項 httpx 棄用警告，遷移前需先做相容性評估。
 
@@ -66,10 +66,10 @@ PR #12 已由 CatGrocery 對最新 head `58d9bc0` 獨立核准，正式 [run 375
 
 - `pytest.xml`：政策、套件 metadata、真實 Gitleaks、歷史機密、RoE、基準變更及 PostgreSQL 正反例。
 - `http-smoke.json`：真實 loopback HTTP 健康、登入、合法讀取及同角色非法讀取。
-- `<run-id>/report.json`：每次新 run 的 G1、G2、AUTH 結果及 ALLOW／BLOCK；缺陷版預期恰好 6 個政策指定的 AUTH findings，修正版預期 0。
+- `<run-id>/report.json`：每次新 run 的 G1、G2、AUTH 結果及 ALLOW／BLOCK；本輪候選缺陷版預期恰好 9 個政策指定的 AUTH findings，修正版預期 0。
 - `latest.txt`：最新 run 的索引。檢查 report 的 subject／policy digest 與當次原碼，不能將舊報告當成本次結果。
 
-`expect_block.py` 要求整個 run 的 `execution` 為 COMPLETED、沒有任何 errors、清理完成、variant 為 vulnerable、三項 gate 都確實完成、G1／G2 無 findings，且 18 個授權案例中失敗的恰好是政策 `seeded_defect_case_ids` 列出的 6 個；工具 ERROR、清理失敗、來源在執行中變動、沒有案例或換成其他案例失敗都會使驗收失敗。
+`expect_block.py` 要求整個 run 的 `execution` 為 COMPLETED、沒有任何 errors、清理完成、variant 為 vulnerable、三項 gate 都確實完成、G1／G2 無 findings，且本輪候選 32 個授權案例中失敗的恰好是政策 `seeded_defect_case_ids` 列出的 9 個；工具 ERROR、清理失敗、來源在執行中變動、沒有案例或換成其他案例失敗都會使驗收失敗。
 
 測試數量以 pytest 收集的項目計算（含 parametrize 展開），不是 `def test_` 的函式數。
 
@@ -82,10 +82,10 @@ W 編號與 G0–G6 閘門編號都來自本地保留的原始規劃。依公開
 | W01、W07 | 試點範圍完成 | 正式產品盤點、owner 與 ASVS 等級指定。 |
 | W02 | 公開程式碼與操作文件已發布 | 內部參考資料保留本地。 |
 | W03 | 固定 checksum／digest、wheel-only、DB 限權、候選 git 強化 | 不受信 PR／惡意套件的強隔離（VM／microVM）尚未驗證。 |
-| W04 | 嚴格狀態、必要 coverage 與歷史、subject／policy 綁定 | 外部可信證據與發布（簽章）。 |
-| W05、W09 | 18 案例授權 fixture 與五種真實缺陷變體 | 完整 G5。 |
-| W06、W20 | G1 metadata 與 G2（含壓縮檔中繼資料與歷史） | G1 行為分析、SBOM／SCA、G3。 |
-| W08 | main 規則集 active、遠端正反例、run 與 PR base 綁定、全 commit 核准排除 | 專用可信檢查來源、artifact attestation、普通開發者繞過驗收。 |
+| W04 | 嚴格狀態、必要 coverage 與歷史、subject／policy 綁定；main 真實簽章已驗證 | 專用 App 消費與正式發布。 |
+| W05、W09 | main 為 18 案例／五種變體；本輪候選為 32 案例／七種變體 | 完整 G5。 |
+| W06、W20 | G1 metadata 與 G2；本輪候選新增鎖定檔 SBOM／OSV SCA | G1 行為分析、安裝映像及其他生態系、G3。 |
+| W08 | main 規則集 active、遠端正反例、run 與 PR base 綁定、全 commit 核准排除 | 專用可信檢查來源與普通開發者繞過驗收；main artifact attestation 已驗證。 |
 | W10–W14 | gateway、三種 adapter、盲測與多輪框架；Gemini／Claude 真實小樣本驗收 | GLM 真實推論、較大樣本的穩定性與偏誤實驗。 |
 | W15–W19 | 待完成 | 產品適用性、簽章證據、完整 release、營運與正式資料／預算治理。 |
 | W21 | 限縮本地 RoE；模型 RoE 呼叫上限實際執行 | 任意網路掃描、redirect／DNS／工具委派與外部資產授權。 |
@@ -94,3 +94,7 @@ W 編號與 G0–G6 閘門編號都來自本地保留的原始規劃。依公開
 ## 2026-10-08 安全邊界修正
 
 本輪完整 703 項回歸通過，新增歷程／混合審查／重跑者／fork 身分／預留／程序與掃描範圍等變體，並備妥獨立簽署與固定驗證器。完整對照、真實模型結果及外部待辦見[安全邊界修正](security-boundaries-20261008.zh-TW.md)。上述 627 等數字屬各段歷史基準，不是本輪測試下限；專用 App 尚未部署的狀態維持不變。
+
+## 2026-10-08 後續擴充（待審查合併）
+
+本輪候選版本將 G1 擴充為鎖定檔 CycloneDX 1.6 清冊與 OSV 精確版本查詢，AUTH 增至 32 案例／9 個指定缺陷；目錄版本為 synthetic-review-v3，增加 B13–B16。尚未合併前，正式 main 仍是 `a5d1ba1` 的 704 項基準及 18／6 AUTH 契約。歷史段落的 627／703 數字保留供辨識批次，不是目前下限。完整新增驗收與外部缺口見[後續擴充紀錄](security-expansion-20261008.zh-TW.md)。

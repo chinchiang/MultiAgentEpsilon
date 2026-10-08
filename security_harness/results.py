@@ -100,6 +100,9 @@ def validate_policy(policy: dict) -> None:
     for contract in contracts.values():
         if not isinstance(contract, dict) or contract.get("kind") not in ("scan", "test"):
             raise ValueError("invalid gate contract")
+        for flag in ('coverage_required', 'history_required', 'sca_required'):
+            if flag in contract and type(contract[flag]) is not bool:
+                raise ValueError("invalid gate coverage flag")
         if contract["kind"] == "test":
             validate_cases([{"case": c, "passed": True} for c in contract.get("case_ids", [])], contract)
             seeded_defects(contract)
@@ -178,6 +181,10 @@ def decide(records: list[dict], policy: dict, subject: str, policy_digest: str,
                 if (policy['gate_contracts'][gate].get('history_required') and
                         not re.fullmatch('[0-9a-f]{40}|[0-9a-f]{64}', str(coverage.get('history_head')))):
                     raise ValueError('history coverage missing')
+            if policy["gate_contracts"][gate].get("sca_required"):
+                from .dependencies import validate_evidence as validate_dependencies
+                validate_dependencies(record["sca"], record["packages"], record["coverage_count"],
+                                      record["findings"], now, policy["max_evidence_age_seconds"])
             if record["kind"] == "test":
                 validate_cases(record["cases"], policy["gate_contracts"][gate])
                 if (record["coverage_count"] != len(record["cases"]) or
@@ -187,7 +194,7 @@ def decide(records: list[dict], policy: dict, subject: str, policy_digest: str,
             age = (now - when).total_seconds()
             if not 0 <= age <= policy["max_evidence_age_seconds"]:
                 raise ValueError("stale or future evidence")
-        except (KeyError, ValueError, TypeError):
+        except (KeyError, ValueError, TypeError, AttributeError):
             reasons.append(f"{gate}: invalid, missing, stale or mismatched evidence")
             continue
         if record["execution"] != "COMPLETED":

@@ -6,6 +6,7 @@ from pathlib import Path
 import pytest
 
 from security_harness.results import decide, result
+from tests.dependency_evidence import clean_evidence
 
 POLICY = json.loads((Path(__file__).resolve().parents[1] / "security/policy.json").read_text())
 NOW = datetime.now(timezone.utc)
@@ -14,6 +15,7 @@ NOW = datetime.now(timezone.utc)
 def records():
     output = [result(g, "COMPLETED", "test" if g == "AUTH" else "scan", 3, 0, "subject", "policy", "tested", run_id="run")
               for g in POLICY["required_gates"]]
+    output[0]["packages"], output[0]["sca"] = clean_evidence(3, NOW)
     output[-1]["cases"] = [{"case": c, "passed": True} for c in POLICY["gate_contracts"]["AUTH"]["case_ids"]]
     output[-1]["coverage_count"] = len(output[-1]["cases"])
     output[1]['evidence'] = {'coverage': {'status': 'COMPLETE', 'selected_files': 3,

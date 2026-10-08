@@ -75,7 +75,7 @@ python3.12 -I /opt/epsilon-publisher/app/scripts/publish_trusted_check.py \
 
 **執行與簽章身分：** `pull_request_target` 使用 PR **base 分支**的 workflow；目前 PR 的 base 不能證明舊 run 的來源。發布程式以提交 SHA、head repository ID 與分支綁定 PR／run，讀取包含已關閉 PR 的完整 timeline；同一範圍曾發生 `base_ref_changed` 時，一律拒絕，改用新 head 分支建立 PR。不同 fork 或分支上的相同 SHA 不互相取代。
 
-獨立的 `attest-evidence` 工作在評估成功後，以 OIDC 簽署上傳 ZIP 的 SHA-256；它使用新 runner，不取出候選來源、不執行 evaluator 匯入，也不接收模型憑證。發布器使用固定版本、root 持有且雜湊相符的 GitHub CLI 驗證 Sigstore 簽章，要求此儲存庫的 `security.yml`、核准的 evaluator commit、`refs/heads/main` 與 GitHub 託管 runner；另外核對已驗證 SLSA 陳述中的 run／attempt URL 及 artifact digest。未簽署的 JSON、其他版本或其他批次的簽章都不能放行。CLI 從離線 bundle 驗證，不接收 App 權杖或模型金鑰；更新可信根仍需連線至 `tuf-repo.github.com` 與 Sigstore 的可信根服務。
+評估工作顯示名稱為 `trusted-security-evaluation`；獨立的 `attest-evidence` 工作在評估成功後，以 OIDC 簽署上傳 ZIP 的 SHA-256；它使用新 runner，不取出候選來源、不執行 evaluator 匯入，也不接收模型憑證。發布器使用固定版本、root 持有且雜湊相符的 GitHub CLI 驗證 Sigstore 簽章，要求此儲存庫的 `security.yml`、核准的 evaluator commit、`refs/heads/main` 與 GitHub 託管 runner；另外核對已驗證 SLSA 陳述中的 run／attempt URL 及 artifact digest。未簽署的 JSON、其他版本或其他批次的簽章都不能放行。最終必要工作 `trusted-security-pilot` 必須在評估及簽章成功後才成功，發布器另核對三項工作與指定步驟；手動執行最終名稱為 `manual-security-completion`。GitHub 個人私人儲存庫若不支援 artifact attestation，不能移除簽章驗證或以評估成功替代，需先處理儲存庫／平台支援條件。CLI 從離線 bundle 驗證，不接收 App 權杖或模型金鑰；更新可信根仍需連線至 `tuf-repo.github.com` 與 Sigstore 的可信根服務。
 
 **負例證據：** `expect_block.py` 執行的是 evaluator 自己的缺陷版，因此負例報告綁定 evaluator 的 worktree manifest 與 evaluator SHA，不綁定候選；失敗案例必須恰好是政策 `seeded_defect_case_ids`。同一套證據契約（`validate_evidence`）也在 CI 上傳前由 `scripts/check_publishable_evidence.py` 自我檢查，契約不一致會讓產生證據的 run 直接失敗。
 
