@@ -21,6 +21,9 @@ def fake_api(checks, runs_by_suite, pr_state="open"):
             return {"total_count": len(checks), "check_runs": checks}
         if "check_suite_id=" in path:
             return {"workflow_runs": runs_by_suite[int(path.split("check_suite_id=")[1].split("&")[0])]}
+        if '/actions/runs/' in path:
+            number = int(path.rsplit('/', 1)[1])
+            return next(r for runs in runs_by_suite.values() for r in runs if r['id'] == number)
         raise AssertionError(path)
     return api
 
@@ -32,7 +35,8 @@ def check(id_, suite, conclusion="success", started="2026-10-06T01:00:00Z", app=
 
 def run(id_, event="pull_request_target", path=".github/workflows/security.yml", head=HEAD, branch="feature"):
     return {"id": id_, "run_attempt": 1, "event": event, "path": path, "head_sha": head,
-            "head_branch": branch, "head_repository": {"id": 10}}
+            "head_branch": branch, "head_repository": {"id": 10},
+            "status": "completed", "conclusion": "success"}
 
 
 def listing(*extra):
@@ -42,6 +46,15 @@ def listing(*extra):
 def test_trusted_pull_request_target_source_allows():
     result = checker.verify(fake_api([check(1, 10)], {10: [run(100)]}), "owner/repo", 5, listing())
     assert result["decision"] == "ALLOW" and result["sources"][0]["run_id"] == 100
+
+
+@pytest.mark.parametrize('status,conclusion', [('completed', 'failure'), ('completed', 'cancelled'),
+    ('completed', 'timed_out'), ('in_progress', None), (None, 'success'), ('completed', None)])
+def test_green_evaluator_cannot_hide_failed_or_incomplete_signing_workflow(status, conclusion):
+    source = run(100)
+    source.update(status=status, conclusion=conclusion)
+    with pytest.raises(checker.Denied, match='WORKFLOW_NOT_SUCCESS'):
+        checker.verify(fake_api([check(1, 10)], {10: [source]}), 'owner/repo', 5, listing())
 
 
 @pytest.mark.parametrize("attack,code", [

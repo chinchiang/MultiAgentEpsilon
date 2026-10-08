@@ -67,6 +67,11 @@ def verify(api, repo, number, pages):
                         "status": check["status"], "conclusion": check["conclusion"]})
     latest = max(checks, key=lambda c: (c.get("started_at") or "", c["id"]))
     need(latest["status"] == "completed" and latest["conclusion"] == "success", "LATEST_CHECK_NOT_SUCCESS")
+    latest_source = next(s for s in sources if s['check_run_id'] == latest['id'])
+    complete = api(f"repos/{repo}/actions/runs/{latest_source['run_id']}")
+    need(complete.get('status') == 'completed' and complete.get('conclusion') == 'success'
+         and complete.get('head_sha') == head
+         and complete.get('run_attempt') == latest_source['run_attempt'], 'WORKFLOW_NOT_SUCCESS')
     return {"decision": "ALLOW", "head_sha": head, "sources": sources}
 
 

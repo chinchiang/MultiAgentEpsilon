@@ -18,6 +18,16 @@ from tests.dependency_evidence import clean_evidence
 ROOT = Path(__file__).resolve().parents[1]
 
 
+@pytest.mark.parametrize('attack', ['missing-final-job', 'signing-failed', 'final-skipped', 'missing-final-step'])
+def test_green_evaluator_requires_verified_signing_and_final_gate(bundle, attack):
+    if attack == 'missing-final-job': bundle['jobs'].pop()
+    elif attack == 'signing-failed': bundle['jobs'][1]['conclusion'] = 'failure'
+    elif attack == 'final-skipped': bundle['jobs'][2]['conclusion'] = 'skipped'
+    else: bundle['jobs'][2]['steps'] = []
+    with pytest.raises(publisher.Denied, match='JOB_SOURCE|COMPLETION_STEP_INCOMPLETE'):
+        publisher.validate_bundle(**bundle)
+
+
 @pytest.fixture
 def bundle():
     now = datetime.now(timezone.utc)
@@ -43,10 +53,12 @@ def bundle():
              "Evaluator regressions and isolation adversarial checks", "Prove seeded defect still blocks",
              "Evaluate candidate through external oracle", "Remove evaluator regression database",
              "Reap cancelled security runs", "Retain evaluator-owned evidence"]
-    jobs = [{"name": "trusted-security-pilot", "conclusion": "success",
+    jobs = [{"name": "trusted-security-evaluation", "conclusion": "success",
              "steps": [{"name": n, "conclusion": "success"} for n in steps]}]
     jobs.append({"name": "Attest evaluator-owned evidence", "conclusion": "success",
                  "steps": [{"name": "Sign evaluator-owned evidence", "conclusion": "success"}]})
+    jobs.append({'name': 'trusted-security-pilot', 'conclusion': 'success',
+                 'steps': [{'name': 'Require evaluator and attestation success', 'conclusion': 'success'}]})
     review = {"id": 11, "state": "APPROVED", "commit_id": "b"*40, "user": {"login": "reviewer"}}
     subject = "worktree-manifest-v1:sha256:" + "c"*64
     run_id = "11111111-1111-4111-8111-111111111111"

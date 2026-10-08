@@ -40,13 +40,14 @@ flowchart TB
     Publisher["專用 trusted publisher：程式已備妥<br/>App／主機／Ruleset 綁定尚未部署"]
     Report -->|"評估工作保存證據"| CI
     CI --> Signed
-    CI -->|"來源核對與核准均必要"| Rules
+    Signed --> Completion["最終必要關卡<br/>評估＋簽章全成功才放行<br/>候選版已修正，main 待合併"]
+    Completion -->|"來源核對與核准均必要"| Rules
     Signed -.->|"待受控主機驗證簽章與來源"| Publisher
     Publisher -.->|"未啟用的 epsilon/trusted-merge"| Rules
 
     classDef implemented fill:#e8f4ff,stroke:#28629b,color:#153958;
     classDef isolated fill:#edf8ef,stroke:#3a8051,color:#21472e;
     classDef pending fill:#fff4dc,stroke:#a67822,stroke-dasharray:5 5,color:#664708;
-    class Run,Scan,Oracle,Decision,Report,Cases,Gateway,Live,Score,Advisory,CI,Signed,Rules implemented;
+    class Run,Scan,Oracle,Decision,Report,Cases,Gateway,Live,Score,Advisory,CI,Signed,Completion,Rules implemented;
     class Isolation isolated;
     class GLM,Publisher pending;

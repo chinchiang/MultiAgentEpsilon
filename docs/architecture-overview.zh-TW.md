@@ -275,3 +275,5 @@ mmdc --configFile docs/diagrams/mermaid-config.json \
 ## 範圍與後續
 
 目前是有限的合成試點：尚未完成任意產品的 ASVS 適用性、G3、完整 G5／G6、其他生態系及安裝映像的 SBOM／SCA／CVE 與較大模型樣本。專用 App 的簽章驗證程式已實作，但正式服務與必要來源綁定仍缺外部資源。這些狀態詳見[覆蓋對照](asvs-coverage.zh-TW.md)、[模型輸出驗收](structured-output.zh-TW.md)與[發布器部署文件](trusted-check-publisher.zh-TW.md)。
+
+本輪另外加入評估與簽章共同成功的最終必要關卡；現行 main 的舊式評估綠燈不能代表整體 CI 成功。私人儲存庫的簽章平台限制及修正見[擴充紀錄](security-expansion-20261008.zh-TW.md)。

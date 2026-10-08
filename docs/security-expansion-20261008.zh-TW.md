@@ -57,3 +57,13 @@ python3.12 -I scripts/verify_required_check.py --pr <本輪PR>
 已完成的直接觀察：目前鎖定檔 23 個套件的 OSV 查詢完整、0 findings；未安裝的 urllib3 1.25.11 真實負例查詢取得 20 筆 advisory／20 個 CVE 別名，判為 BLOCK。B13–B16 兩個 mock 審查者各兩輪，共 16 次呼叫／8,192 預留輸出詞元全部完成，兩家各 4 TP／4 TN、0 FP／FN、8 組可比較結果零分歧，清理完成。這些 mock 成績不是 Gemini／Claude 成績。
 
 AWS STS 經既有非機密設定選擇器確認回覆 ExpiredToken；已要求經安全環境設定更新臨時憑證。沒有自動切換付費模型、呼叫 GLM 或把未執行的 v3 真實配對列為成功。
+
+## 簽章失敗不能留下可合併的綠燈
+
+候選 CI [37781203657](https://github.com/chinchiang/MultiAgentEpsilon/actions/runs/37781203657) 的評估工作完成 760 項回歸及正反例，但簽章工作因 GitHub 回覆「個人私人儲存庫不支援 artifact attestation」而失敗。這是失敗批次，不能列為完整 CI 成功或正式簽章驗收。使用者選擇恢復公開；目前連線修改可見度回覆 403，需擁有者在 GitHub 設定完成，程式不自行更改其他權限或移除簽章要求。
+
+本輪進一步將原評估工作的顯示名稱改為 `trusted-security-evaluation`，新增無權杖、無 checkout、無寫入權限的最終工作 `trusted-security-pilot`，依賴評估與簽章兩個工作。最終工作使用 `always()`，只有兩項結果都是 success 才通過；failure／cancelled／skipped 都失敗。手動執行使用 `manual-security-completion`，不能冒充必要檢查。
+
+發布器要求評估、簽章、最終關卡三個工作及指定步驟全部成功。過渡期來源驗證器也重新讀取整個 workflow 的最新狀態及 attempt，防止既有 main 的評估綠燈掩蓋簽章失敗。16 種上游結果組合以實際 shell 回歸，另有整體 workflow 失敗、簽章失敗、最終工作缺失／跳過及缺少必要步驟等反例。
+
+此修改待獨立核准及合併。現行 main 尚未包含最終關卡；不能只看舊式評估工作綠燈就合併，須核對整體 workflow 與來源。main 真實歷史簽章驗收仍有效，但不是本輪失敗的替代證據。

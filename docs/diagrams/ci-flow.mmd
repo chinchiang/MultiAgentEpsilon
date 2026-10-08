@@ -12,7 +12,10 @@ flowchart TB
     Cleanup --> Finished{"評估與清理成功？"}
     Finished -->|"是"| Attest["獨立全新 runner<br/>只取得 ZIP 摘要，簽署 artifact attestation"]
     Finished -->|"否"| Block["BLOCK；保留失敗證據<br/>簽署工作不執行"]
-    Finished -->|"成功的正式必要檢查"| Verify["合併前 verify_required_check.py<br/>核對 workflow／事件／head／分支／base 歷程"]
+    Attest --> Final{"評估與簽章都是 success？"}
+    Block --> Final
+    Final -->|"是；最終必要檢查成功"| Verify["合併前 verify_required_check.py<br/>核對 workflow／事件／head／分支／base 歷程"]
+    Final -->|"否"| FinalFailure["最終必要檢查失敗<br/>failure／cancelled／skipped 均阻擋"]
     Verify --> Merge["main Ruleset＋有效獨立核准<br/>符合條件才可合併"]
     Attest -.-> Publisher["待部署的專用 App<br/>驗證簽章、來源、digest、run attempt、核准與最新 run"]
     Publisher -.-> Future["待綁定 epsilon/trusted-merge<br/>目前不能當作已生效的合併條件"]

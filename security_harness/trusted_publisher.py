@@ -239,14 +239,17 @@ def validate_bundle(settings, gate_policy, pr, run, newer_runs, jobs, files, rev
     need(type(run["run_attempt"]) is int and run["run_attempt"] >= 1, "RUN_ATTEMPT")
     reject_newer_runs(run, newer_runs, pr["head"]["sha"])
     named = {j["name"]: j for j in jobs}
-    need(len(jobs) == len(named) == 2
-         and set(named) == {"trusted-security-pilot", "Attest evaluator-owned evidence"}
+    need(len(jobs) == len(named) == 3
+         and set(named) == {"trusted-security-evaluation", "Attest evaluator-owned evidence", "trusted-security-pilot"}
          and all(j["conclusion"] == "success" for j in jobs), "JOB_SOURCE")
-    steps = {s["name"]: s["conclusion"] for s in named["trusted-security-pilot"]["steps"]}
+    steps = {s["name"]: s["conclusion"] for s in named["trusted-security-evaluation"]["steps"]}
     need(all(steps.get(s) == "success" for s in REQUIRED_STEPS), "REQUIRED_STEP_INCOMPLETE")
     signing = named["Attest evaluator-owned evidence"]["steps"]
     need(any(s["name"] == "Sign evaluator-owned evidence" and s["conclusion"] == "success"
              for s in signing), "ATTESTATION_STEP_INCOMPLETE")
+    completion = named['trusted-security-pilot']['steps']
+    need(any(s['name'] == 'Require evaluator and attestation success' and s['conclusion'] == 'success'
+             for s in completion), 'COMPLETION_STEP_INCOMPLETE')
     excluded = {person["login"] for person in (run.get("actor"), run.get("triggering_actor"))
                 if isinstance(person, dict) and person.get("login")} | set(commit_identities)
     approvals = validate_review(pr, reviews, permissions, settings, excluded)
