@@ -2,7 +2,33 @@
 
 Vibe Coding 資安測試框架的第一個可執行試點：Python 3.12、FastAPI、PostgreSQL、Gitleaks 與確定性政策判定。使用合成資料驗證「缺陷能被攔截、修正版能通過、工具故障不能假綠」。
 
-目前支援 Linux x86_64 與可用的 Docker daemon。這是測試平台與刻意含缺陷的測試標的；不應部署成正式服務，也未完成 ASVS、G0–G6 或多模型驗收。
+目前支援 Linux x86_64 與可用的 Docker daemon。這是測試平台與刻意含缺陷的測試標的；不應部署成正式服務，也未完成完整 ASVS、G0–G6 或多模型穩定性與偏誤驗收。
+
+## 系統架構與流程（Architecture Overview）
+
+![目前系統架構](docs/diagrams/architecture-overview.svg)
+
+[完整架構、安全測試／多模型／CI 流程與目錄結構](docs/architecture-overview.zh-TW.md)依已合併的實作整理。實線為已實作路徑；虛線依標籤表示 GLM 真實連線暫停、復原路徑或專用 App 尚待部署。模型報告僅供參考，ALLOW／BLOCK 仍由確定性政策及外部 oracle 判定。
+
+```text
+MultiAgentEpsilon/
+├── .github/             CI 工作流程與 CODEOWNERS
+├── deploy/              專用檢查發布器的部署範本
+├── docs/                架構、覆蓋、操作與驗收文件
+│   └── diagrams/        Mermaid 原始圖與可分享的 SVG
+├── fixture_app/         受測的合成 FastAPI 應用
+├── scripts/             安裝、執行、回收與治理入口
+├── security/            政策、工具鎖定、RoE 與合成案例
+├── security_harness/    可信評估、隔離、掃描與證據核心
+│   └── llm/             模型 gateway、adapter、盲審與評分
+├── tests/               契約、缺陷變體與隔離回歸
+├── requirements.lock    固定版本與套件雜湊
+├── requirements.in      套件宣告
+├── pyproject.toml       Python 與 pytest 設定
+└── SECURITY.md          資安回報及處理範圍
+```
+
+此為主要目錄摘要；[完整檔案樹與本機生成目錄](docs/architecture-overview.zh-TW.md#目錄結構)另行列出。
 
 ## 開始執行
 
@@ -44,7 +70,7 @@ python3 scripts/dev_db.py stop
 | G1 | PyPI metadata、固定版本／hash、來源、冷卻期、wheel-only 安裝 | CVE／KEV／EPSS、SBOM、惡意套件行為、所有生態系 |
 | G2 | 真實 Gitleaks、遮罩、工作樹及候選 HEAD 可達 blobs、限額 gzip／zip／tar 展開 | 服務端 Push Protection、遠端不可得歷史／快取、金鑰撤銷 |
 | 授權回歸 | 登入負例、同角色、跨租戶、管理者讀寫、欄位限制、登出及完整 fixture 狀態；18 個案例 | 完整 G5／Web/API 黑箱掃描、TLS／CSRF／JWT／SSRF |
-| 政策 | 嚴格結果格式、故障阻擋、subject／policy digest、基準變更檢查 | 簽章／可信發布、例外生命週期、不可繞過的遠端設定 |
+| 政策與證據 | 嚴格結果格式、故障阻擋、subject／policy digest、基準變更檢查、CI 簽章與來源驗證 | 專用可信發布器正式部署、例外生命週期、普通開發者的完整遠端繞過驗收 |
 | CI | 遠端 main／PR 正反例、固定 actions SHA、最小權限、早期拒絕證據與清理；main 規則已讀回 | 專用可信來源尚未部署，普通開發者繞過驗收仍未完成 |
 | 多模型 | [受限 gateway 與三種 adapter](docs/model-gateway.zh-TW.md)、[合成盲測與裁決試點](docs/blind-review.zh-TW.md) | GLM 真實推論、兩個真實家族的多輪穩定性、完整 G6／偏誤驗收 |
 
@@ -64,6 +90,7 @@ G2 與 subject digest 共用輸入清冊：生成物名稱只在 repository 根�
 
 ## 文件與來源
 
+- [系統架構、執行流程與完整目錄結構](docs/architecture-overview.zh-TW.md)
 - [試點範圍、授權矩陣與限制](docs/pilot-scope.zh-TW.md)
 - [實作現況與剩餘待辦](docs/milestone-status.zh-TW.md)（[歷史紀錄](docs/milestone-history.zh-TW.md)）
 - [可信執行、基準更新與合併保護](docs/trusted-execution.zh-TW.md)
