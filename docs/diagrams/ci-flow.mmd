@@ -1,0 +1,18 @@
+flowchart TB
+    PR["PR → main<br/>pull_request_target"] --> Checkout["checkout base evaluator 與 head candidate<br/>candidate 僅作資料"]
+    Checkout --> Guard{"全部路徑有最新 head 的可信獨立核准？"}
+    Guard -->|"是"| Evaluate["可信 evaluator 安裝、離線 runtime 建置與完整回歸<br/>缺陷版必須 BLOCK；候選接受外部 oracle 評估"]
+    Guard -->|"否"| Failure["正式檢查失敗"]
+    Other["main push／workflow_dispatch<br/>依事件選 evaluator；手動檢查另用名稱"] --> Evaluate
+    Evaluate --> Contract{"證據自我檢查通過？"}
+    Contract -->|"是"| Success["評估工作成功"]
+    Contract -->|"否或先前步驟失敗"| Failure
+    Success --> Cleanup["always：停止本次 DB、janitor 回收<br/>上傳 evaluator-owned artifacts／audit ZIP"]
+    Failure --> Cleanup
+    Cleanup --> Finished{"評估與清理成功？"}
+    Finished -->|"是"| Attest["獨立全新 runner<br/>只取得 ZIP 摘要，簽署 artifact attestation"]
+    Finished -->|"否"| Block["BLOCK；保留失敗證據<br/>簽署工作不執行"]
+    Finished -->|"成功的正式必要檢查"| Verify["合併前 verify_required_check.py<br/>核對 workflow／事件／head／分支／base 歷程"]
+    Verify --> Merge["main Ruleset＋有效獨立核准<br/>符合條件才可合併"]
+    Attest -.-> Publisher["待部署的專用 App<br/>驗證簽章、來源、digest、run attempt、核准與最新 run"]
+    Publisher -.-> Future["待綁定 epsilon/trusted-merge<br/>目前不能當作已生效的合併條件"]

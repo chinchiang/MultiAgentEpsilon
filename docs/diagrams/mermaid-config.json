@@ -1,0 +1,21 @@
+{
+  "securityLevel": "strict",
+  "htmlLabels": false,
+  "theme": "base",
+  "fontFamily": "Noto Sans CJK TC, sans-serif",
+  "fontSize": 17,
+  "flowchart": {
+    "htmlLabels": false,
+    "curve": "linear",
+    "nodeSpacing": 25,
+    "rankSpacing": 40
+  },
+  "themeVariables": {
+    "primaryColor": "#e8f4ff",
+    "primaryTextColor": "#153958",
+    "primaryBorderColor": "#28629b",
+    "lineColor": "#486477",
+    "clusterBkg": "#f7fafc",
+    "clusterBorder": "#afc4d5"
+  }
+}

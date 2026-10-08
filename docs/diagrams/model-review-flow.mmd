@@ -1,0 +1,24 @@
+flowchart TB
+    Cases["review-cases.json<br/>synthetic-review-v2 合成案例"] --> Plan["固定供應商、案例、輪次與呼叫計畫<br/>綁定 catalog／oracle／實作／RoE 摘要"]
+    Plan --> Initial["建立 INCOMPLETE 報告<br/>supervisor 登記與握手後啟動 worker"]
+    Initial --> Configure["先核對供應商設定／CLI 並建立 adapter"]
+    Configure -->|"設定有效"| Reserve["Gateway 在 API I/O 前持久化<br/>call ID、請求摘要與輸出詞元預留"]
+    Reserve --> Request["循序送出盲測請求<br/>同案同輪內容相同，不含 oracle 或其他模型答案"]
+    Request --> Provider["選定的 mock／Gemini／Bedrock adapter<br/>GLM 真實連線目前暫停"]
+    Provider --> Valid{"正常結束且通過嚴格 JSON／引用／行號驗證？"}
+    Valid -->|"是"| Success["記錄有效審查與回應摘要<br/>實際用量依供應商回報"]
+    Valid -->|"否"| Failure["保留錯誤、逾時、截斷或拒答分類<br/>已建立的預留保留；未知用量仍未知"]
+    Configure -->|"設定錯誤；不建立呼叫預留"| Failure
+    Success --> Next{"尚有計畫內呼叫？"}
+    Failure --> Next
+    Next -->|"是；每次仍受限額檢查"| Configure
+    Next -->|"否"| Score["本機標準答案評分<br/>TP／TN／FP／FN、行號命中、分歧及失敗分母"]
+    Oracle["review-oracle.json<br/>不送給模型"] --> Score
+    Score --> Cleanup["supervisor 清理 worker／AWS CLI 群組與目錄<br/>最後驗證報告綁定與預留帳目"]
+    Initial -->|"取消、總期限或 worker 失敗"| Cleanup
+    Cleanup --> Status{"全部審查有效、證據一致且清理完成？"}
+    Status -->|"是"| Complete["COMPLETE：執行完成"]
+    Status -->|"否"| Incomplete["INCOMPLETE：保留有效與失敗結果"]
+    Complete --> Advisory["報告僅供參考<br/>不取代確定性 gates 或獨立核准"]
+    Incomplete --> Advisory
+    Advisory --> Notes["review_adjudicate.py<br/>精確報告綁定的未簽章註記；身分未驗證"]

@@ -1,0 +1,23 @@
+flowchart TB
+    Start["啟動 run_security.py"] --> Initial["建立 run ID 與初始 BLOCK 報告<br/>解析前就留下證據"]
+    Initial --> Parent["supervisor 登記擁有者／程序群組<br/>持久化握手後啟動限額 worker"]
+    Parent --> Config["核對 RoE／政策／案例清單<br/>計算 subject、evaluator、policy 摘要"]
+    Config --> G1["G1：候選 requirements.lock<br/>PyPI 來源／版本／hash／冷卻期／wheel"]
+    G1 --> G2["G2：真實 Gitleaks<br/>完整輸入清冊、必要 HEAD 歷史與覆蓋證據"]
+    G2 --> Precondition{"G1／G2 完成且零 finding？"}
+    Precondition -->|"是"| Containers["核對 runtime pin 與候選 lock<br/>建立無網路 app／DB 容器"]
+    Precondition -->|"否"| Skip["AUTH = NOT_RUN<br/>保留掃描錯誤與覆蓋缺口"]
+    Containers --> Auth["容器外 oracle 執行 18 個必要授權案例<br/>核對 HTTP 完整契約與資料庫副作用"]
+    Auth --> Pending["確定性判定＋來源摘要再核對<br/>完成結果先保持 AWAITING_CLEANUP"]
+    Skip --> Pending
+    Config -->|"設定或來源錯誤"| Error["錯誤證據／BLOCK"]
+    Containers -->|"隔離或 HTTP 錯誤"| Error
+    Parent -->|"取消、逾時、worker 失敗"| Error
+    Error --> Cleanup
+    Pending --> Cleanup["父程序清理<br/>終止所屬群組、移除所屬容器與暫存目錄"]
+    Cleanup --> Eligible{"必要 gates、證據與清理全部符合政策？"}
+    Eligible -->|"是"| Allow["最終 ALLOW／回傳碼 0"]
+    Eligible -->|"否"| Block["最終 BLOCK／回傳碼 1<br/>失敗回收保留清冊"]
+    Recovery["cleanup_runs.py<br/>擁有者死亡後的 janitor 回收"] -.-> Cleanup
+    Allow --> Evidence["artifacts／run-id／report.json<br/>security schema 3／未簽章本機證據"]
+    Block --> Evidence

@@ -1,0 +1,52 @@
+flowchart TB
+    Source["候選儲存庫／PR head"]
+    Trust["受信任基準<br/>程式、政策、工具鎖定與 RoE"]
+
+    subgraph Evaluator["受信任評估端：本機或 GitHub runner"]
+        Run["run_security.py<br/>supervisor／限額 worker"]
+        Scan["G1／G2<br/>套件驗證與機密掃描"]
+        Oracle["AUTH：容器外 oracle<br/>18 個授權案例與副作用查核"]
+        Decision["確定性政策判定<br/>ALLOW／BLOCK，故障即阻擋"]
+        Report["run-bound report.json<br/>摘要綁定與清理結果"]
+        Run --> Scan --> Oracle --> Decision --> Report
+    end
+
+    Isolation["隔離 FastAPI＋PostgreSQL 容器<br/>無網路、非 root、唯讀根目錄<br/>內部使用 Unix socket／合成資料"]
+
+    Source -->|"候選作為資料"| Run
+    Trust --> Run
+    Oracle <-->|"HTTP bridge／獨立 DB 查核"| Isolation
+
+    subgraph ModelPath["獨立模型審查路徑：目前僅固定合成案例"]
+        direction TB
+        Cases["review-cases.json<br/>盲測請求，不含標準答案"]
+        Gateway["model_review.py／Gateway<br/>呼叫前持久化預留；有界循序呼叫"]
+        Live["Gemini API／Claude Sonnet<br/>adapter 與真實推論已驗收"]
+        GLM["GLM adapter<br/>離線回歸；真實連線暫停"]
+        Score["嚴格輸出驗證＋本機評分<br/>比較、分歧與失敗分母"]
+        Advisory["模型報告僅供參考<br/>COMPLETE／INCOMPLETE"]
+        Cases --> Gateway
+        Gateway --> Live --> Score
+        Gateway -.-> GLM
+        Score --> Advisory
+    end
+
+    %% 僅對齊兩條獨立路徑，沒有資料交換。
+    Source ~~~ Cases
+
+    CI["GitHub Actions<br/>精確 head 獨立核准＋正式必要檢查"]
+    Signed["獨立 runner 簽署 ZIP 摘要<br/>GitHub artifact attestation"]
+    Rules["main Ruleset：已啟用、無 bypass<br/>目前必要來源為共用 Actions App"]
+    Publisher["專用 trusted publisher：程式已備妥<br/>App／主機／Ruleset 綁定尚未部署"]
+    Report -->|"評估工作保存證據"| CI
+    CI --> Signed
+    CI -->|"來源核對與核准均必要"| Rules
+    Signed -.->|"待受控主機驗證簽章與來源"| Publisher
+    Publisher -.->|"未啟用的 epsilon/trusted-merge"| Rules
+
+    classDef implemented fill:#e8f4ff,stroke:#28629b,color:#153958;
+    classDef isolated fill:#edf8ef,stroke:#3a8051,color:#21472e;
+    classDef pending fill:#fff4dc,stroke:#a67822,stroke-dasharray:5 5,color:#664708;
+    class Run,Scan,Oracle,Decision,Report,Cases,Gateway,Live,Score,Advisory,CI,Signed,Rules implemented;
+    class Isolation isolated;
+    class GLM,Publisher pending;
