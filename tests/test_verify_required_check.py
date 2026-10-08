@@ -9,7 +9,7 @@ HEAD = "b" * 40
 
 def pull(number=5, base="main", head=HEAD, ref="feature", state="open"):
     return {"number": number, "state": state, "base": {"ref": base, "repo": {"id": 10}},
-            "head": {"sha": head, "ref": ref, "repo": {"id": 10}}}
+            "head": {"sha": head, "ref": ref, "repo": {"id": 10, "full_name": "owner/repo"}}}
 
 
 def fake_api(checks, runs_by_suite, pr_state="open"):
@@ -36,7 +36,7 @@ def run(id_, event="pull_request_target", path=".github/workflows/security.yml",
 
 
 def listing(*extra):
-    return lambda path: [pull(), *extra]
+    return lambda path: [] if "/timeline?" in path else [pull(), *extra]
 
 
 def test_trusted_pull_request_target_source_allows():

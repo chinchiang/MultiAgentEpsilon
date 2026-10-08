@@ -85,3 +85,7 @@ janitor 只處理已死亡的 owner；先停止 worker，再重新盤點 AWS 子
 ## 結構化審查輸出
 
 盲測的 Gemini／Bedrock 現在使用原生 JSON schema；Gemini 3 Flash 審查使用 LOW 思考程度，思考詞元納入回報輸出用量。固定 ACK 仍為純文字。本機嚴格驗證、截斷阻擋與既有預算不變，詳見[設定、限制與真實驗收](structured-output.zh-TW.md)。
+
+目前可執行的介接器只有 mock、Gemini、Bedrock 與 GLM；設定入口為 `.env.example` 與對應環境變數，不讀取模型清單 JSON。GLM 真實連線依使用者指示暫停，離線協定測試持續保留。每次送出呼叫前會將預留次數與權杖上限同步寫入磁碟；程序遭 SIGKILL 時可保留 IN_FLIGHT 紀錄，但無法據此推算遠端實際費用或保證遠端推論已取消。
+
+環境重建後可執行 `python -I scripts/install_aws_cli.py`，安裝官方 PGP 簽章已驗證並固定封存雜湊的 AWS CLI 2.37.10。模型指令使用 `AWS_CLI_PATH="$PWD/.tools/aws-bin/aws"`；SSO profile 與非機密設定另存於忽略的 `.state/bedrock/config`，以 `AWS_CONFIG_FILE` 指定。臨時憑證到期仍須經安全環境更新，不會從聊天或測試報告載入。

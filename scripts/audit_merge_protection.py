@@ -17,12 +17,16 @@ ACTIONS_APP_ID = 15368
 
 def codeowners_reviewers(text):
     """Owners GitHub would request for every path ('*'), from the base branch file."""
-    owners = []
+    rules = {}
     for line in (text or "").splitlines():
         parts = line.split("#", 1)[0].split()
-        if parts and parts[0] == "*":
-            owners = [p[1:] for p in parts[1:] if p.startswith("@") and "/" not in p]
-    return owners
+        if parts:
+            rules[parts[0]] = {p[1:] for p in parts[1:] if p.startswith("@") and "/" not in p}
+    if "*" not in rules:
+        return []
+    # Conservative: a common personal owner must appear in every effective rule.
+    # Team resolution and GitHub's full glob semantics require native per-path review.
+    return sorted(set.intersection(*rules.values()))
 
 
 def inspect_configuration(branch, rulesets, pr, collaborators, reviewers, codeowners=None, publisher_app_id=None):
@@ -87,14 +91,17 @@ def main():
     try:
         trust = json.loads((ROOT/'security/trust-policy.json').read_text())
         repo = trust['repository']
-        def api(path):
-            return json.loads(subprocess.check_output(['gh','api',f'repos/{repo}/{path}'],
-                              encoding='utf-8', stderr=subprocess.DEVNULL, timeout=30))
+        def api(path, pages=False):
+            args = ['gh','api',f'repos/{repo}/{path}']
+            if pages:
+                args += ['--paginate', '--jq', '.[] | @json']
+            raw = subprocess.check_output(args, encoding='utf-8', stderr=subprocess.DEVNULL, timeout=60)
+            return [json.loads(line) for line in raw.splitlines() if line] if pages else json.loads(raw)
         branch = api('branches/main')
-        brief = api('rulesets?includes_parents=true')
+        brief = api('rulesets?includes_parents=true&per_page=100', pages=True)
         rules = [api('rulesets/'+str(r['id'])) for r in brief]
         pr = api(f'pulls/{args.pr}')
-        collaborators = api('collaborators?per_page=100')
+        collaborators = api('collaborators?per_page=100', pages=True)
         try:
             owners_file = api('contents/.github/CODEOWNERS?ref=main')
             codeowners = base64.b64decode(owners_file['content']).decode('utf-8')

@@ -7,11 +7,16 @@ import pytest
 from pathlib import Path
 
 
+@pytest.fixture(autouse=True)
+def clear_ci_run_identity(monkeypatch):
+    monkeypatch.delenv("GITHUB_RUN_ID", raising=False)
+
+
 def test_candidate_cannot_silently_lower_policy_or_replace_evaluator():
     paths = ["security/policy.json", "security/gitleaks.toml", "scripts/run_security.py",
              "security_harness/results.py", ".github/workflows/security.yml",
              "requirements.lock", "fixture_app/app.py", "docs/README.md"]
-    assert protected_changes(paths) == paths[:6]
+    assert protected_changes(paths) == paths
 
 
 def test_new_execution_entrypoints_are_protected_by_default():
@@ -108,7 +113,7 @@ def test_guard_retains_sha_bound_evidence_even_when_it_blocks(tmp_path):
 @pytest.mark.parametrize("old,new,blocked", [
     ("scripts/evaluator.py", "fixture_app/moved.py", True),
     ("fixture_app/app.py", "scripts/evaluator.py", True),
-    ("fixture_app/app.py", "fixture_app/moved.py", False),
+    ("fixture_app/app.py", "fixture_app/moved.py", True),
 ])
 def test_git_rename_checks_both_sides(tmp_path, old, new, blocked):
     def git(*args):

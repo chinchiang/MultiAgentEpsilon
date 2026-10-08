@@ -5,9 +5,23 @@ import re
 import shutil
 import signal
 import subprocess
+import sys
 import time
 from pathlib import Path
 from .results import write_json
+
+SOURCE_ROOT = Path(__file__).resolve().parents[1]
+
+
+def group_alive(pid):
+    for path in Path('/proc').glob('[0-9]*/stat'):
+        try:
+            fields = path.read_text().rsplit(')', 1)[1].split()
+            if int(fields[2]) == pid and fields[0] != 'Z':
+                return True
+        except (FileNotFoundError, ProcessLookupError):
+            continue
+    return False
 
 
 def identity(pid):
@@ -54,6 +68,8 @@ def owner_alive(marker):
 
 
 def terminate_group(pid):
+    if type(pid) is not int or pid <= 1 or pid == os.getpgrp():
+        raise ValueError('invalid owned process group')
     # Kill descendants even if the immediate worker has already exited.
     for signum, delay in ((signal.SIGTERM, 0.3), (signal.SIGKILL, 0)):
         try:
@@ -62,6 +78,11 @@ def terminate_group(pid):
             break
         if delay:
             time.sleep(delay)
+    deadline = time.monotonic() + 3
+    while group_alive(pid):
+        if time.monotonic() >= deadline:
+            raise TimeoutError('process group cleanup incomplete')
+        time.sleep(0.02)
 
 
 def kill_group(process):
@@ -119,7 +140,8 @@ def sweep_stale(root):
                     if recover(root, work.name):
                         cleaned.append(work.name)
                     continue
-                if 'worker_pid' in marker:
+                same_boot = marker['boot'] == Path('/proc/sys/kernel/random/boot_id').read_text().strip()
+                if same_boot and 'worker_pid' in marker:
                     try:
                         same_worker = identity(marker['worker_pid']) == marker['worker_start']
                     except FileNotFoundError:
@@ -135,7 +157,10 @@ def sweep_stale(root):
                     audit.data = json.loads(report.read_text())
                     audit.data.update(execution='CANCELLED', decision='BLOCK', reasons=['orphaned supervisor reaped'],
                                       cleanup={'completed': True, 'recovered_by_janitor': True,
-                                               'run_directory_removed': True, 'temporary_directory_removed': True})
+                                               'run_directory_removed': not work.exists(),
+                                               'temporary_directory_removed': not temporary_directory(work.name).exists(),
+                                               'process_group_terminated': True, 'error_type': None,
+                                               'boot_changed': not same_boot})
                     # A reaped old run must not displace the index of a newer run.
                     audit.finish((('G1', 'scan'), ('G2', 'scan'), ('AUTH', 'test')), update_pointer=False)
                 cleaned.append(work.name)
@@ -159,15 +184,16 @@ def supervise(root, audit, command, max_seconds):
     try:
         for signum in (signal.SIGTERM, signal.SIGINT):
             handlers[signum] = signal.signal(signum, lambda number, frame: cancelled.append(number))
-        process = subprocess.Popen(command, cwd=root, start_new_session=True,
+        # The gate exits on EOF if the supervisor dies before registration.
+        gated = [sys.executable, '-I', str(SOURCE_ROOT / 'scripts/model_process.py'), *command]
+        process = subprocess.Popen(gated, cwd=root, start_new_session=True, stdin=subprocess.PIPE,
                                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
                                    env={**os.environ, 'TMPDIR': str(temporary_directory(audit.data['run_id']))})
         marker = json.loads((work / 'owner.json').read_text())
-        try:
-            marker.update(worker_pid=process.pid, worker_start=identity(process.pid))
-            write_json(work / 'owner.json', marker)
-        except FileNotFoundError:
-            pass  # An immediately exited worker has no group descendants in normal use.
+        marker.update(worker_pid=process.pid, worker_start=identity(process.pid))
+        write_json(work / 'owner.json', marker)
+        process.stdin.write(b'G')
+        process.stdin.close()
         while process.poll() is None:
             if cancelled:
                 reason = 'CANCELLED'
@@ -176,9 +202,13 @@ def supervise(root, audit, command, max_seconds):
                 reason = 'TIMEOUT'
                 break
             time.sleep(0.05)
+    except Exception:
+        reason = 'ERROR'
     finally:
         if process is not None:
             try:
+                if process.stdin and not process.stdin.closed:
+                    process.stdin.close()
                 kill_group(process)
                 group_terminated = True
             except Exception as exc:

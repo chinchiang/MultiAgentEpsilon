@@ -68,3 +68,7 @@ python3 scripts/dev_db.py stop
 候選 lock digest 必須等於已驗證 runtime lock digest；尚不支援任意候選依賴映像建置。受保護變更使用禁用 rename 折疊的 diff，同時判斷刪除與新增路徑。結果 schema 3 使用版本化逐檔 manifest，不能沿用 schema 2 的 gate 證據。
 
 目前管理 API 的實際阻礙、獨立檢查來源需求及遠端負向驗收步驟，見[遠端合併保護設定與驗收缺口](remote-merge-protection.zh-TW.md)。
+
+G2 現在也掃描 HEAD 可達提交的訊息、作者與提交者中繼資料，以及所有標籤名稱與附註標籤內容；標籤指向但 HEAD 不可達的檔案歷史仍不在範圍。原始中繼資料不寫入證據，超過清冊或位元組限制時保持 BLOCK。Git manifest 只使用 Git 儲存的擁有者執行權限分類，避免 checkout umask 不同造成摘要誤差。
+
+Gitfile（linked worktree 或部分 submodule 使用的 `.git` 文字檔）會在檢查候選 repository 時提前拒絕；這是目前輸入格式限制，不是掃描完成或容器執行失敗。請使用一般 clone 的實體 `.git` 目錄，不接受可指向任意 host 路徑的 gitfile。跨開機清理先比較 boot ID，程序登記持久化前的子程序只能等待握手，不能執行候選工作。

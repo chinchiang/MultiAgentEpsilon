@@ -55,6 +55,9 @@ def run_isolated(candidate: Path, variant="fixed", run_id=None) -> dict:
     if variant not in ("fixed", "vulnerable"):
         raise ValueError("invalid fixture variant")
     runtime = json.loads((ROOT / ".state/runtime-image.json").read_text())
+    tools = json.loads((ROOT / "security/tools.lock.json").read_text())
+    if runtime.get("base_image") != tools["python_runtime"]["image"]:
+        raise ValueError("trusted runtime base image is stale; rebuild it")
     for path, key in (("requirements.lock", "lock_sha256"), ("security/runtime/server.py", "server_sha256"),
                       ("scripts/build_runtime.py", "builder_sha256"),
                       ("security/runtime/request.py", "request_sha256")):

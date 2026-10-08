@@ -26,15 +26,17 @@ def bundle():
                 "workflow_path": ".github/workflows/security.yml", "evaluator_sha": "a"*40,
                 "evaluator_digest": "worktree-manifest-v1:sha256:" + "e"*64,
                 "policy_digest": "f"*64, "minimum_regression_tests": 360,
-                "reviewers": ["reviewer"], "check_name": "epsilon/trusted-merge"}
+                "reviewers": ["reviewer"], "check_name": "epsilon/trusted-merge",
+                "attestation_verifier": "/opt/epsilon-publisher/tools/gh",
+                "attestation_verifier_sha256": "1"*64}
     pr = {"number": 5, "state": "open", "draft": False, "user": {"login": "author"},
           "base": {"ref": "main", "sha": "a"*40, "repo": {"id": 10, "full_name": "owner/repo"}},
-          "head": {"sha": "b"*40}}
+          "head": {"sha": "b"*40, "ref": "feature", "repo": {"id": 10, "full_name": "owner/repo"}}}
     # Observed on GitHub: a pull_request_target run (and its check suite) carries the
     # PR head SHA; the workflow file and evaluator come from the default branch.
     run = {"id": 100, "run_attempt": 1, "repository": {"id": 10, "full_name": "owner/repo"},
            "workflow_id": 99, "path": settings["workflow_path"], "event": "pull_request_target",
-           "head_sha": "b"*40, "status": "completed", "conclusion": "success",
+           "head_sha": "b"*40, "head_branch": "feature", "head_repository": {"id": 10}, "status": "completed", "conclusion": "success",
            "actor": {"login": "author"}, "triggering_actor": {"login": "author"}, "pull_requests": [{"number": 5}]}
     steps = ["Record evaluator-owned CI provenance", "Check protected changes and exact-head independent approval",
              "Evaluator regressions and isolation adversarial checks", "Prove seeded defect still blocks",
@@ -42,6 +44,8 @@ def bundle():
              "Reap cancelled security runs", "Retain evaluator-owned evidence"]
     jobs = [{"name": "trusted-security-pilot", "conclusion": "success",
              "steps": [{"name": n, "conclusion": "success"} for n in steps]}]
+    jobs.append({"name": "Attest evaluator-owned evidence", "conclusion": "success",
+                 "steps": [{"name": "Sign evaluator-owned evidence", "conclusion": "success"}]})
     review = {"id": 11, "state": "APPROVED", "commit_id": "b"*40, "user": {"login": "reviewer"}}
     subject = "worktree-manifest-v1:sha256:" + "c"*64
     run_id = "11111111-1111-4111-8111-111111111111"
@@ -278,7 +282,7 @@ def test_unchanged_outcome_is_not_reposted_but_a_change_is(bundle, monkeypatch):
     assert len(writes) == 2 and state["published"]["code"] == "GATE_REJECTED"
 
 
-@pytest.mark.parametrize("code", ["GITHUB_HTTP_403", "GITHUB_HTTP_429", "API_BUDGET"])
+@pytest.mark.parametrize("code", ["GITHUB_RATE_LIMIT", "API_BUDGET"])
 def test_throttling_backs_off_without_posting(bundle, monkeypatch, code):
     writes = []
     class Client:
@@ -297,7 +301,7 @@ def test_unrelated_fork_runs_do_not_block_but_a_newer_same_head_run_does(bundle)
     # GitHub leaves pull_requests empty for fork heads; that must not be a denial lever.
     bundle["newer_runs"] = [bundle["run"], {"id": 500, "head_sha": "d"*40, "pull_requests": []}]
     assert publisher.validate_bundle(**bundle)["run_id"] == 100
-    bundle["newer_runs"].append({"id": 501, "head_sha": "b"*40, "pull_requests": []})
+    bundle["newer_runs"].append({"id": 501, "head_sha": "b"*40, "head_branch": "feature", "head_repository": {"id": 10}, "pull_requests": []})
     with pytest.raises(publisher.Denied, match="NEWER_RUN_EXISTS"):
         publisher.validate_bundle(**bundle)
 
@@ -383,7 +387,7 @@ def test_publication_rechecks_mutable_state_before_green(bundle, monkeypatch, ch
     run = copy.deepcopy(bundle["run"])
     reviews = copy.deepcopy(bundle["reviews"])
     fresh = copy.deepcopy(bundle["pr"])
-    fresh["head"].update(ref="feature", repo={"id": 10})
+    fresh["head"].update(ref="feature", repo={"id": 10, "full_name": "owner/repo"})
     run.update(head_branch="feature", head_repository={"id": 10})
     if change == "head": fresh["head"]["sha"] = "d"*40
     if change == "rerun": run["run_attempt"] = 2
@@ -401,12 +405,13 @@ def test_publication_rechecks_mutable_state_before_green(bundle, monkeypatch, ch
             if "/actions/runs/" in path: return run
             if "/actions/workflows/" in path:
                 assert "head_sha=" + "b"*40 in path
-                listing = [run, {"id": 101, "head_sha": "b"*40}] if change == "new_run" else [run]
+                listing = [run, {"id": 101, "head_sha": "b"*40, "head_branch": "feature", "head_repository": {"id": 10}}] if change == "new_run" else [run]
                 return {"total_count": len(listing), "workflow_runs": listing}
             if "/permission" in path: return {"role_name": "read" if change == "review_permission" else "write"}
             raise AssertionError("unexpected request")
         def pages(self, path):
-            if path.endswith("/pulls?state=all"):
+            if "/timeline" in path: return []
+            if "/pulls?state=all&head=" in path:
                 twin = copy.deepcopy(fresh)
                 twin.update(number=6, state="closed")
                 twin["base"]["ref"] = "untrusted"
@@ -456,8 +461,8 @@ def base_binding(twin=None, branch="feature", listed=True):
 
 
 @pytest.mark.parametrize("twin,branch,code", [
-    ({"number": 6, "base": {"ref": "evil", "repo": {"id": 10}}, "head": {"sha": "b"*40}}, "feature", "FOREIGN_BASE_PR"),
-    ({"number": 6, "base": {"ref": "main", "repo": {"id": 77}}, "head": {"sha": "b"*40}}, "feature", "FOREIGN_BASE_PR"),
+    ({"number": 6, "base": {"ref": "evil", "repo": {"id": 10}}, "head": {"sha": "b"*40, "ref": "feature", "repo": {"id": 10, "full_name": "owner/repo"}}}, "feature", "FOREIGN_BASE_PR"),
+    ({"number": 6, "base": {"ref": "main", "repo": {"id": 77}}, "head": {"sha": "b"*40, "ref": "feature", "repo": {"id": 10, "full_name": "owner/repo"}}}, "feature", "FOREIGN_BASE_PR"),
     (None, "twin", "RUN_HEAD_BRANCH"),
 ])
 def test_run_from_a_same_head_pr_into_another_base_is_refused(twin, branch, code):
@@ -466,7 +471,7 @@ def test_run_from_a_same_head_pr_into_another_base_is_refused(twin, branch, code
 
 
 def test_run_base_binding_accepts_the_only_pr_and_fails_closed_on_missing_listing():
-    publisher.validate_run_base(*base_binding(), "main")
+    publisher.validate_run_base(*base_binding(), "main", {5: []})
     with pytest.raises(publisher.Denied, match="PR_LISTING_INCOMPLETE"):
         publisher.validate_run_base(*base_binding(listed=False), "main")
     run, pr, prs = base_binding()

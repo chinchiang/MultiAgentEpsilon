@@ -92,11 +92,12 @@ class Gateway:
     input. A synthetic label is not a DLP detector. The CLI uses a fixed fixture.
     """
 
-    def __init__(self, limits=None):
+    def __init__(self, limits=None, checkpoint=None):
         self.limits = limits or Limits()
         self.calls = 0
         self.reserved_tokens = 0
         self.evidence = []
+        self.checkpoint = checkpoint
         # Per-run key: model identities stay comparable within a report, but an ARN with
         # an account ID cannot be recovered by brute-forcing an unsalted digest.
         self._identity_key = secrets.token_bytes(32)
@@ -122,6 +123,7 @@ class Gateway:
                     "status": "ERROR", "code": None,
                     "request_sha256": None, "response_sha256": None, "diagnostic": None,
                     "input_tokens": None, "output_tokens": None, "advisory_only": True}
+        evidence.update(reserved=False, reserved_output_tokens=0, elapsed_ms=None)
         self.evidence.append(evidence)
         started = time.monotonic()
         try:
@@ -144,6 +146,9 @@ class Gateway:
                 return None
             self.calls += 1
             self.reserved_tokens += request.max_output_tokens
+            evidence.update(status="IN_FLIGHT", reserved=True, reserved_output_tokens=request.max_output_tokens)
+            if self.checkpoint is not None:
+                self.checkpoint()  # Durable reservation precedes any adapter I/O.
             async with asyncio.timeout(self.limits.timeout_seconds):
                 reply = await adapter.generate(request)
             if not isinstance(reply, Reply) or type(reply.text) is not str or not reply.text.strip():
@@ -170,8 +175,13 @@ class Gateway:
         except Exception:
             # Do not serialize exception messages, provider payloads or URLs.
             evidence["code"] = "PROVIDER_FAILURE"
+            evidence["status"] = "ERROR"
         finally:
             evidence["elapsed_ms"] = round((time.monotonic() - started) * 1000)
+            if evidence["status"] == "IN_FLIGHT":
+                evidence["status"] = "ERROR"
+            if self.checkpoint is not None:
+                self.checkpoint()
         return None
 
 

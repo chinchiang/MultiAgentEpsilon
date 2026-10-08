@@ -6,12 +6,12 @@ import itertools
 import json
 import uuid
 from datetime import datetime, timezone
-from pathlib import Path
+from dataclasses import asdict
 
 from .benchmark import (CASES_PATH, ORACLE_PATH, CWES, PROVIDERS, load_cases, case_digest, review_request,
                         request_digest, validate_review, bounded_text, parse_review)
 from .lifecycle import REPORT_LIMIT
-from .gateway import digest, ModelError
+from .gateway import digest, ModelError, Limits
 from .transport import strict_json
 
 
@@ -26,7 +26,7 @@ def signature(review):
 def reference():
     data = strict_json(ORACLE_PATH.read_bytes())
     cases = load_cases()
-    if data['version'] != 'synthetic-review-v1' or set(data['cases']) != set(cases):
+    if data['version'] != 'synthetic-review-v2' or set(data['cases']) != set(cases):
         raise ValueError('reference does not match catalog')
     for key, value in data['cases'].items():
         if (set(value) != {'verdict', 'findings'} or value['verdict'] not in ('VULNERABLE', 'CLEAN') or
@@ -49,6 +49,26 @@ def validate_collection(report, expected_plan=None):
     output_tokens = report.get('output_tokens_per_review', 512)
     if type(output_tokens) is not int or output_tokens not in (512, 1024) or output_tokens * len(plan) > 8192:
         raise ValueError('invalid review budget')
+    expected_limits = asdict(Limits(max_calls=len(plan), reserved_output_tokens=output_tokens * len(plan), timeout_seconds=30))
+    Limits(**report['limits'])
+    if (report['limits'] != expected_limits or
+            type(report.get('total_timeout_seconds')) is not int or
+            report['total_timeout_seconds'] != min(130, 20 * len(plan) + 10)):
+        raise ValueError('review limits mismatch')
+    from .benchmark import ROOT
+    if report.get('model_roe_sha256') != file_digest(ROOT / 'security/model-roe.json'):
+        raise ValueError('model RoE binding mismatch')
+    for call in calls:
+        if (type(call.get('reserved')) is not bool or type(call.get('reserved_output_tokens')) is not int or
+                call['reserved_output_tokens'] != (output_tokens if call['reserved'] else 0) or
+                (not call['reserved'] and (call.get('status') != 'ERROR' or
+                    call.get('code') not in ('ROUTING_DENIED', 'INPUT_LIMIT', 'BUDGET_EXHAUSTED')))):
+            raise ValueError('invalid call reservation')
+    if (type(report.get('reserved_calls')) is not int or
+            type(report.get('reserved_output_tokens')) is not int or
+            report['reserved_calls'] != sum(c['reserved'] for c in calls) or
+            report['reserved_output_tokens'] != sum(c['reserved_output_tokens'] for c in calls)):
+        raise ValueError('reservation accounting mismatch')
     if expected_plan is not None and plan != expected_plan:
         raise ValueError('worker changed the review plan')
     rounds = report.get('rounds', 1)
@@ -130,6 +150,10 @@ def ratio(numerator, denominator):
 
 def summarize(report, expected_plan=None):
     validate_collection(report, expected_plan)
+    return _summarize_validated(report)
+
+
+def _summarize_validated(report):
     if report.get('rounds', 1) > 1:
         return summarize_repeated(report)
     truth = reference()
@@ -239,7 +263,9 @@ def summarize_repeated(report):
             for entry in part[key]:
                 entry.pop('round_index', None)
         part['providers'] = [p['provider'] for p in part['plan']]
-        rounds.append({'round_index': number, 'analysis': summarize(part)})
+        # Parent validation already bound the shared run budget. A round slice is
+        # an analysis projection, never a separately funded execution.
+        rounds.append({'round_index': number, 'analysis': _summarize_validated(part)})
     metrics = {}
     additive = ('tp', 'tn', 'fp', 'fn', 'abstained', 'unavailable', 'matched_findings',
                 'reported_findings', 'planned', 'classified', 'calls_recorded', 'elapsed_ms_reported')
@@ -313,3 +339,27 @@ def note_matches_report(note, report_path):
     return (note.get('report_sha256') == file_digest(report_path) and
             note.get('run_id') == report_path.parent.name and note.get('advisory_only') is True and
             note.get('security_gate_effect') == 'NONE')
+
+
+def read_adjudications(report_path):
+    """Consume only bounded, exact-report notes; asserted identity stays unverified."""
+    raw = report_path.read_bytes()
+    if len(raw) > REPORT_LIMIT:
+        raise ValueError('report too large')
+    report = strict_json(raw)
+    summarize(report)
+    paths = sorted((report_path.parent / 'adjudications').glob('*.json'))
+    if len(paths) > 100:
+        raise ValueError('too many adjudication notes')
+    notes = []
+    for path in paths:
+        if path.is_symlink() or path.stat().st_size > 16384:
+            raise ValueError('invalid adjudication file')
+        note = strict_json(path.read_bytes())
+        if (not note_matches_report(note, report_path) or note.get('identity_verified') is not False or
+                note.get('case_id') not in report['case_ids'] or note.get('schema_version') != 1 or
+                note.get('decision') not in ('REFERENCE_CONFIRMED', 'REFERENCE_CHALLENGED', 'NEEDS_MORE_EVIDENCE') or
+                not bounded_text(note.get('asserted_reviewer')) or not bounded_text(note.get('reason'))):
+            raise ValueError('stale or invalid adjudication note')
+        notes.append(note)
+    return notes

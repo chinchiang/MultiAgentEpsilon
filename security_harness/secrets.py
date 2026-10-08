@@ -72,6 +72,35 @@ def history_blobs(root, required=False):
     return tip, blobs
 
 
+def history_metadata(root, tip):
+    """HEAD commit messages/identities and all tag names/annotated-tag metadata.
+
+    Tag target histories outside HEAD remain excluded. Bound raw bytes before
+    scanning; never copy metadata or tag names into evidence diagnostics.
+    """
+    env = candidate_git.environment()
+    commits = bounded_output(candidate_git.command(root, 'log', '--format=raw', '--no-decorate',
+                             '--no-color', '--no-show-signature', tip), b'', timeout=30,
+                             limit=LIMITS.max_file_bytes, env=env)
+    yield commits, 'git:commit-metadata', tip
+    tags = bounded_output(candidate_git.command(root, 'for-each-ref',
+                          '--format=%(objecttype) %(objectname) %(refname)', 'refs/tags'), b'',
+                          timeout=20, limit=1024*1024, env=env)
+    rows = tags.splitlines()
+    if len(rows) > 1000:
+        raise ResourceLimit('tag metadata inventory exceeds limit')
+    if tags:
+        yield tags, 'git:tag-refs', tip
+    for row in rows:
+        kind, oid, name = row.split(b' ', 2)
+        if not re.fullmatch(rb'[a-f0-9]{40}|[a-f0-9]{64}', oid) or not name.startswith(b'refs/tags/'):
+            raise ValueError('invalid tag metadata')
+        if kind == b'tag':
+            data = bounded_output(candidate_git.command(root, 'cat-file', 'tag', oid.decode('ascii')), b'',
+                                  timeout=20, limit=LIMITS.max_file_bytes, env=env)
+            yield data, 'git:annotated-tag', oid.decode('ascii')
+
+
 def scan(root: Path, binary: Path, config: Path, expected_hash: str, *, history=True,
          require_history=False, binary_allowlist: Path | None = None) -> dict:
     if digest_file(binary) != expected_hash:
@@ -83,6 +112,7 @@ def scan(root: Path, binary: Path, config: Path, expected_hash: str, *, history=
         raise ValueError('empty scan scope')
     findings = []
     tip, blobs = history_blobs(root, require_history) if history else (None, [])
+    metadata_count = 0
     with tempfile.TemporaryDirectory(prefix='epsilon-gitleaks-') as temp:
         temp = Path(temp)
         snapshot = temp / 'snapshot'
@@ -105,6 +135,13 @@ def scan(root: Path, binary: Path, config: Path, expected_hash: str, *, history=
             if inventory.expanded_bytes > LIMITS.max_expanded_bytes:
                 raise ResourceLimit('combined scan content limit exceeded')
             inventory.add(data, name or ('git:' + oid), scope='history', object_id=oid)
+        if tip:
+            for data, name, oid in history_metadata(root, tip):
+                inventory.expanded_bytes += len(data)
+                if inventory.expanded_bytes > LIMITS.max_expanded_bytes:
+                    raise ResourceLimit('combined scan content limit exceeded')
+                inventory.add(data, name, scope='history-metadata', object_id=oid)
+                metadata_count += 1
         report = temp / 'scan.json'
         # Output goes to a bounded report file, never to a captured diagnostic stream.
         process = subprocess.run([str(binary), 'dir', str(snapshot), '--config', str(config),
@@ -128,9 +165,10 @@ def scan(root: Path, binary: Path, config: Path, expected_hash: str, *, history=
                     'scanned_leaves': len(inventory.entries), 'scanned_bytes': sum(e['bytes'] for e in inventory.entries.values()),
                     'expanded_bytes': inventory.expanded_bytes, 'archives': inventory.archives,
                     'history_head': tip, 'history_blobs': len(blobs), 'unsupported_files': 0,
+                    'history_metadata': metadata_count,
                     'reviewed_binaries': inventory.reviewed,
                     'formats': ['UTF-8', 'gzip', 'zip', 'ustar', 'reviewed-binary-strings'],
-                    'scope': 'worktree plus all blobs reachable from candidate HEAD; other refs excluded',
+                    'scope': 'worktree and HEAD-reachable blobs/commit metadata plus tag names/annotations; other ref target contents excluded',
                     'limits': vars(LIMITS)}
     return {'targets': len(paths), 'findings': findings, 'coverage': coverage,
             'scopes': ['explicit worktree inventory', 'HEAD history' if tip else 'history NOT_AVAILABLE/NOT_REQUESTED'],

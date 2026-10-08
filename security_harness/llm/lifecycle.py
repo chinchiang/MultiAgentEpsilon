@@ -177,6 +177,21 @@ def finish(root, run_id, *, providers=(), returncode=None, reason=None, recovere
         except Exception:
             completed = False
             data.update(analysis=None, code='EVALUATION_INVALID')
+    elif expected_report is not None:
+        # Smoke workers are bound to the supervisor's immutable plan and limits too.
+        immutable = ('providers', 'fixture', 'implementation_sha256', 'model_roe_sha256',
+                     'limits', 'total_timeout_seconds', 'max_output_tokens_per_call')
+        calls = data.get('calls', [])
+        reservations_valid = (type(data.get('reserved_calls')) is int and
+            type(data.get('reserved_output_tokens')) is int and
+            all(type(c.get('reserved')) is bool and c.get('reserved') is True and
+                type(c.get('reserved_output_tokens')) is int and
+                c['reserved_output_tokens'] == expected_report['max_output_tokens_per_call'] for c in calls) and
+            data['reserved_calls'] == len(calls) and
+            data['reserved_output_tokens'] == len(calls) * expected_report['max_output_tokens_per_call'])
+        if not all(data.get(k) == expected_report.get(k) for k in immutable) or not reservations_valid:
+            completed = False
+            data['code'] = 'EVALUATION_INVALID'
     try:
         if cleanup_error:
             raise RuntimeError('process cleanup failed')

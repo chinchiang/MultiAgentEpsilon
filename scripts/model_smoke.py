@@ -6,6 +6,7 @@ import hashlib
 import json
 import os
 import signal
+import shutil
 import sys
 import uuid
 from datetime import datetime, timezone
@@ -48,13 +49,19 @@ def configured_adapter(provider, work=None, http=None):
         return GeminiAdapter(setting("GEMINI_MODEL_ID"), setting("GEMINI_API_KEY"), http=http)
     if provider == "glm":
         return GLMAdapter(setting("GLM_MODEL_ID"), setting("GLM_CHAT_URL"), setting("GLM_API_KEY", False), http=http)
+    if provider != "bedrock":
+        raise ModelError("CONFIGURATION")
+    executable = os.getenv("AWS_CLI_PATH", "aws")
+    if shutil.which(executable) is None:
+        raise ModelError("CONFIGURATION")
     return BedrockAdapter(setting("BEDROCK_MODEL_ID"), setting("BEDROCK_REGION"),
-                          AwsCLI(os.getenv("AWS_CLI_PATH", "aws"), run_directory=work))
+                          AwsCLI(executable, run_directory=work))
 
 
 def implementation_digest():
     paths = [Path(__file__).resolve(), ROOT / 'scripts/model_worker.py', ROOT / 'scripts/model_process.py',
              ROOT / 'security_harness/lifecycle.py', ROOT / 'security_harness/results.py',
+             ROOT / 'security_harness/scope.py', ROOT / 'security/model-roe.json',
              *sorted((ROOT / "security_harness/llm").glob("*.py"))]
     manifest = [(p.relative_to(ROOT).as_posix(), hashlib.sha256(p.read_bytes()).hexdigest()) for p in paths]
     return hashlib.sha256(json.dumps(manifest, separators=(",", ":")).encode()).hexdigest()
@@ -69,7 +76,9 @@ def initial_report(providers, run_id):
             "limits": asdict(limits), "total_timeout_seconds": 30 * len(providers) + 10,
             "max_output_tokens_per_call": FIXTURE.max_output_tokens,
             "checks": [{"provider": p, "live": p != "mock", "status": "NOT_RUN", "code": None} for p in providers],
-            "calls": [], "cleanup": {"completed": False}}
+            "calls": [], "reserved_calls": 0, "reserved_output_tokens": 0,
+            "model_roe_sha256": hashlib.sha256((ROOT / 'security/model-roe.json').read_bytes()).hexdigest(),
+            "cleanup": {"completed": False}}
 
 
 async def run_worker(root, run_id):
@@ -80,6 +89,10 @@ async def run_worker(root, run_id):
     report['calls'] = gateway.evidence
     task = asyncio.current_task()
     loop = asyncio.get_running_loop()
+    def checkpoint():
+        report.update(reserved_calls=gateway.calls, reserved_output_tokens=gateway.reserved_tokens)
+        persist(output, report)
+    gateway.checkpoint = checkpoint
     for sig in (signal.SIGTERM, signal.SIGINT):
         loop.add_signal_handler(sig, task.cancel)
     try:

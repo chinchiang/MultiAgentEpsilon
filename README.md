@@ -56,7 +56,7 @@ G2 與 subject digest 共用輸入清冊：生成物名稱只在 repository 根�
 
 ## CI 啟用界線
 
-[security.yml](.github/workflows/security.yml) 改用 `pull_request_target`，只執行 base SHA 的 evaluator、安裝程序與測試；候選 checkout 僅作資料，只有限定的 `fixture_app` 來源會送入無網路容器。token 權限為 contents/read 與 pull-requests/read，不提供模型或部署金鑰。main push 與手動執行亦使用同一評分路徑；手動選取的 workflow ref 代表維護者選定的 evaluator，不能自動當成已核准基準。因此 main 上的 workflow 手動執行時，檢查名稱固定為 `manual-security-evaluation`、artifact 為 `manual-security-*`。`workflow_dispatch` 使用所選 ref 的 YAML，有推送權限者在自己分支改掉 job 名稱仍可產生同名檢查，所以審查者仍須以下述工具核對來源。執行完畢前，CI 會用發布程式的同一套證據契約自我檢查（`check_publishable_evidence.py`），證據與契約不一致時該 run 直接失敗。
+[security.yml](.github/workflows/security.yml) 改用 `pull_request_target`，只執行 base SHA 的 evaluator、安裝程序與測試；候選 checkout 僅作資料，只有限定的 `fixture_app` 來源會送入無網路容器。評估工作的 token 權限為 contents/read、pull-requests/read 與 actions/read，不提供模型或部署金鑰；獨立簽署工作另有 id-token/write 與 attestations/write。所有路徑（包含 fixture、README 與文件）都須經可信、具寫入權限的獨立審查者對最新 head 核准。main push 與手動執行亦使用同一評分路徑；手動選取的 workflow ref 代表維護者選定的 evaluator，不能自動當成已核准基準。因此 main 上的 workflow 手動執行時，檢查名稱固定為 `manual-security-evaluation`、artifact 為 `manual-security-*`。`workflow_dispatch` 使用所選 ref 的 YAML，有推送權限者在自己分支改掉 job 名稱仍可產生同名檢查，所以審查者仍須以下述工具核對來源。執行完畢前，CI 會用發布程式的同一套證據契約自我檢查（`check_publishable_evidence.py`），證據與契約不一致時該 run 直接失敗。
 
 新執行入口預設受保護。基準更新需由可信 reviewer 對目前 head SHA 獨立核准；guard 即時查核 GitHub PR／reviews，撤回核准、換版或作者自行核准皆不放行。此 run 仍以舊基準判定，合併後才成為下一輪基準。
 
@@ -81,3 +81,5 @@ G2 與 subject digest 共用輸入清冊：生成物名稱只在 repository 根�
 新增越權、路徑穿越及 SSRF 的合成配對案例可用 `scripts/model_review.py --suite boundaries` 離線執行；行為反例、ASVS 5.0.0 對照與未涵蓋範圍見 [覆蓋對照](docs/asvs-coverage.zh-TW.md)。這些案例不代表正式應用已完成相同驗證。
 
 可用 `--rounds` 在同一總預算內執行重複盲測；逐輪結果、失敗分類與穩定性判讀見 [多輪盲測文件](docs/repeated-review.zh-TW.md)。
+
+本輪修正與完整驗收記錄見[安全邊界修正](docs/security-boundaries-20261008.zh-TW.md)。已產生簽章或通過本機測試，仍須完成專用 App 的部署、Ruleset 來源綁定與遠端驗收。

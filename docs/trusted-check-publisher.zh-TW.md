@@ -10,7 +10,7 @@
 
 1. 設定名稱，例如 `epsilon-trusted-check-chinchiang`；Homepage URL 使用儲存庫網址。
 2. 此版採輪詢，取消 Webhook 的 Active。
-3. Repository permissions：Actions、Contents、Pull requests 讀取，Checks 讀寫；Metadata 為必要讀取。不要加入其他寫入權限。
+3. Repository permissions：Actions、Contents、Pull requests、Attestations 讀取，Checks 讀寫；Metadata 為必要讀取。不要加入其他寫入權限。
 4. 建立 App，記錄 **App ID**，產生私鑰並經安全管道保存於部署主機。不要貼到聊天、issue、儲存庫或本儲存庫的 Actions secrets。
 5. Install App → Only select repositories → `chinchiang/MultiAgentEpsilon`；記錄安裝網址尾端的 **Installation ID**。
 
@@ -71,13 +71,15 @@ python3.12 -I /opt/epsilon-publisher/app/scripts/publish_trusted_check.py \
   --pr <編號> --output /var/lib/epsilon-publisher/pr-<編號>.json
 ```
 
-請使用非草稿的驗收 PR；草稿 PR 不能用來宣稱正向發布成功。手動 workflow_dispatch 不授權。發布程式會讀取整個 repository 的 PR 清單（`pulls?state=all`，上限 1,000 筆）來排除開到其他 base 的同 head PR；超過上限即拒絕發布。
+請使用非草稿的驗收 PR；草稿 PR 不能用來宣稱正向發布成功。手動 workflow_dispatch 不授權。PR 清單依 head 擁有者與分支查詢，再依 SHA、repository ID 與分支過濾；分頁上限為 10,000 筆，剛好完整頁時會查下一頁證明完整，超限拒絕。
 
-**來源綁定（2026-10-06 依實際 GitHub 資料修正）：** `pull_request_target` 的 run 與其 check suite 由 GitHub 記錄在 **PR head commit** 上（已以公開的 nodejs/node run 核對：`run.head_sha` 等於 PR head；fork PR 的 `pull_requests` 為空陣列），workflow 檔案與 evaluator 則來自預設分支。因此發布程式要求 `run.head_sha` 等於 PR head、事件為 `pull_request_target`、路徑為 `.github/workflows/security.yml`（皆由 GitHub 提供），evaluator commit 則由預設分支 workflow 寫入的來源紀錄與設定中的 `evaluator_sha` 綁定。預設查找同一 head SHA 的最新 run；可指定 `--run-id`，但仍須是該 head 的 `pull_request_target` run，且沒有同一 head 的較新 run。較新的 run 只依 head SHA 比對，外部 fork PR 產生的無關 run 不能阻斷發布。
+**執行與簽章身分：** `pull_request_target` 使用 PR **base 分支**的 workflow；目前 PR 的 base 不能證明舊 run 的來源。發布程式以提交 SHA、head repository ID 與分支綁定 PR／run，讀取包含已關閉 PR 的完整 timeline；同一範圍曾發生 `base_ref_changed` 時，一律拒絕，改用新 head 分支建立 PR。不同 fork 或分支上的相同 SHA 不互相取代。
+
+獨立的 `attest-evidence` 工作在評估成功後，以 OIDC 簽署上傳 ZIP 的 SHA-256；它使用新 runner，不取出候選來源、不執行 evaluator 匯入，也不接收模型憑證。發布器使用固定版本、root 持有且雜湊相符的 GitHub CLI 驗證 Sigstore 簽章，要求此儲存庫的 `security.yml`、核准的 evaluator commit、`refs/heads/main` 與 GitHub 託管 runner；另外核對已驗證 SLSA 陳述中的 run／attempt URL 及 artifact digest。未簽署的 JSON、其他版本或其他批次的簽章都不能放行。CLI 從離線 bundle 驗證，不接收 App 權杖或模型金鑰；更新可信根仍需連線至 `tuf-repo.github.com` 與 Sigstore 的可信根服務。
 
 **負例證據：** `expect_block.py` 執行的是 evaluator 自己的缺陷版，因此負例報告綁定 evaluator 的 worktree manifest 與 evaluator SHA，不綁定候選；失敗案例必須恰好是政策 `seeded_defect_case_ids`。同一套證據契約（`validate_evidence`）也在 CI 上傳前由 `scripts/check_publishable_evidence.py` 自我檢查，契約不一致會讓產生證據的 run 直接失敗。
 
-每次核對來源、獨立核准與完整證據後，只在結果（head、結論、診斷碼、run、attempt、核准）與上次發布不同時，才建立一個 completed 檢查；不再先發 in_progress，避免必要檢查每個週期閃爍。證據超過 1 小時會使驗證失敗，結果改變而發布 failure。GitHub 回應 403／429 或超出 API 預算時不發布任何結果，並在狀態檔記錄 15 分鐘退避；這段期間既有結果不會被更新，需監控。每次執行結束都會撤銷該次安裝權杖。JWT 核對 App、Installation 身分，安裝權杖限此儲存庫與最低所需權限；下載 artifact 時不把權杖轉送到儲存服務。不記錄私鑰、權杖、原始 API 錯誤或 artifact 內容。
+每次核對來源、獨立核准與完整證據後，只在結果（head、結論、診斷碼、run、attempt、核准）與上次發布不同時，才建立一個 completed 檢查；不再先發 in_progress，避免必要檢查每個週期閃爍。證據超過 1 小時會使驗證失敗，結果改變而發布 failure。GitHub 回應 429、帶速率限制標頭的 403，或超出 API 預算時不發布任何結果，並在狀態檔記錄 15 分鐘退避；這段期間既有結果不會被更新，需監控。一般 403 會以權限錯誤失敗，不當成速率限制。首個 PR 查詢遭限流也會記錄退避。API 無法寫入時不能保證撤銷既有綠燈，監控須告警。每次執行結束都會撤銷該次安裝權杖。JWT 核對 App、Installation 身分，安裝權杖限此儲存庫與最低所需權限；下載 artifact 時不把權杖轉送到儲存服務。不記錄私鑰、權杖、原始 API 錯誤或 artifact 內容。
 
 ## 持續執行與限制
 
@@ -100,3 +102,15 @@ systemctl enable --now epsilon-publisher@<驗收-PR-編號>.timer
 先在隔離驗收分支／PR，以普通開發者身分驗證：錯誤 App 同名成功、其他 workflow／repository、錯誤 SHA／attempt、報告過期／不完整、未核准／核准撤回、換版、檢查失敗及直接推送均不得放行；合法條件才通過。保留真實身分、規則與 API 回應，不以作者自行審查或草稿 PR 的阻擋代替。不可對 main 做可能真的合併成功的探測。
 
 本地測試驗證程式拒絕與再次查核邏輯。App 註冊、主機部署、實際 API 相容性、專用來源規則綁定與遠端行為驗收仍待完成。
+
+## 安裝簽章驗證工具
+
+使用已獨立核准的程式版本，在 Linux x86_64 下載並核對封存與執行檔兩層雜湊：
+
+```bash
+python3 -I scripts/install_attestation_verifier.py --output /tmp/epsilon-gh-verified
+sudo install -d -o root -g root -m 0755 /opt/epsilon-publisher/tools
+sudo install -o root -g root -m 0755 /tmp/epsilon-gh-verified /opt/epsilon-publisher/tools/gh
+```
+
+`publisher.json` 的 `attestation_verifier` 與 `attestation_verifier_sha256` 必須與核准的工具鎖定檔相符。所有上層目錄須由 root 持有且不能被服務帳號替換。驗證器的設定與可信根快取使用每次獨立的暫存目錄，避免依賴服務帳號的家目錄。更新工具或來源版本須重新審查、更新 pin 並驗收。首次部署需確認 App 已授予 Attestations 讀取；既有 Connector 的權限不等同專用 App 權限。

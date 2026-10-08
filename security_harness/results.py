@@ -15,6 +15,11 @@ EVIDENCE_VERSION = 3
 SUBJECT_FORMAT = "worktree-manifest-v1"
 
 
+def executable_bits(mode):
+    """Git stores only the owner execute classification, not checkout umask bits."""
+    return 0o111 if mode & 0o100 else 0
+
+
 def file_identity(path: Path) -> tuple[os.stat_result, str]:
     """Stream regular files without following a final symlink; detect read-time changes."""
     fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
@@ -61,7 +66,7 @@ def subject_digest(root: Path) -> str:
     for p in paths:
         info, content = file_identity(p)
         files.append({"path": p.relative_to(root).as_posix(), "type": "file",
-                      "executable_bits": info.st_mode & 0o111, "size": info.st_size,
+                      "executable_bits": executable_bits(info.st_mode), "size": info.st_size,
                       "sha256": content})
     if paths != input_files(root):
         raise ValueError("input inventory changed while hashing")
@@ -202,6 +207,13 @@ def write_json(path: Path, data: dict) -> None:
     try:
         with os.fdopen(fd, "w") as stream:
             stream.write(json.dumps(data, ensure_ascii=False, indent=2) + "\n")
+            stream.flush()
+            os.fsync(stream.fileno())
         os.replace(temporary, path)
+        directory = os.open(path.parent, os.O_RDONLY | os.O_DIRECTORY)
+        try:
+            os.fsync(directory)
+        finally:
+            os.close(directory)
     finally:
         Path(temporary).unlink(missing_ok=True)

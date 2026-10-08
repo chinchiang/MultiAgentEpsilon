@@ -2,7 +2,6 @@
 import asyncio
 import json
 import signal
-import uuid
 from dataclasses import asdict
 from datetime import datetime, timezone
 
@@ -31,9 +30,11 @@ def initial_report(providers, case_ids, run_id, output_tokens=OUTPUT_TOKENS, rou
             'started_at': datetime.now(timezone.utc).isoformat(),
             'implementation_sha256': digest(json.dumps(implementation)),
             'case_catalog_sha256': file_digest(CASES_PATH), 'oracle_sha256': file_digest(ORACLE_PATH),
+            'model_roe_sha256': file_digest(ROOT / 'security/model-roe.json'),
             'rounds': rounds, 'sampling_policy': {p: ('provider-default' if p == 'bedrock' else 'temperature=0' if not p.startswith('mock-') else 'deterministic-fixture') for p in providers},
             'selected_providers': providers, 'case_ids': case_ids, 'plan': plan,
             'providers': [p['provider'] for p in plan], 'checks': checks, 'calls': [],
+            'reserved_calls': 0, 'reserved_output_tokens': 0,
             'limits': asdict(limits), 'total_timeout_seconds': min(130, 20 * len(plan) + 10),
             'output_tokens_per_review': output_tokens,
             'cleanup': {'completed': False}, 'analysis': None}
@@ -53,6 +54,17 @@ async def run_worker(root, run_id):
     def save():
         report.update(reserved_calls=gateway.calls, reserved_output_tokens=gateway.reserved_tokens)
         persist(path, report)
+
+    def checkpoint():
+        if gateway.evidence:
+            call = gateway.evidence[-1]
+            call.update(case_id=check['case_id'], review_id=check['review_id'])
+            if 'round_index' in check:
+                call['round_index'] = check['round_index']
+            check['call_id'] = call['call_id']
+        save()
+
+    gateway.checkpoint = checkpoint
 
     try:
         from .benchmark_score import file_digest

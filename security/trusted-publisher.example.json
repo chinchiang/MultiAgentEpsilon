@@ -10,7 +10,13 @@
   "evaluator_sha": null,
   "evaluator_digest": null,
   "policy_digest": null,
-  "minimum_regression_tests": 627,
-  "reviewers": ["chinchiang", "CatGrocery", "d98922036ntu"],
-  "check_name": "epsilon/trusted-merge"
+  "minimum_regression_tests": 703,
+  "reviewers": [
+    "chinchiang",
+    "CatGrocery",
+    "d98922036ntu"
+  ],
+  "check_name": "epsilon/trusted-merge",
+  "attestation_verifier": "/opt/epsilon-publisher/tools/gh",
+  "attestation_verifier_sha256": "7469124f706944133d6a169691dd1c6c3511b12e85878d255e044e2948df4c9b"
 }

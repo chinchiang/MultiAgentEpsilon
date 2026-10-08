@@ -395,7 +395,7 @@ def test_cli_seal_failure_closes_input_without_starting_child(monkeypatch):
 def test_review_uses_native_schema_without_weakening_local_evidence_checks(provider):
     import copy
     from security_harness.llm import benchmark as bench
-    from security_harness.llm.output_schema import review_schema
+    from security_harness.llm.output_schema import request_schema
     case = bench.load_cases()['B09']
     request = bench.review_request(case, 'opaque-id')
     # Syntactically valid output can still contain fabricated evidence.
@@ -424,14 +424,14 @@ def test_review_uses_native_schema_without_weakening_local_evidence_checks(provi
         assert len(wire) == 1
         config = json.loads(wire[0].content)['generationConfig']
         assert config['responseMimeType'] == 'application/json'
-        assert config['responseJsonSchema'] == review_schema()
+        assert config['responseJsonSchema'] == request_schema(request, 'gemini')
         assert config['thinkingConfig'] == {'thinkingLevel': 'LOW', 'includeThoughts': False}
         assert config['maxOutputTokens'] == request.max_output_tokens
     else:
         assert len(captured) == 1
         config = captured[0]['outputConfig']['textFormat']
         assert config['type'] == 'json_schema'
-        assert json.loads(config['structure']['jsonSchema']['schema']) == review_schema()
+        assert json.loads(config['structure']['jsonSchema']['schema']) == request_schema(request, 'bedrock')
         assert captured[0]['inferenceConfig'] == {'maxTokens': request.max_output_tokens}
         assert 'toolConfig' not in captured[0]
     assert evidence['request_sha256'] == bench.request_digest(request)

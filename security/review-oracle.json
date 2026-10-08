@@ -1,5 +1,5 @@
 {
-  "version": "synthetic-review-v1",
+  "version": "synthetic-review-v2",
   "cases": {
     "B01": {
       "verdict": "VULNERABLE",
