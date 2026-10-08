@@ -4,7 +4,7 @@ import json
 
 from .gateway import ModelError, Reply
 from .transport import AwsCLI, JsonHTTP, validate_url
-from .output_schema import REVIEW_FORMAT, review_schema
+from .output_schema import REVIEW_FORMAT, request_schema
 
 
 def usage(value, input_key, output_key):
@@ -70,7 +70,7 @@ class GeminiAdapter:
     async def generate(self, request):
         config = {"maxOutputTokens": request.max_output_tokens, "candidateCount": 1, "temperature": 0}
         if request.response_format == REVIEW_FORMAT:
-            config.update(responseMimeType='application/json', responseJsonSchema=review_schema())
+            config.update(responseMimeType='application/json', responseJsonSchema=request_schema(request, 'gemini'))
             # Use LOW for Gemini 3 Flash; MINIMAL was rejected by the live model.
             # Do not send this model-specific
             # option to earlier generations, Pro, or arbitrary model aliases.
@@ -175,7 +175,7 @@ class BedrockAdapter:
         if request.response_format == REVIEW_FORMAT:
             payload['outputConfig'] = {'textFormat': {
                 'type': 'json_schema', 'structure': {'jsonSchema': {
-                    'name': 'security_review', 'schema': json.dumps(review_schema(), separators=(',', ':'))}}}}
+                    'name': 'security_review', 'schema': json.dumps(request_schema(request, 'bedrock'), separators=(',', ':'))}}}}
         value = await self.cli.converse(self.region, payload)
         reason = value.get("stopReason")
         if reason == "tool_use":

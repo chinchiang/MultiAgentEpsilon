@@ -26,7 +26,7 @@ def load_cases():
     if len(raw) > 65536:
         raise ValueError('case catalog too large')
     catalog = strict_json(raw)
-    if set(catalog) != {'version', 'cases'} or catalog['version'] != 'synthetic-review-v1':
+    if set(catalog) != {'version', 'cases'} or catalog['version'] != 'synthetic-review-v2':
         raise ValueError('unsupported case catalog')
     cases = {}
     for case in catalog['cases']:
@@ -78,7 +78,9 @@ INVISIBLE_CATEGORIES = frozenset({'Cc', 'Cf', 'Cs', 'Co', 'Cn', 'Zl', 'Zp'})
 
 def bounded_text(value):
     return (type(value) is str and 0 < len(value.strip()) <= 400 and len(value) <= 400
-            and not any(unicodedata.category(c) in INVISIBLE_CATEGORIES for c in value))
+            and not any(unicodedata.category(c) in INVISIBLE_CATEGORIES or
+                        ord(c) in (0x034f, 0x3164, 0x2800) or
+                        0xfe00 <= ord(c) <= 0xfe0f or 0xe0100 <= ord(c) <= 0xe01ef for c in value))
 
 
 def validate_review(value, case, review_id):

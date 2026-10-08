@@ -64,12 +64,13 @@ def test_candidate_dependency_change_refused_before_container_start(tmp_path, mo
     baseline.mkdir()
     paths = {"requirements.lock": "lock_sha256", "security/runtime/server.py": "server_sha256",
              "scripts/build_runtime.py": "builder_sha256", "security/runtime/request.py": "request_sha256"}
-    runtime = {"image_id": "unused"}
+    runtime = {"image_id": "unused", "base_image": json.loads((ROOT / "security/tools.lock.json").read_text())["python_runtime"]["image"]}
     for name, key in paths.items():
         target = baseline / name
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_bytes((ROOT / name).read_bytes())
         runtime[key] = hashlib.sha256(target.read_bytes()).hexdigest()
+    (baseline / "security/tools.lock.json").write_bytes((ROOT / "security/tools.lock.json").read_bytes())
     (baseline / ".state").mkdir()
     (baseline / ".state/runtime-image.json").write_text(json.dumps(runtime))
     candidate = tmp_path / "candidate"

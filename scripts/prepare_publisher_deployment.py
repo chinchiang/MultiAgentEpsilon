@@ -15,7 +15,7 @@ from pathlib import Path, PurePosixPath
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 from security_harness import candidate_git
-from security_harness.results import subject_digest, validate_policy
+from security_harness.results import subject_digest, validate_policy, executable_bits
 from security_harness.trusted_publisher import Denied, need, strict_json, validate_settings
 
 
@@ -39,7 +39,7 @@ def archive_digest(data):
             with stream:
                 content = stream.read(1024**2 + 1)
             need(len(content) == member.size, "ARCHIVE_ENTRY")
-            files.append({"path": member.name, "type": "file", "executable_bits": member.mode & 0o111,
+            files.append({"path": member.name, "type": "file", "executable_bits": executable_bits(member.mode),
                           "size": len(content), "sha256": hashlib.sha256(content).hexdigest()})
     encoded = json.dumps({"format": "worktree-manifest-v1", "files": sorted(files, key=lambda f: f["path"])},
                          sort_keys=True, ensure_ascii=True, separators=(",", ":")).encode()

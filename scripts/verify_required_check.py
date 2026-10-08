@@ -9,7 +9,9 @@ for exactly that head. One foreign or manual run on the head blocks.
 
 Such a run executes the workflow file from the PR's base branch, which run metadata
 does not record; each run is therefore also bound to this PR's head branch, and any
-PR in any state that shares the head but targets another branch blocks.
+PR in any state with the same SHA, head repository and branch that targets another
+base or has a base-retarget timeline event blocks. This is an interim metadata
+check; the dedicated publisher additionally requires cryptographic attestations.
 """
 import argparse
 import json
@@ -19,7 +21,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from security_harness.trusted_publisher import validate_run_base
+from security_harness.trusted_publisher import validate_run_base, related_pull_path, head_scope
 
 REQUIRED_CHECK = "trusted-security-pilot"
 ACTIONS_APP_ID = 15368
@@ -46,7 +48,9 @@ def verify(api, repo, number, pages):
     checks = [c for c in listing["check_runs"] if c["name"] == REQUIRED_CHECK]
     need(checks, "REQUIRED_CHECK_MISSING")
     sources = []
-    pull_requests = pages(f"repos/{repo}/pulls?state=all&per_page=100")
+    pull_requests = pages(related_pull_path(f"repos/{repo}", pr) + "&per_page=100")
+    histories = {p["number"]: pages(f"repos/{repo}/issues/{p['number']}/timeline?per_page=100")
+                 for p in pull_requests if head_scope(p) == head_scope(pr)}
     for check in checks:
         # A same-named check from another app is not what the ruleset counts, but it
         # still signals tampering on this head.
@@ -57,7 +61,7 @@ def verify(api, repo, number, pages):
         need(run["event"] == "pull_request_target" and run["path"] == WORKFLOW_PATH
              and run["head_sha"] == head, "UNTRUSTED_CHECK_SOURCE")
         try:
-            validate_run_base(run, pr, pull_requests, BASE_BRANCH)
+            validate_run_base(run, pr, pull_requests, BASE_BRANCH, histories)
         except ValueError as exc:
             raise Denied(str(exc)) from None
         sources.append({"check_run_id": check["id"], "run_id": run["id"], "run_attempt": run["run_attempt"],

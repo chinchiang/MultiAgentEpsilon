@@ -9,10 +9,12 @@ import copy
 import hashlib
 import io
 import json
+import os
 import re
 import stat
 import subprocess
 import time
+import tempfile
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -62,6 +64,9 @@ def validate_settings(settings, gate_policy):
     need(SHA.fullmatch(settings.get("evaluator_sha") or ""), "UNAPPROVED_EVALUATOR")
     need(MANIFEST.fullmatch(settings.get("evaluator_digest") or ""), "EVALUATOR_DIGEST")
     need(DIGEST.fullmatch(settings.get("policy_digest") or ""), "POLICY_DIGEST")
+    need(isinstance(settings.get("attestation_verifier"), str)
+         and Path(settings["attestation_verifier"]).is_absolute()
+         and DIGEST.fullmatch(settings.get("attestation_verifier_sha256") or ""), "ATTESTATION_SETTINGS")
     reviewers = settings.get("reviewers")
     need(isinstance(reviewers, list) and reviewers and len(set(reviewers)) == len(reviewers)
          and all(isinstance(r, str) and re.fullmatch(r"[A-Za-z0-9-]+", r) for r in reviewers), "REVIEWERS")
@@ -69,13 +74,14 @@ def validate_settings(settings, gate_policy):
 
 
 def reject_newer_runs(run, newer_runs, head):
-    # GitHub omits pull_requests for fork heads, so association cannot be the key:
-    # unrelated (e.g. outsider fork) runs must not block, and any newer evaluation of
-    # this exact head supersedes the older green result.
+    # SHA alone is shared across forks. Only the same repository/branch evaluation
+    # supersedes this run; missing identity on a same-SHA newer run fails closed.
     for other in newer_runs:
         need(type(other.get("id")) is int and SHA.fullmatch(other.get("head_sha") or ""), "RUN_LISTING")
         if other["id"] > run["id"] and other["head_sha"] == head:
-            raise Denied("NEWER_RUN_EXISTS")
+            need(other.get("head_branch") and (other.get("head_repository") or {}).get("id"), "RUN_LISTING_IDENTITY")
+            if run_scope(other) == run_scope(run):
+                raise Denied("NEWER_RUN_EXISTS")
 
 
 def unpack_evidence(data):
@@ -232,10 +238,15 @@ def validate_bundle(settings, gate_policy, pr, run, newer_runs, jobs, files, rev
     need(run["head_sha"] == pr["head"]["sha"], "RUN_SHA")
     need(type(run["run_attempt"]) is int and run["run_attempt"] >= 1, "RUN_ATTEMPT")
     reject_newer_runs(run, newer_runs, pr["head"]["sha"])
-    need(len(jobs) == 1 and jobs[0]["name"] == "trusted-security-pilot"
-         and jobs[0]["conclusion"] == "success", "JOB_SOURCE")
-    steps = {s["name"]: s["conclusion"] for s in jobs[0]["steps"]}
+    named = {j["name"]: j for j in jobs}
+    need(len(jobs) == len(named) == 2
+         and set(named) == {"trusted-security-pilot", "Attest evaluator-owned evidence"}
+         and all(j["conclusion"] == "success" for j in jobs), "JOB_SOURCE")
+    steps = {s["name"]: s["conclusion"] for s in named["trusted-security-pilot"]["steps"]}
     need(all(steps.get(s) == "success" for s in REQUIRED_STEPS), "REQUIRED_STEP_INCOMPLETE")
+    signing = named["Attest evaluator-owned evidence"]["steps"]
+    need(any(s["name"] == "Sign evaluator-owned evidence" and s["conclusion"] == "success"
+             for s in signing), "ATTESTATION_STEP_INCOMPLETE")
     excluded = {person["login"] for person in (run.get("actor"), run.get("triggering_actor"))
                 if isinstance(person, dict) and person.get("login")} | set(commit_identities)
     approvals = validate_review(pr, reviews, permissions, settings, excluded)
@@ -293,6 +304,9 @@ class GitHub:
                 need(host.endswith(".blob.core.windows.net"), "ARTIFACT_REDIRECT_HOST")
                 # Installation/JWT credentials must never follow storage redirects.
                 return self.raw(location, authenticated=False, limit=limit)
+            if exc.code in (403, 429) and (exc.code == 429 or exc.headers.get("Retry-After")
+                    or exc.headers.get("X-RateLimit-Remaining") == "0"):
+                raise Denied("GITHUB_RATE_LIMIT") from None
             raise Denied("GITHUB_HTTP_" + str(exc.code)) from None
 
     def api(self, path, method="GET", payload=None):
@@ -301,10 +315,11 @@ class GitHub:
 
     def pages(self, path):
         result = []
-        for page in range(1, 11):
+        for page in range(1, 102):
             separator = "&" if "?" in path else "?"
             items = self.api(path + separator + f"per_page=100&page={page}")
             need(isinstance(items, list), "PAGINATION_TYPE")
+            need(len(result) + len(items) <= 10000, "PAGINATION_LIMIT")
             result.extend(items)
             if len(items) < 100:
                 return result
@@ -327,7 +342,8 @@ def installation_client(settings, key_file):
     installation = client.api(f"/app/installations/{settings['installation_id']}")
     need(installation["app_id"] == settings["app_id"] and installation.get("suspended_at") is None
          and installation["account"]["login"].lower() == settings["repository"].split("/")[0].lower(), "INSTALLATION_IDENTITY")
-    permissions = {"actions": "read", "contents": "read", "pull_requests": "read", "checks": "write"}
+    permissions = {"actions": "read", "contents": "read", "pull_requests": "read", "checks": "write",
+                   "attestations": "read"}
     response = client.api(f"/app/installations/{settings['installation_id']}/access_tokens", "POST",
                           {"repository_ids": [settings["repository_id"]], "permissions": permissions})
     granted = response.get("permissions", {})
@@ -384,13 +400,35 @@ def identities(*people):
     return {p["login"] for p in people if isinstance(p, dict) and isinstance(p.get("login"), str)}
 
 
-def validate_run_base(run, pr, pull_requests, base_branch):
+def head_scope(pr):
+    head = pr["head"]
+    return head.get("sha"), (head.get("repo") or {}).get("id"), head.get("ref")
+
+
+def run_scope(run):
+    return run.get("head_sha"), (run.get("head_repository") or {}).get("id"), run.get("head_branch")
+
+
+def related_pull_path(prefix, pr):
+    repo = (pr["head"].get("repo") or {}).get("full_name", "")
+    need(re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", repo), "PR_HEAD_REPOSITORY")
+    owner = repo.split("/")[0]
+    return prefix + "/pulls?state=all&head=" + urllib.parse.quote(owner + ":" + pr["head"]["ref"], safe="")
+
+
+def run_base_history(client, prefix, pr, pulls):
+    return {p["number"]: client.pages(f"{prefix}/issues/{p['number']}/timeline")
+            for p in pulls if head_scope(p) == head_scope(pr)}
+
+
+def validate_run_base(run, pr, pull_requests, base_branch, histories=None):
     """Bind a pull_request_target run to this PR's base without trusting run evidence.
 
-    The same head can be opened against another branch whose copy of the workflow writes
-    its own green evidence. PRs cannot be deleted, so any PR in any state that shares
-    the head with another base is visible here; and a twin from a different head branch
-    yields a run whose head branch differs from this PR's.
+    Current PR state cannot prove historical workflow source. Without a signed
+    source identity, any base-retargeted PR sharing this exact head/repo/branch is
+    refused, including later reruns and retarget-away-and-back. Creation timestamps
+    alone cannot establish which queued event supplied a workflow. A new PR on a
+    new head branch can be evaluated normally. Timelines must be complete API data.
     """
     head = pr["head"]["sha"]
     head_repo = (pr["head"].get("repo") or {}).get("id")
@@ -398,8 +436,20 @@ def validate_run_base(run, pr, pull_requests, base_branch):
          and (run.get("head_repository") or {}).get("id") == head_repo, "RUN_HEAD_BRANCH")
     need(isinstance(pull_requests, list) and any(p.get("number") == pr["number"] for p in pull_requests),
          "PR_LISTING_INCOMPLETE")
+    relevant = [p for p in pull_requests if head_scope(p) == head_scope(pr)]
+    need(any(p["number"] == pr["number"] for p in relevant), "PR_LISTING_INCOMPLETE")
     need(all(p["base"]["ref"] == base_branch and p["base"]["repo"]["id"] == pr["base"]["repo"]["id"]
-             for p in pull_requests if p["head"]["sha"] == head), "FOREIGN_BASE_PR")
+             for p in relevant), "FOREIGN_BASE_PR")
+    need(isinstance(histories, dict), "BASE_HISTORY_MISSING")
+    for p in relevant:
+        events = histories.get(p["number"])
+        need(isinstance(events, list) and all(isinstance(e, dict) and isinstance(e.get("event"), str)
+                                             for e in events), "BASE_HISTORY_MISSING")
+        need(not any(e["event"] == "base_ref_changed" for e in events), "BASE_RETARGETED_UNVERIFIABLE")
+    # Associated PR snapshots, when present, may only constrain trust further.
+    for linked in run.get("pull_requests", []):
+        if linked.get("number") == pr["number"] and linked.get("base"):
+            need(linked["base"].get("ref") == base_branch, "RUN_ORIGINAL_BASE")
 
 
 PR_COMMIT_LIMIT = 250  # GitHub lists at most 250 commits for a pull request.
@@ -411,6 +461,58 @@ def pr_commit_identities(commits, head):
     need(isinstance(commits, list) and 0 < len(commits) < PR_COMMIT_LIMIT, "PR_COMMITS_TRUNCATED")
     need(all(isinstance(c, dict) for c in commits) and commits[-1].get("sha") == head, "PR_COMMITS_HEAD")
     return set().union(*(identities(c.get("author"), c.get("committer")) for c in commits))
+
+
+def verify_artifact_attestation(client, settings, run, raw):
+    """Use a pinned verifier for cryptography, then bind its verified SLSA statement
+    to the precise run attempt. Artifact JSON is never itself a source identity.
+    Offline bundles avoid giving the subprocess the installation token or model keys.
+    """
+    from .processes import bounded_output
+    from scripts.publish_trusted_check import open_config
+    binary = Path(settings["attestation_verifier"])
+    fd = open_config(binary, 0)
+    with os.fdopen(fd, "rb") as stream:
+        info = os.fstat(stream.fileno())
+        need(stat.S_ISREG(info.st_mode) and info.st_uid == 0 and not info.st_mode & 0o022
+             and info.st_mode & 0o111 and info.st_size <= 128 * 1024**2, "ATTESTATION_VERIFIER_FILE")
+        need(hashlib.file_digest(stream, "sha256").hexdigest() == settings["attestation_verifier_sha256"],
+             "ATTESTATION_VERIFIER_DIGEST")
+    digest = hashlib.sha256(raw).hexdigest()
+    response = client.api(f"/repos/{settings['repository']}/attestations/sha256:{digest}?per_page=30")
+    attestations = response.get("attestations")
+    need(isinstance(attestations, list) and 0 < len(attestations) < 30, "ATTESTATION_MISSING_OR_TRUNCATED")
+    bundles = b"\n".join(json.dumps(a["bundle"], separators=(",", ":")).encode() for a in attestations)
+    need(len(bundles) <= 2 * 1024**2, "ATTESTATION_LIMIT")
+    env = {k: v for k, v in os.environ.items() if k.upper() in {
+        "PATH", "HOME", "TMPDIR", "HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "NO_PROXY",
+        "SSL_CERT_FILE", "SSL_CERT_DIR", "REQUESTS_CA_BUNDLE"}}
+    env.update(GH_PROMPT_DISABLED="1", GH_NO_UPDATE_NOTIFIER="1")
+    with tempfile.TemporaryDirectory(prefix="epsilon-attestation-") as directory:
+        env.update(XDG_CACHE_HOME=directory + "/cache", GH_CONFIG_DIR=directory + "/config")
+        artifact, bundle = Path(directory) / "evidence.zip", Path(directory) / "bundle.jsonl"
+        artifact.write_bytes(raw)
+        bundle.write_bytes(bundles)
+        command = [str(binary), "attestation", "verify", str(artifact), "--bundle", str(bundle),
+                   "--repo", settings["repository"], "--signer-workflow",
+                   settings["repository"] + "/" + settings["workflow_path"],
+                   "--signer-digest", settings["evaluator_sha"], "--source-ref", "refs/heads/main",
+                   "--deny-self-hosted-runners", "--predicate-type", "https://slsa.dev/provenance/v1",
+                   "--format", "json"]
+        try:
+            verified = strict_json(bounded_output(command, b"", timeout=90, limit=2 * 1024**2, env=env))
+        except Exception:
+            raise Denied("ATTESTATION_VERIFICATION_FAILED") from None
+    need(isinstance(verified, list) and bool(verified), "ATTESTATION_VERIFICATION_FAILED")
+    invocation = f"https://github.com/{settings['repository']}/actions/runs/{run['id']}/attempts/{run['run_attempt']}"
+    for proof in verified:
+        statement = proof.get("verificationResult", {}).get("statement", {})
+        metadata = statement.get("predicate", {}).get("runDetails", {}).get("metadata", {})
+        if (statement.get("predicateType") == "https://slsa.dev/provenance/v1"
+                and metadata.get("invocationId") == invocation
+                and any(s.get("digest", {}).get("sha256") == digest for s in statement.get("subject", []))):
+            return
+    raise Denied("ATTESTATION_RUN_MISMATCH")
 
 
 def collect(client, settings, number, run_id, gate_policy, blob_cache=None):
@@ -436,12 +538,13 @@ def collect(client, settings, number, run_id, gate_policy, blob_cache=None):
     raw = client.raw("https://api.github.com" + prefix + f"/actions/artifacts/{artifact['id']}/zip", limit=16 * 1024**2)
     advertised_digest = artifact.get("digest")
     need(advertised_digest == "sha256:" + hashlib.sha256(raw).hexdigest(), "ARTIFACT_DIGEST")
+    verify_artifact_attestation(client, settings, run, raw)
     reviews = client.pages(f"{prefix}/pulls/{number}/reviews")
     logins = {r["user"]["login"] for r in reviews if r["state"] in ("APPROVED", "DISMISSED", "CHANGES_REQUESTED")}
     permissions = {login: client.api(f"{prefix}/collaborators/{urllib.parse.quote(login, safe='')}/permission")["role_name"] for login in logins}
-    twins = client.pages(f"{prefix}/commits/{head}/pulls")
-    need([p["number"] for p in twins if p["state"] == "open" and p["head"]["sha"] == head] == [number], "SHARED_PR_HEAD")
-    validate_run_base(run, pr, client.pages(f"{prefix}/pulls?state=all"), settings["base_branch"])
+    twins = client.pages(related_pull_path(prefix, pr))
+    need([p["number"] for p in twins if p["state"] == "open" and head_scope(p) == head_scope(pr)] == [number], "SHARED_PR_HEAD")
+    validate_run_base(run, pr, twins, settings["base_branch"], run_base_history(client, prefix, pr, twins))
     commit = client.api(f"{prefix}/commits/{head}")
     commit_identities = (identities(commit.get("author"), commit.get("committer"))
                          | pr_commit_identities(client.pages(f"{prefix}/pulls/{number}/commits"), head))
@@ -452,14 +555,15 @@ def collect(client, settings, number, run_id, gate_policy, blob_cache=None):
     return proof
 
 
-def discover_run(client, settings, head):
+def discover_run(client, settings, pr):
+    head = pr["head"]["sha"]
     runs = [r for r in head_runs(client, settings, head)
-            if r.get("head_sha") == head and r.get("path") == settings["workflow_path"]]
+            if run_scope(r) == head_scope(pr) and r.get("path") == settings["workflow_path"]]
     need(bool(runs), "RUN_MISSING")
     return max(r["id"] for r in runs)
 
 
-THROTTLED = ("GITHUB_HTTP_403", "GITHUB_HTTP_429", "API_BUDGET")
+THROTTLED = ("GITHUB_RATE_LIMIT", "API_BUDGET")
 
 
 def publish(client, settings, gate_policy, number, run_id=None, state=None):
@@ -471,12 +575,17 @@ def publish(client, settings, gate_policy, number, run_id=None, state=None):
     """
     state = {} if state is None else state
     prefix = "/repos/" + settings["repository"]
-    pr = client.api(f"{prefix}/pulls/{number}")
+    try:
+        pr = client.api(f"{prefix}/pulls/{number}")
+    except Denied as exc:
+        if str(exc) in THROTTLED:
+            state["backoff_until"] = int(time.time()) + 900
+        raise
     need(SHA.fullmatch(pr["head"]["sha"]) and pr["base"]["repo"]["id"] == settings["repository_id"], "CHECK_TARGET")
     head = pr["head"]["sha"]
     try:
         if run_id is None:
-            run_id = discover_run(client, settings, head)
+            run_id = discover_run(client, settings, pr)
         proof = collect(client, settings, number, run_id, gate_policy, state.setdefault("blobs", {}))
         need(proof["head_sha"] == head, "HEAD_CHANGED")
         # Recheck mutable PR/reviews/latest attempt immediately before green.
@@ -486,7 +595,8 @@ def publish(client, settings, gate_policy, number, run_id=None, state=None):
         run = client.api(f"{prefix}/actions/runs/{run_id}")
         need(run["run_attempt"] == proof["run_attempt"] and run["status"] == "completed"
              and run["conclusion"] == "success" and run["head_sha"] == head, "RUN_CHANGED")
-        validate_run_base(run, fresh, client.pages(f"{prefix}/pulls?state=all"), settings["base_branch"])
+        twins = client.pages(related_pull_path(prefix, fresh))
+        validate_run_base(run, fresh, twins, settings["base_branch"], run_base_history(client, prefix, fresh, twins))
         reject_newer_runs(run, head_runs(client, settings, head), head)
         reviews = client.pages(f"{prefix}/pulls/{number}/reviews")
         permissions = {r["user"]["login"]: client.api(f"{prefix}/collaborators/{urllib.parse.quote(r['user']['login'], safe='')}/permission")["role_name"]

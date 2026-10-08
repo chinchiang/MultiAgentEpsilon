@@ -265,7 +265,7 @@ def test_larger_review_budget_is_bound_to_every_request_and_total_cap():
     assert report['limits']['timeout_seconds'] == 30
     score.validate_collection(report, report['plan'])
     report['output_tokens_per_review'] = 512
-    with pytest.raises(ValueError, match='request binding'):
+    with pytest.raises(ValueError, match='request binding|limits mismatch'):
         score.validate_collection(report)
     with pytest.raises(ValueError):
         runner.initial_report(['mock-review-a', 'mock-review-b'], list(bench.SUITES['injection']), str(uuid.uuid4()), 1024)
