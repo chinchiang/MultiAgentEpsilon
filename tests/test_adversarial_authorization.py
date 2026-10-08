@@ -37,8 +37,8 @@ MUTATIONS = {'wrong_password_accepted': ('if not user or not hmac.compare_digest
                                      '            return [{**row, "leaked": '
                                      'other} for row in rows]'),
  # The admin branch of the write predicate escapes the tenant boundary.
- 'admin_cross_tenant_write': ("WHERE id=%s AND tenant=%s AND (owner=%s OR %s='admin') RETURNING *",
-                              "WHERE id=%s AND ((tenant=%s AND owner=%s) OR %s='admin') RETURNING *"),
+ 'admin_cross_tenant_write': ("UPDATE items SET value=%s WHERE id=%s AND tenant=%s AND (owner=%s OR %s='admin') RETURNING *",
+                              "UPDATE items SET value=%s WHERE id=%s AND ((tenant=%s AND owner=%s) OR %s='admin') RETURNING *"),
  'denied_write_changes_other_row': ('if not row:\n'
                                     '            raise HTTPException(404, '
                                     '"item not found")',
@@ -51,7 +51,17 @@ MUTATIONS = {'wrong_password_accepted': ('if not user or not hmac.compare_digest
                                     '            raise HTTPException(404, '
                                     '"item not found")')}
 
+MUTATIONS.update({
+    'expired_session_accepted': (' AND s.expires_at>now()', ''),
+    'admin_cross_tenant_delete': (
+        "DELETE FROM items WHERE id=%s AND tenant=%s AND (owner=%s OR %s='admin') RETURNING *",
+        "DELETE FROM items WHERE id=%s AND ((tenant=%s AND owner=%s) OR %s='admin') RETURNING *"),
+})
+
 EXPECTED = {
+    'expired_session_accepted': {'expired session read denied', 'expired session logout denied',
+                                 'expired session delete denied'},
+    'admin_cross_tenant_delete': {'admin cross-tenant delete denied without side effect'},
     'wrong_password_accepted': {'wrong password denied without session'},
     'cross_tenant_404_leak': {'admin cross-tenant denied'},
     'export_nested_cross_tenant_leak': {'admin export tenant-scoped'},
@@ -69,8 +79,8 @@ def test_real_candidate_mutations_are_blocked(tmp_path, mutation):
     app = tmp_path / 'fixture_app/app.py'
     source = app.read_text()
     old, new = MUTATIONS[mutation]
-    assert source.count(old) == 1, 'mutation must still apply to the actual candidate'
-    app.write_text(source.replace(old, new))
+    assert source.count(old) == (2 if mutation == 'denied_write_changes_other_row' else 1), 'mutation must still apply to the actual candidate'
+    app.write_text(source.replace(old, new, 1))
     observed = run_isolated(tmp_path)
     cases = observed['cases']
     validate_cases(cases, POLICY['gate_contracts']['AUTH'])

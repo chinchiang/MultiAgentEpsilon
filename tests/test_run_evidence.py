@@ -29,6 +29,7 @@ def test_orchestrator_blocks_incomplete_worker_output(tmp_path, monkeypatch, cas
     monkeypatch.setattr(run_security, "ROOT", fixture_root(tmp_path))
     monkeypatch.setattr(sys, "argv", ["run_security"])
     monkeypatch.setattr(run_security, "verify", lambda *a: ["synthetic"])
+    monkeypatch.setattr(run_security, "dependency_scan", lambda *a: {"findings": [], "sbom": {}})
     monkeypatch.setattr(run_security, "scan", lambda *a, **k: {"targets": 1, "findings": []})
     monkeypatch.setattr(isolation, "cleanup_run", lambda *a: None)
     with patch.object(run_security.subprocess, "run", return_value=subprocess.CompletedProcess([], 0, json.dumps({"cases": cases, "isolation": {}}), "")):
@@ -67,6 +68,7 @@ def test_timeout_cleans_owned_isolation_and_records_timeout(tmp_path, monkeypatc
     monkeypatch.setattr(run_security, "ROOT", fixture_root(tmp_path))
     monkeypatch.setattr(sys, "argv", ["run_security"])
     monkeypatch.setattr(run_security, "verify", lambda *a: ["synthetic"])
+    monkeypatch.setattr(run_security, "dependency_scan", lambda *a: {"findings": [], "sbom": {}})
     monkeypatch.setattr(run_security, "scan", lambda *a, **k: {"targets": 1, "findings": []})
     cleaned = []
     monkeypatch.setattr(isolation, "cleanup_run", cleaned.append)
@@ -75,3 +77,34 @@ def test_timeout_cleans_owned_isolation_and_records_timeout(tmp_path, monkeypatc
     data = report(tmp_path)
     assert cleaned == [data["run_id"]]
     assert data["records"][-1]["execution"] == "TIMEOUT"
+
+
+def test_bootstrap_known_vulnerability_blocks_before_installation(tmp_path, monkeypatch):
+    monkeypatch.setattr(bootstrap, 'ROOT', fixture_root(tmp_path))
+    monkeypatch.setattr(bootstrap, 'verify', lambda *a: [{'name': 'example', 'version': '1.0'}])
+    monkeypatch.setattr(bootstrap, 'dependency_scan', lambda *a: {
+        'sbom': {}, 'findings': [{'advisory_id': 'CVE-2026-12345'}]})
+    def forbidden(*args, **kwargs):
+        raise AssertionError('installation must not start')
+    monkeypatch.setattr(bootstrap.subprocess, 'run', forbidden)
+    assert bootstrap.main() == 1
+    data = report(tmp_path)
+    assert data['decision'] == 'BLOCK' and data['stage'] == 'G1'
+    assert data['records'][0]['gate'] == 'G1' and data['records'][0]['findings'] == 1
+    assert not (tmp_path / '.venv').exists()
+
+
+def test_bootstrap_partial_query_keeps_error_and_findings_without_installing(tmp_path, monkeypatch):
+    from security_harness.dependencies import DependencyError
+    monkeypatch.setattr(bootstrap, 'ROOT', fixture_root(tmp_path))
+    monkeypatch.setattr(bootstrap, 'verify', lambda *a: [{'name': 'example', 'version': '1.0'}])
+    partial = {'status': 'INCOMPLETE', 'sbom': {}, 'findings': [{'advisory_id': 'CVE-2026-12345'}],
+               'queries': [{'status': 'ERROR', 'error_type': 'TimeoutError'}]}
+    def incomplete(*args):
+        raise DependencyError('incomplete query', partial)
+    monkeypatch.setattr(bootstrap, 'dependency_scan', incomplete)
+    assert bootstrap.main() == 1
+    data = report(tmp_path)
+    assert data['records'][0]['execution'] == 'ERROR' and data['records'][0]['findings'] == 1
+    assert data['records'][0]['sca']['queries'][0]['error_type'] == 'TimeoutError'
+    assert not (tmp_path / '.venv').exists()

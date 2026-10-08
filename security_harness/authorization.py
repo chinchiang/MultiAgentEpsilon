@@ -137,6 +137,42 @@ def evaluate(client, dsn, schema, passwords, connect):
                   response.status_code == 204 and not response.content and after_logout == expected
                   and denied.status_code == 401 and denied_body == {"detail": "authentication required"}
                   and snapshot(dsn, schema, connect) == expected})
+
+    expired = secrets.token_urlsafe(32)
+    with connect(dsn, schema) as conn:
+        conn.execute("INSERT INTO sessions VALUES (%s,%s,now()-interval '1 minute')",
+                     (hashlib.sha256(expired.encode()).hexdigest(), 'bob'))
+    expired_headers = {"Authorization": "Bearer " + expired}
+    denied_body = {"detail": "authentication required"}
+    check("expired session read denied", "get", "/items/2", 401, denied_body, headers=expired_headers)
+    check("expired session logout denied", "post", "/logout", 401, denied_body, headers=expired_headers)
+    check("anonymous delete denied", "delete", "/items/2", 401, denied_body)
+    check("forged bearer delete denied", "delete", "/items/2", 401, denied_body,
+          headers={"Authorization": "Bearer invalid"})
+    check("expired session delete denied", "delete", "/items/2", 401, denied_body, headers=expired_headers)
+    for actor in ('bob', 'carol'):
+        check(f"{actor}: unauthorized delete denied without side effect", "delete", "/items/1", 404,
+              {"detail": "item not found"}, headers=headers[actor])
+    check("admin cross-tenant delete denied without side effect", "delete", "/items/3", 404,
+          {"detail": "item not found"}, headers=headers['admin'])
+    check("forged bearer logout denied", "post", "/logout", 401, denied_body,
+          headers={"Authorization": "Bearer invalid"})
+    check("SQL-like username denied without session", "post", "/login", 401,
+          {"detail": "invalid credentials"}, json={"username": "' OR '1'='1", "password": "synthetic"})
+    literal = "'; DELETE FROM items; --"
+    expected = snapshot(dsn, schema, connect)
+    expected['items'][1] = {**expected['items'][1], 'value': literal}
+    check("SQL-like update remains literal data", "patch", "/items/2", 200, expected['items'][1],
+          expected=expected, headers=headers['bob'], json={'value': literal})
+    expected = snapshot(dsn, schema, connect)
+    expected['items'] = [i for i in expected['items'] if i['id'] != 2]
+    check("owner deletes own data", "delete", "/items/2", 204, None, expected=expected, headers=headers['bob'])
+    check("repeated delete denied without side effect", "delete", "/items/2", 404,
+          {"detail": "item not found"}, headers=headers['bob'])
+    expected = snapshot(dsn, schema, connect)
+    expected['items'] = [i for i in expected['items'] if i['id'] != 1]
+    check("same-tenant admin delete allowed", "delete", "/items/1", 204, None,
+          expected=expected, headers=headers['admin'])
     return cases
 
 

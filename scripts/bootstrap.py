@@ -14,8 +14,9 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 from security_harness.preflight import verify
+from security_harness.dependencies import DependencyError, scan as dependency_scan
 from security_harness.audit import AuditRun
-from security_harness.results import digest_file, subject_digest, validate_policy
+from security_harness.results import digest_file, subject_digest, validate_policy, write_json
 
 
 def install(audit):
@@ -28,7 +29,19 @@ def install(audit):
     audit.data["subject_digest"] = subject_digest(ROOT)
     audit.stage("G1")
     packages = verify(ROOT / "requirements.lock", policy)
-    audit.add("G1", "COMPLETED", "scan", len(packages), 0, "installation preflight")
+    try:
+        sca = dependency_scan(ROOT / "requirements.lock")
+    except DependencyError as exc:
+        if exc.evidence:
+            write_json(audit.output / "sbom.cdx.json", exc.evidence['sbom'])
+            audit.add("G1", "ERROR", "scan", len(packages), len(exc.evidence['findings']),
+                      "incomplete dependency query", packages=packages, sca=exc.evidence)
+        raise
+    write_json(audit.output / "sbom.cdx.json", sca["sbom"])
+    audit.add("G1", "COMPLETED", "scan", len(packages), len(sca["findings"]),
+              "installation provenance and OSV preflight", packages=packages, sca=sca)
+    if sca["findings"]:
+        raise RuntimeError("known dependency vulnerabilities; installation blocked")
     print(f"G1 preflight verified {len(packages)} pinned packages before installation", flush=True)
     audit.stage("scanner")
     scanner = json.loads((ROOT / "security/tools.lock.json").read_text())["gitleaks"]

@@ -79,14 +79,13 @@ def test_closed_pr_is_not_verified():
         checker.verify(fake_api([check(1, 10)], {10: [run(100)]}, pr_state="closed"), "owner/repo", 5, listing())
 
 
-def test_gh_output_is_decoded_as_utf8_not_the_locale_codec(monkeypatch):
-    seen = {}
-    def fake(args, **kwargs):
-        seen.update(kwargs)
-        return '{"title": "可信安全閘門"}'
-    monkeypatch.setattr(checker.subprocess, "check_output", fake)
+def test_reader_preserves_chinese_titles_without_a_locale_subprocess(monkeypatch):
+    class Reader:
+        def api(self, path):
+            assert path == '/repos/owner/repo/pulls/6'
+            return {"title": "可信安全閘門"}
+    monkeypatch.setattr(checker, '_reader', Reader())
     assert checker.gh_api("repos/owner/repo/pulls/6")["title"] == "可信安全閘門"
-    assert seen["encoding"] == "utf-8" and "text" not in seen
 
 
 @pytest.mark.parametrize("twin,branch,code", [

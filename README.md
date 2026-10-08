@@ -50,11 +50,11 @@ python3 scripts/dev_db.py start
 
 `dev_db.py` 的 loopback 資料庫供本地開發與可信基準測試使用；隔離評分會另外建立無網路資料庫與最低所需權限的應用帳號，完成後移除。所有資料均為合成資料。
 
-`expect_block.py` 會確認缺陷版**恰好**違反政策 `seeded_defect_case_ids` 指定的 **6 個授權案例**（bob／carol 越權讀寫各一、admin 跨租戶讀取與寫入）；數量相同但換成別的案例、或任意工具錯誤都不算成功。`run_security.py` 預設跑修正版，回傳碼 0 表示這次有限試點 ALLOW，1 表示 BLOCK。`ERROR`、`TIMEOUT`、必要零目標、缺 gate、過期或不同 subject／policy 的證據都不能 ALLOW。正向操作及資料庫副作用也會一起驗證。
+`expect_block.py` 會確認缺陷版**恰好**違反政策 `seeded_defect_case_ids` 指定的 **9 個授權案例**（bob／carol 越權讀寫刪除各一、admin 跨租戶讀取、寫入與刪除）；數量相同但換成別的案例、或任意工具錯誤都不算成功。`run_security.py` 預設跑修正版，回傳碼 0 表示這次有限試點 ALLOW，1 表示 BLOCK。`ERROR`、`TIMEOUT`、必要零目標、缺 gate、過期或不同 subject／policy 的證據都不能 ALLOW。正向操作及資料庫副作用也會一起驗證。
 
 結果 schema 為第 3 版，拒絕舊版 gate 證據：每筆 gate 綁定相同 run ID、subject 與 policy digest。subject 使用 `worktree-manifest-v1`，雜湊明確編碼的逐檔路徑、型態、執行權限、大小及內容 SHA-256。AUTH 必須包含政策指定的唯一案例集合；缺漏、重複、未知 ID 或彙總不一致均 BLOCK。
 
-AUTH 有 18 個必要案例，包含錯誤密碼及不存在帳號，以及 admin 的同租戶寫入（允許）與跨租戶寫入（拒絕且無副作用）。拒絕回應、讀取及匯出依合成 API 契約比對完整 JSON，拒絕重複 key；每個案例核對完整 users／items／sessions 快照與允許的變更。這是合成 fixture 的契約，不是任意 API 的通用回應規則。五種已重現缺陷（含 admin 寫入條件越過租戶邊界）的真實隔離回歸見 `tests/test_adversarial_authorization.py`。
+AUTH 有 32 個必要案例，包含錯誤密碼及不存在帳號，以及 admin 的同租戶寫入（允許）與跨租戶寫入（拒絕且無副作用）。拒絕回應、讀取及匯出依合成 API 契約比對完整 JSON，拒絕重複 key；每個案例核對完整 users／items／sessions 快照與允許的變更。這是合成 fixture 的契約，不是任意 API 的通用回應規則。七種已重現缺陷（含 admin 寫入條件越過租戶邊界）的真實隔離回歸見 `tests/test_adversarial_authorization.py`。
 
 每次執行在解析設定前建立 `artifacts/<run-id>/report.json`；錯誤只保存階段與例外類型，不記錄敏感例外文字。`artifacts/latest.txt` 是 security run 索引；bootstrap、preflight 與 runtime-build 使用各自的索引。這些是未簽章的執行證據，不是可信 attestation。停止並刪除本地開發資料庫：
 
@@ -67,9 +67,9 @@ python3 scripts/dev_db.py stop
 | 元件 | 已實作範圍 | 尚未涵蓋 |
 |---|---|---|
 | G0／G4 | [試點授權矩陣與威脅](docs/pilot-scope.zh-TW.md) | 真實應用 owner、完整威脅建模及適用性核准 |
-| G1 | PyPI metadata、固定版本／hash、來源、冷卻期、wheel-only 安裝 | CVE／KEV／EPSS、SBOM、惡意套件行為、所有生態系 |
+| G1 | PyPI metadata、固定版本／hash、冷卻期、wheel-only；鎖定檔 CycloneDX SBOM、OSV 精確版本漏洞查詢 | 安裝映像清冊、KEV／EPSS、惡意套件行為、其他生態系 |
 | G2 | 真實 Gitleaks、遮罩、工作樹及候選 HEAD 可達 blobs、限額 gzip／zip／tar 展開 | 服務端 Push Protection、遠端不可得歷史／快取、金鑰撤銷 |
-| 授權回歸 | 登入負例、同角色、跨租戶、管理者讀寫、欄位限制、登出及完整 fixture 狀態；18 個案例 | 完整 G5／Web/API 黑箱掃描、TLS／CSRF／JWT／SSRF |
+| 授權回歸 | 登入負例、同角色、跨租戶、管理者讀寫、欄位限制、登出及完整 fixture 狀態；32 個案例 | 完整 G5／Web/API 黑箱掃描、TLS／CSRF／JWT／SSRF |
 | 政策與證據 | 嚴格結果格式、故障阻擋、subject／policy digest、基準變更檢查、CI 簽章與來源驗證 | 專用可信發布器正式部署、例外生命週期、普通開發者的完整遠端繞過驗收 |
 | CI | 遠端 main／PR 正反例、固定 actions SHA、最小權限、早期拒絕證據與清理；main 規則已讀回 | 專用可信來源尚未部署，普通開發者繞過驗收仍未完成 |
 | 多模型 | [受限 gateway 與三種 adapter](docs/model-gateway.zh-TW.md)、[合成盲測與裁決試點](docs/blind-review.zh-TW.md) | GLM 真實推論、兩個真實家族的多輪穩定性、完整 G6／偏誤驗收 |
@@ -110,3 +110,5 @@ G2 與 subject digest 共用輸入清冊：生成物名稱只在 repository 根�
 可用 `--rounds` 在同一總預算內執行重複盲測；逐輪結果、失敗分類與穩定性判讀見 [多輪盲測文件](docs/repeated-review.zh-TW.md)。
 
 本輪修正與完整驗收記錄見[安全邊界修正](docs/security-boundaries-20261008.zh-TW.md)。已產生簽章或通過本機測試，仍須完成專用 App 的部署、Ruleset 來源綁定與遠端驗收。
+
+本輪新增依賴漏洞閘門、刪除／過期工作階段案例及模型變體的範圍、證據與部署缺口，見[後續擴充紀錄](docs/security-expansion-20261008.zh-TW.md)。此候選版本待獨立審查合併；main 的既有驗收不能替代本輪驗收。

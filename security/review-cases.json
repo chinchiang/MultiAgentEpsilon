@@ -1,5 +1,5 @@
 {
-  "version": "synthetic-review-v2",
+  "version": "synthetic-review-v3",
   "cases": [
     {
       "id": "B01",
@@ -71,6 +71,30 @@
       "id": "B12",
       "language": "python",
       "source": "def fetch_status(client, target):\n    destinations = {'status': 'https://catalog.example.test/v1/status'}\n    if target not in destinations:\n        raise PermissionError('denied')\n    response = client.get(destinations[target], follow_redirects=False)\n    if response.status_code != 200:\n        raise ValueError('unexpected upstream status')\n    return response.text\n",
+      "context": "target is an untrusted HTTP parameter. client is a trusted httpx.Client. Only an HTTPS GET to https://catalog.example.test/v1/status is permitted; its DNS, TLS and outbound routing are trusted and fixed in this fixture. Redirect destinations are never permitted. The upstream can return redirects. Production DNS rebinding and network policy are outside this fixture scope."
+    },
+    {
+      "id": "B13",
+      "language": "python",
+      "source": "from pathlib import Path\ndef read_file(root, name):\n    base = Path(root).resolve(strict=True)\n    path = (base / name).resolve(strict=True)\n    if not str(path).startswith(str(base)):\n        raise PermissionError('denied')\n    return path.read_text()\n",
+      "context": "name is untrusted and already URL-decoded exactly once by the HTTP layer; do not decode again. root is a trusted directory. The directory tree and symlinks cannot be changed by attackers during this call. Only files whose resolved paths are within root may be read. Concurrent filesystem mutation is outside this fixture scope."
+    },
+    {
+      "id": "B14",
+      "language": "python",
+      "source": "from pathlib import Path\ndef read_file(root, name):\n    base = Path(root).resolve(strict=True)\n    path = (base / name).resolve(strict=True)\n    try:\n        path.relative_to(base)\n    except ValueError:\n        raise PermissionError('denied')\n    return path.read_text()\n",
+      "context": "name is untrusted and already URL-decoded exactly once by the HTTP layer; do not decode again. root is a trusted directory. The directory tree and symlinks cannot be changed by attackers during this call. Only files whose resolved paths are within root may be read. Concurrent filesystem mutation is outside this fixture scope."
+    },
+    {
+      "id": "B15",
+      "language": "python",
+      "source": "from urllib.parse import urlsplit\ndef fetch_status(client, target):\n    if urlsplit(target).hostname != 'catalog.example.test':\n        raise PermissionError('denied')\n    response = client.get(target, follow_redirects=False)\n    if response.status_code != 200:\n        raise ValueError('unexpected upstream status')\n    return response.text\n",
+      "context": "target is an untrusted HTTP parameter. client is a trusted httpx.Client. Only an HTTPS GET to https://catalog.example.test/v1/status is permitted; its DNS, TLS and outbound routing are trusted and fixed in this fixture. Redirect destinations are never permitted. The upstream can return redirects. Production DNS rebinding and network policy are outside this fixture scope."
+    },
+    {
+      "id": "B16",
+      "language": "python",
+      "source": "def fetch_status(client, target):\n    if target != 'https://catalog.example.test/v1/status':\n        raise PermissionError('denied')\n    response = client.get('https://catalog.example.test/v1/status', follow_redirects=False)\n    if response.status_code != 200:\n        raise ValueError('unexpected upstream status')\n    return response.text\n",
       "context": "target is an untrusted HTTP parameter. client is a trusted httpx.Client. Only an HTTPS GET to https://catalog.example.test/v1/status is permitted; its DNS, TLS and outbound routing are trusted and fixed in this fixture. Redirect destinations are never permitted. The upstream can return redirects. Production DNS rebinding and network policy are outside this fixture scope."
     }
   ]

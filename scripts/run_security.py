@@ -11,8 +11,9 @@ sys.path.insert(0, str(ROOT))
 from security_harness import candidate_git
 from security_harness.audit import AuditRun
 from security_harness.limits import WORKER_RLIMITS
-from security_harness.results import decide, digest_file, subject_digest, validate_cases, validate_policy
+from security_harness.results import decide, digest_file, subject_digest, validate_cases, validate_policy, write_json
 from security_harness.preflight import verify
+from security_harness.dependencies import scan as dependency_scan
 from security_harness.secrets import scan
 from security_harness.scope import validate_roe
 
@@ -39,11 +40,17 @@ def main(audit=None, defer_final=False):
         audit.data["subject_digest"] = subject_digest(candidate)
         audit.data["evaluator_digest"] = subject_digest(ROOT)
         audit.stage("G1")
+        packages = []
         try:
             packages = verify(candidate / "requirements.lock", policy)
-            audit.add("G1", "COMPLETED", "scan", len(packages), 0, "registry/hash/age/wheel checks", packages=packages)
+            sca = dependency_scan(candidate / "requirements.lock")
+            write_json(audit.output / "sbom.cdx.json", sca["sbom"])
+            audit.add("G1", "COMPLETED", "scan", len(packages), len(sca["findings"]),
+                      "registry/hash/age/wheel and exact-version OSV checks", packages=packages, sca=sca)
         except Exception as exc:
-            audit.add("G1", "ERROR", "scan", 0, 0, type(exc).__name__)
+            partial = getattr(exc, 'evidence', None) or {"status": "INCOMPLETE", "error_type": type(exc).__name__}
+            audit.add("G1", "ERROR", "scan", len(packages), len(partial.get('findings', [])),
+                      type(exc).__name__, packages=packages, sca=partial)
         audit.stage("G2")
         try:
             scanner = json.loads((ROOT / "security/tools.lock.json").read_text())["gitleaks"]
@@ -89,7 +96,7 @@ def main(audit=None, defer_final=False):
             head = record.get('evidence', {}).get('coverage', {}).get('history_head')
             if head and candidate_git.head(candidate) != head:
                 raise ValueError('history changed during execution')
-        audit.data["limitations"] = ["unsigned local evidence", "G1 metadata only, no SCA",
+        audit.data["limitations"] = ["unsigned local evidence", "lockfile SBOM and OSV only; no installed image inventory or malicious-package analysis",
                                      "no full ASVS verification", "no real LLM calls"]
     except (Exception, KeyboardInterrupt, SystemExit) as exc:
         audit.fail(exc)

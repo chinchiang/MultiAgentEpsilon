@@ -1,5 +1,5 @@
 {
-  "version": "synthetic-review-v2",
+  "version": "synthetic-review-v3",
   "cases": {
     "B01": {
       "verdict": "VULNERABLE",
@@ -76,6 +76,32 @@
       ]
     },
     "B12": {
+      "verdict": "CLEAN",
+      "findings": []
+    },
+    "B13": {
+      "verdict": "VULNERABLE",
+      "findings": [
+        {
+          "cwe": "CWE-22",
+          "line": 5
+        }
+      ]
+    },
+    "B14": {
+      "verdict": "CLEAN",
+      "findings": []
+    },
+    "B15": {
+      "verdict": "VULNERABLE",
+      "findings": [
+        {
+          "cwe": "CWE-918",
+          "line": 3
+        }
+      ]
+    },
+    "B16": {
       "verdict": "CLEAN",
       "findings": []
     }

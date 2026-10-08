@@ -8,9 +8,9 @@
 |---|---|---|---|
 | 1.2.4／第一級：資料庫查詢注入防護 | B01、B02、B05、B06；CWE-89 | `tests/test_model_benchmark.py::test_sql_reference_has_executable_counterexample`：記憶體 SQLite 的正常查詢與注入反例 | 部分涵蓋；未驗證其他資料庫、查詢語言、預存程序及正式應用的所有查詢入口 |
 | 1.2.5／第一級：作業系統命令注入防護 | B03、B04；CWE-78 | `tests/test_model_benchmark.py::test_command_reference_tracks_shell_boundary_without_executing_payload`：攔截呼叫，核對命令字串與參數陣列 | 部分涵蓋；未執行攻擊命令，未涵蓋不同命令列程式的選項注入及作業系統差異 |
-| 8.2.2／第一級：物件層級存取控制 | B07、B08；CWE-639 | `tests/test_review_boundaries.py::test_document_unauthorized_reads_are_observable`：允許擁有者讀取，驗證未登入、同租戶其他使用者、同使用者識別值但不同租戶的讀取 | 部分涵蓋；身分資料視為可信。未涵蓋身分驗證、更新／刪除、角色繼承及完整業務政策 |
-| 5.3.2／第一級：檔案路徑來源及驗證 | B09、B10；CWE-22 | `tests/test_review_boundaries.py::test_file_escape_reads_actual_temporary_sentinel`：實際讀取暫存檔，驗證上層目錄、絕對路徑、相同前綴的相鄰目錄及符號連結 | 部分涵蓋；限 Linux、HTTP 層已解碼一次、目錄樹在呼叫期間不變。未涵蓋競爭條件、Windows、遠端檔案引入及寫入 |
-| 1.3.6／第二級：伺服器端請求偽造防護 | B11、B12；CWE-918 | `tests/test_review_boundaries.py::test_ssrf_untrusted_destinations_never_leave_mock_transport` 及 `test_ssrf_redirects_cannot_reach_second_mock_destination`：觀察模擬 HTTP 請求與重新導向鏈 | 部分涵蓋；以固定目的地代碼控制通訊協定、網域、路徑及連接埠，拒絕重新導向。未驗證正式 DNS、DNS 重新綁定、出口政策、代理伺服器及實際內網 |
+| 8.2.2／第一級：物件層級存取控制 | B07、B08 及 AUTH 32 案例；CWE-639 | `tests/test_review_boundaries.py::test_document_unauthorized_reads_are_observable`：允許擁有者讀取，驗證未登入、同租戶其他使用者、同使用者識別值但不同租戶的讀取 | 部分涵蓋；身分資料視為可信。AUTH 另涵蓋合成 fixture 的登入、更新／刪除及過期工作階段。未涵蓋正式身分提供者、角色繼承及完整業務政策 |
+| 5.3.2／第一級：檔案路徑來源及驗證 | B09、B10、B13、B14；CWE-22 | `tests/test_review_boundaries.py::test_file_escape_reads_actual_temporary_sentinel`：實際讀取暫存檔，驗證上層目錄、絕對路徑、相同前綴的相鄰目錄及符號連結 | 部分涵蓋；限 Linux、HTTP 層已解碼一次、目錄樹在呼叫期間不變。未涵蓋競爭條件、Windows、遠端檔案引入及寫入 |
+| 1.3.6／第二級：伺服器端請求偽造防護 | B11、B12、B15、B16；CWE-918 | `tests/test_review_boundaries.py::test_ssrf_untrusted_destinations_never_leave_mock_transport` 及 `test_ssrf_redirects_cannot_reach_second_mock_destination`：觀察模擬 HTTP 請求與重新導向鏈 | 部分涵蓋；以固定目的地代碼控制通訊協定、網域、路徑及連接埠，拒絕重新導向。未驗證正式 DNS、DNS 重新綁定、出口政策、代理伺服器及實際內網 |
 
 B07／B09／B11 必須重現資料或請求越界；B08／B10／B12 必須拒絕相同攻擊，且正常操作仍成功。這些回歸由持續整合流程的完整測試集執行。SSRF 使用 `httpx.MockTransport`，不存取任何真實內網或雲端中繼資料服務；路徑測試僅使用測試建立的暫存資料。
 
@@ -26,4 +26,4 @@ B07／B09／B11 必須重現資料或請求越界；B08／B10／B12 必須拒絕
 
 測試報告保存各攻擊變體的結果；盲測報告另保存案例、標準答案及實作摘要。新增案例會改變目錄與標準答案摘要，舊報告只適用於當時提交，不能用新版目錄重新背書。完整持續整合的測試報告及提交識別值以 PR 的驗證連結為準。
 
-後續應先增加寫入越權、可變目錄樹的安全開檔、DNS 與出口政策驗證，再針對正式應用建立端點清單及適用性審查。這些項目目前均未由新增案例完成。
+本輪新增合成 fixture 的寫入／刪除越權、過期工作階段及 B13–B16 變體。後續仍需可變目錄樹的安全開檔、DNS 與出口政策驗證，再針對正式應用建立端點清單及適用性審查。可變目錄樹、正式 DNS／出口政策及產品端點盤點仍未完成。新增目錄為 v3，真實 v2 結果保持為歷史證據；本輪細節見[擴充紀錄](security-expansion-20261008.zh-TW.md)。

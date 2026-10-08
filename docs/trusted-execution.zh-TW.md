@@ -63,7 +63,7 @@ python3 scripts/dev_db.py start
 python3 scripts/dev_db.py stop
 ```
 
-隔離回歸會執行缺陷版、修正版，以及在候選匯入時嘗試寫入唯讀來源／入口、讀取 evaluator／Docker socket／token、建立 IP 出向連線的探測。必要結果為：完整 18 案例、缺陷版恰好政策 `seeded_defect_case_ids` 的 6 個 findings／BLOCK、修正版 0 findings／ALLOW。另有錯誤密碼登入、404 洩漏、匯出夾帶跨租戶資料、其他資料列被非法修改，以及 admin 寫入條件越過租戶邊界五種變體，必須產生指定 AUTH findings；socket 改指向 host 測試端點必須失敗且端點不得收到連線。
+隔離回歸會執行缺陷版、修正版，以及在候選匯入時嘗試寫入唯讀來源／入口、讀取 evaluator／Docker socket／token、建立 IP 出向連線的探測。必要結果為：完整 32 案例、缺陷版恰好政策 `seeded_defect_case_ids` 的 9 個 findings／BLOCK、修正版 0 findings／ALLOW。另有錯誤密碼登入、404 洩漏、匯出夾帶跨租戶資料、其他資料列被非法修改，以及 admin 寫入條件越過租戶邊界，加上過期工作階段與跨租戶刪除共七種變體，必須產生指定 AUTH findings；socket 改指向 host 測試端點必須失敗且端點不得收到連線。
 
 候選 lock digest 必須等於已驗證 runtime lock digest；尚不支援任意候選依賴映像建置。受保護變更使用禁用 rename 折疊的 diff，同時判斷刪除與新增路徑。結果 schema 3 使用版本化逐檔 manifest，不能沿用 schema 2 的 gate 證據。
 

@@ -1,6 +1,6 @@
 # 系統架構與流程（Architecture Overview）
 
-本文件依 2026-10-08 已合併的 `main` 提交 `a5d1ba1ebf2ac5e0e4d2a47f827985db260efabd` 及實際程式整理。新增的圖表與文件不改變執行邏輯。系統目前是 Python 3.12 的資安測試試點，由命令列、GitHub Actions、隔離容器與模型 adapter 組成；多模型採獨立盲審、循序呼叫與本機評分。
+本文件依本輪候選版本的實際程式整理，包含新增 G1 漏洞檢查及 AUTH 刪除案例，尚待獨立審查合併。2026-10-08 正式 `main` 基準仍為 `a5d1ba1ebf2ac5e0e4d2a47f827985db260efabd`（704 項測試、18 個 AUTH 案例）。系統目前是 Python 3.12 的資安測試試點，由命令列、GitHub Actions、隔離容器與模型 adapter 組成；多模型採獨立盲審、循序呼叫與本機評分。
 
 圖中的實線表示已實作的執行或資料關係；虛線表示暫停、復原或尚待部署的路徑，依節點標示判讀。圖表使用 Mermaid 原始檔，另提供可直接開啟與分享的 SVG。
 
@@ -12,7 +12,7 @@
 
 | 路徑 | 目前作用 | 狀態與邊界 |
 |---|---|---|
-| 確定性測試 | G1 套件驗證、G2 機密掃描、18 個 AUTH 授權案例，再由政策判定 ALLOW／BLOCK | 已實作；AUTH 僅評估合成 FastAPI fixture，必要 gate 故障即阻擋 |
+| 確定性測試 | G1 套件來源／OSV 漏洞驗證、G2 機密掃描、32 個 AUTH 授權案例，再由政策判定 ALLOW／BLOCK | 已實作；AUTH 僅評估合成 FastAPI fixture，必要 gate 故障即阻擋 |
 | 多模型盲審 | 固定合成程式送給選定模型，驗證回答、對照本機標準答案並比較分歧 | Gemini／Claude Sonnet 已完成 B09～B12 真實配對；GLM 保留離線回歸，真實連線暫停；模型結果僅供參考 |
 | CI 與證據簽署 | base evaluator 評估 head candidate，獨立 runner 簽署證據 ZIP 摘要 | 已運作；不把候選 checkout 的工具、政策或測試匯入受信任 host |
 | 遠端合併保護 | 最新 head 獨立核准、正式必要檢查與來源驗證 | `main` 規則集 24512048 啟用、無 bypass；必要來源仍為共用 Actions App 15368 |
@@ -27,9 +27,9 @@
 [Mermaid 原始檔](diagrams/security-flow.mmd) · [開啟 SVG](diagrams/security-flow.svg)
 
 1. `scripts/run_security.py` 先建立 run ID 與初始證據，再由 supervisor 登記擁有者及程序群組；持久化握手完成後才允許 worker 執行。
-2. worker 從受信任基準讀取 RoE、政策與工具設定，核對候選輸入及清冊摘要。G1 查核候選 lock 的套件資料，G2 使用真實 Gitleaks 掃描工作樹、候選 HEAD 可達內容、提交／標籤中繼資料及限額封存展開。
+2. worker 從受信任基準讀取 RoE、政策與工具設定，核對候選輸入及清冊摘要。G1 查核候選 lock 的套件資料、產生鎖定檔 SBOM 並向 OSV 查詢每個固定版本，G2 使用真實 Gitleaks 掃描工作樹、候選 HEAD 可達內容、提交／標籤中繼資料及限額封存展開。
 3. G1／G2 完成且零 findings 才執行 AUTH。隔離 runtime 核對映像、可信啟動器與候選 lock，僅將受限的 `fixture_app/*.py` 來源送入 app 容器。
-4. 可信 oracle 在容器外透過 Docker exec 啟動容器內 HTTP bridge，並獨立查詢 PostgreSQL，核對 18 個授權案例的完整回應與資料庫副作用。
+4. 可信 oracle 在容器外透過 Docker exec 啟動容器內 HTTP bridge，並獨立查詢 PostgreSQL，核對 32 個授權案例的完整回應與資料庫副作用。
 5. worker 的結果先保持 `AWAITING_CLEANUP`；父程序確認所屬程序群組、容器及暫存目錄已清理，才發布最終結果。設定錯誤、缺 gate、過期證據、摘要不一致或清理失敗均 BLOCK。
 
 app 與隔離 DB 都使用 `--network=none`，透過共享的 PostgreSQL Unix socket 通訊。app 為非 root、唯讀根目錄，無 Linux capabilities，具 CPU／記憶體／PID／tmpfs 限額，只取得合成最低權限 DB 帳號。容器外 oracle 使用自己的可信 seed 與連線；候選不能修改評分器、政策或最終報告。
@@ -42,7 +42,7 @@ app 與隔離 DB 都使用 `--network=none`，透過共享的 PostgreSQL Unix so
 
 [Mermaid 原始檔](diagrams/model-review-flow.mmd) · [開啟 SVG](diagrams/model-review-flow.svg)
 
-`security/review-cases.json` 包含 B01～B12 的固定合成案例；`security/review-oracle.json` 是留在本機的標準答案。同一案例、同一輪給不同模型相同內容與不透明識別碼，請求不含案例 ID、逐案 CWE 提示、標準答案或其他模型回答。呼叫依已建立的計畫循序執行；需要真實 API 時必須明確指定 `--live`。
+`security/review-cases.json` 包含 B01～B16 的固定合成案例；`security/review-oracle.json` 是留在本機的標準答案。同一案例、同一輪給不同模型相同內容與不透明識別碼，請求不含案例 ID、逐案 CWE 提示、標準答案或其他模型回答。呼叫依已建立的計畫循序執行；需要真實 API 時必須明確指定 `--live`。
 
 Gateway 在 API I/O 前持久化 call ID、請求摘要及輸出詞元預留，再交給 adapter。Gemini 使用 HTTP `generateContent`，Claude 使用 AWS CLI 的 Bedrock Converse；adapter 輸出仍須通過本機 JSON、引用、行號、最多三項 findings 與判定一致性驗證。Bedrock 不傳送不支援的 `maxItems`，本機三項上限維持不變。
 
@@ -69,7 +69,7 @@ PR 使用 `.github/workflows/security.yml` 的 `pull_request_target`：evaluator
 | 安裝與離線 runtime | [`bootstrap.py`](../scripts/bootstrap.py)、[`build_runtime.py`](../scripts/build_runtime.py)、[`requirements.lock`](../requirements.lock)、[`tools.lock.json`](../security/tools.lock.json) |
 | 安全測試入口與 worker | [`run_security.py`](../scripts/run_security.py)、[`security_worker.py`](../scripts/security_worker.py)、[`audit.py`](../security_harness/audit.py) |
 | RoE、輸入、摘要與政策 | [`scope.py`](../security_harness/scope.py)、[`inputs.py`](../security_harness/inputs.py)、[`results.py`](../security_harness/results.py)、[`roe.json`](../security/roe.json)、[`policy.json`](../security/policy.json) |
-| G1／G2 | [`preflight.py`](../security_harness/preflight.py)、[`secrets.py`](../security_harness/secrets.py)、[`scan_content.py`](../security_harness/scan_content.py)、[`candidate_git.py`](../security_harness/candidate_git.py) |
+| G1／G2 | [`preflight.py`](../security_harness/preflight.py)、[`dependencies.py`](../security_harness/dependencies.py)、[`secrets.py`](../security_harness/secrets.py)、[`scan_content.py`](../security_harness/scan_content.py)、[`candidate_git.py`](../security_harness/candidate_git.py) |
 | 隔離與外部 oracle | [`isolation.py`](../security_harness/isolation.py)、[`container_http.py`](../security_harness/container_http.py)、[`authorization.py`](../security_harness/authorization.py)、[`fixture_database.py`](../security_harness/fixture_database.py)、[`fixture_app/app.py`](../fixture_app/app.py) |
 | 程序生命週期與回收 | [`lifecycle.py`](../security_harness/lifecycle.py)、[`limits.py`](../security_harness/limits.py)、[`cleanup_runs.py`](../scripts/cleanup_runs.py)；模型另用 [`llm/lifecycle.py`](../security_harness/llm/lifecycle.py) |
 | 模型 transport／adapter | [`gateway.py`](../security_harness/llm/gateway.py)、[`adapters.py`](../security_harness/llm/adapters.py)、[`transport.py`](../security_harness/llm/transport.py)、[`output_schema.py`](../security_harness/llm/output_schema.py) |
@@ -118,6 +118,7 @@ MultiAgentEpsilon/
 │   ├── remote-merge-protection.zh-TW.md
 │   ├── repeated-review.zh-TW.md
 │   ├── security-boundaries-20261008.zh-TW.md
+│   ├── security-expansion-20261008.zh-TW.md
 │   ├── structured-output.zh-TW.md
 │   ├── trusted-check-publisher.zh-TW.md
 │   └── trusted-execution.zh-TW.md
@@ -180,7 +181,9 @@ MultiAgentEpsilon/
 │   ├── authorization.py
 │   ├── candidate_git.py
 │   ├── container_http.py
+│   ├── dependencies.py
 │   ├── fixture_database.py
+│   ├── github_readonly.py
 │   ├── inputs.py
 │   ├── isolation.py
 │   ├── lifecycle.py
@@ -193,12 +196,15 @@ MultiAgentEpsilon/
 │   ├── secrets.py
 │   └── trusted_publisher.py
 ├── tests/
+│   ├── dependency_evidence.py
 │   ├── model_evidence.py
 │   ├── test_adversarial_authorization.py
 │   ├── test_authorization.py
 │   ├── test_candidate_git.py
 │   ├── test_container_http.py
+│   ├── test_dependencies.py
 │   ├── test_expect_block.py
+│   ├── test_github_readonly.py
 │   ├── test_gitleaks.py
 │   ├── test_inputs.py
 │   ├── test_isolation.py
@@ -213,6 +219,7 @@ MultiAgentEpsilon/
 │   ├── test_preflight.py
 │   ├── test_publisher_deployment.py
 │   ├── test_review_boundaries.py
+│   ├── test_review_variants.py
 │   ├── test_run_evidence.py
 │   ├── test_scan_coverage.py
 │   ├── test_scope.py
@@ -267,4 +274,4 @@ mmdc --configFile docs/diagrams/mermaid-config.json \
 
 ## 範圍與後續
 
-目前是有限的合成試點：尚未完成任意產品的 ASVS 適用性、G3、完整 G5／G6、SBOM／SCA／CVE 與較大模型樣本。專用 App 的簽章驗證程式已實作，但正式服務與必要來源綁定仍缺外部資源。這些狀態詳見[覆蓋對照](asvs-coverage.zh-TW.md)、[模型輸出驗收](structured-output.zh-TW.md)與[發布器部署文件](trusted-check-publisher.zh-TW.md)。
+目前是有限的合成試點：尚未完成任意產品的 ASVS 適用性、G3、完整 G5／G6、其他生態系及安裝映像的 SBOM／SCA／CVE 與較大模型樣本。專用 App 的簽章驗證程式已實作，但正式服務與必要來源綁定仍缺外部資源。這些狀態詳見[覆蓋對照](asvs-coverage.zh-TW.md)、[模型輸出驗收](structured-output.zh-TW.md)與[發布器部署文件](trusted-check-publisher.zh-TW.md)。

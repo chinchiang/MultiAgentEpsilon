@@ -15,7 +15,7 @@ def test_identical_oracle_rejects_vulnerable_and_accepts_fixed():
     vulnerable = run_authorization(dsn, "vulnerable")
     fixed = run_authorization(dsn, "fixed")
     contract = json.loads((Path(__file__).resolve().parents[1] / "security/policy.json").read_text())["gate_contracts"]["AUTH"]
-    assert len(vulnerable) == len(fixed) == len(contract["case_ids"]) == 18
+    assert len(vulnerable) == len(fixed) == len(contract["case_ids"]) == 32
     failed = {x["case"] for x in vulnerable if not x["passed"]}
     assert failed == set(contract["seeded_defect_case_ids"]) == {
         "bob: unauthorized read denied without data",
@@ -23,7 +23,10 @@ def test_identical_oracle_rejects_vulnerable_and_accepts_fixed():
         "carol: unauthorized read denied without data",
         "carol: unauthorized write denied without side effect",
         "admin cross-tenant denied",
-        "admin cross-tenant write denied without side effect"}
+        "admin cross-tenant write denied without side effect",
+        "bob: unauthorized delete denied without side effect",
+        "carol: unauthorized delete denied without side effect",
+        "admin cross-tenant delete denied without side effect"}
     assert all(x["passed"] for x in fixed)
 
 

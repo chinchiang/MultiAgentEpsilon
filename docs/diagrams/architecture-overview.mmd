@@ -4,8 +4,8 @@ flowchart TB
 
     subgraph Evaluator["受信任評估端：本機或 GitHub runner"]
         Run["run_security.py<br/>supervisor／限額 worker"]
-        Scan["G1／G2<br/>套件驗證與機密掃描"]
-        Oracle["AUTH：容器外 oracle<br/>18 個授權案例與副作用查核"]
+        Scan["G1／G2<br/>來源／SBOM／OSV 與機密掃描"]
+        Oracle["AUTH：容器外 oracle<br/>32 個授權案例與副作用查核"]
         Decision["確定性政策判定<br/>ALLOW／BLOCK，故障即阻擋"]
         Report["run-bound report.json<br/>摘要綁定與清理結果"]
         Run --> Scan --> Oracle --> Decision --> Report

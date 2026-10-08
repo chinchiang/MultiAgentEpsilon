@@ -13,6 +13,7 @@ import pytest
 
 from security_harness import trusted_publisher as publisher
 from security_harness.results import result, subject_digest
+from tests.dependency_evidence import clean_evidence
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -56,6 +57,7 @@ def bundle():
                       "history_blobs": 1, "unsupported_files": 0, "history_head": "b"*40}}),
                result("AUTH", "COMPLETED", "test", len(policy["gate_contracts"]["AUTH"]["case_ids"]), 0, subject, "f"*64, "synthetic", run_id=run_id,
                       cases=[{"case": n, "passed": True} for n in policy["gate_contracts"]["AUTH"]["case_ids"]])]
+    records[0]["packages"], records[0]["sca"] = clean_evidence(23, now)
     for record in records:
         record["created_at"] = now.isoformat()
     report = {"schema_version": 3, "operation": "security", "variant": "fixed", "run_id": run_id,
