@@ -1,11 +1,11 @@
 # 第一個里程碑：實作狀態與驗收方式
 
-本文件只記錄**現況**（2026-10-07）。各批次的原始紀錄與當時的數字移至[里程碑歷史紀錄](milestone-history.zh-TW.md)。
+本文件只記錄**現況**（2026-10-08）。各批次的原始紀錄與當時的數字移至[里程碑歷史紀錄](milestone-history.zh-TW.md)。
 
 ## 遠端治理
 
 - main 由規則集 24512048 保護：沒有 bypass、須經 PR 與 code owner 核准、推送新 commit 後舊核准失效、最後推送須另獲核准、未歸屬變更需額外核准，必要檢查為 GitHub Actions App 15368 的 `trusted-security-pilot`。最新狀態以 `python3 scripts/audit_merge_protection.py` 讀回為準。
-- CODEOWNERS 與 `security/trust-policy.json` 列有 chinchiang 與 CatGrocery；CatGrocery 已接受協作邀請並具 write 權限（2026-10-07 讀回；`scripts/audit_merge_protection.py` 讀回 base 分支 CODEOWNERS 有獨立審查者、且有可用的獨立審查者）。之後的 PR 依規則合併，不需再停用規則集。作者為 chinchiang 的 PR 需由 CatGrocery 核准才能依規則合併；涉及受保護路徑的 PR，guard 另需非作者、且未曾提交 PR 中任何 commit 的基準審查者核准。
+- 既有可信清單為 chinchiang 與 CatGrocery；CatGrocery 已接受協作邀請並具 write 權限（2026-10-07 讀回）。本次清單變更在 CODEOWNERS、`security/trust-policy.json` 與發布器範本加入 d98922036ntu，其 write 權限已於 2026-10-08 讀回確認。新增清單須由舊主分支的既有可信審查者核准，合併後才能用於後續基準更新。之後的 PR 依規則合併，不需再停用規則集；涉及受保護路徑的 PR，guard 另需具寫入權限、非作者、且未曾提交 PR 中任何 commit 的基準審查者核准。作者為 chinchiang 的 PR 在這項變更合併後可由 CatGrocery 或 d98922036ntu 獨立核准。
 - 首次基準遷移已於 2026-10-06 完成：擁有者暫時停用規則集，以 merge commit 合併 #6（`da567d8`）與 #7（`0ac31cb`）。文件 PR #10 也在規則集停用期間合併，沒有審查紀錄；之後規則集已恢復 active。
 - 必要檢查仍可由其他 workflow 以同名產生。`pull_request_target` 執行的是 PR **base 分支**上的 workflow，run 中繼資料不記錄 base；因此審查者在核准或合併前執行 `python3 scripts/verify_required_check.py --pr <編號>`，它要求檢查來自 `pull_request_target`、run 的 head 分支與此 PR 相同，且沒有任何（含已關閉）共用同一 head 卻開到其他分支的 PR。專用 App 的 `epsilon/trusted-merge` 尚未建立、部署或綁定。
 

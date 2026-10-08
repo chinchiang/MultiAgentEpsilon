@@ -3,7 +3,8 @@
   "repository": "chinchiang/MultiAgentEpsilon",
   "baseline_reviewers": [
     "chinchiang",
-    "CatGrocery"
+    "CatGrocery",
+    "d98922036ntu"
   ],
   "require_independent_author": true
 }
