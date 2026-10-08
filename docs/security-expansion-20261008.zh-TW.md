@@ -53,3 +53,7 @@ python3.12 -I scripts/verify_required_check.py --pr <本輪PR>
 ## 驗收紀錄
 
 結果以本輪實際 JUnit、正反例報告與 CI run 記錄為準；尚未完成的真實模型呼叫或部署不列為通過。
+
+已完成的直接觀察：目前鎖定檔 23 個套件的 OSV 查詢完整、0 findings；未安裝的 urllib3 1.25.11 真實負例查詢取得 20 筆 advisory／20 個 CVE 別名，判為 BLOCK。B13–B16 兩個 mock 審查者各兩輪，共 16 次呼叫／8,192 預留輸出詞元全部完成，兩家各 4 TP／4 TN、0 FP／FN、8 組可比較結果零分歧，清理完成。這些 mock 成績不是 Gemini／Claude 成績。
+
+AWS STS 經既有非機密設定選擇器確認回覆 ExpiredToken；已要求經安全環境設定更新臨時憑證。沒有自動切換付費模型、呼叫 GLM 或把未執行的 v3 真實配對列為成功。
