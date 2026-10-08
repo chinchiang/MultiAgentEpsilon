@@ -43,7 +43,9 @@ python3.12 -I scripts/prepare_publisher_deployment.py \
 | `/etc/epsilon-publisher/github-app.pem` | App 私鑰；**root 持有、0600**，放在程式 checkout 之外。unit 以 systemd `LoadCredential` 提供服務一份私有唯讀副本，服務帳號無法讀取或替換原檔 |
 | `/var/lib/epsilon-publisher` | 執行鎖、固定格式結果與每個 PR 的狀態檔（已驗證 blob 摘要快取、上次發布結果、節流退避期限）；服務帳號持有，0700 |
 
-範本 repository ID 是 1403706385、workflow ID 是 374309318；部署前讀回確認。填入真正 App ID、Installation ID、已核准 `evaluator_sha`、該 evaluator 的 worktree manifest digest，以及 gate policy 原檔 SHA-256。reviewers 須與 `security/trust-policy.json` 的 `baseline_reviewers` 一致（範本為 chinchiang、CatGrocery）；PR 作者、該 run 的觸發者及 PR 中任一 commit 的作者／提交者一律不計（rerun 請由非核准者執行），且只採計具寫入權限者；minimum_regression_tests 設為核准基準的完整測試數；範本值即為本版基準的完整測試數，CI 的證據自我檢查也以它為下限，測試被刪減會直接失敗。
+範本 repository ID 是 1403706385、workflow ID 是 374309318；部署前讀回確認。填入真正 App ID、Installation ID、已核准 `evaluator_sha`、該 evaluator 的 worktree manifest digest，以及 gate policy 原檔 SHA-256。reviewers 須與 `security/trust-policy.json` 的 `baseline_reviewers` 一致（範本為 chinchiang、CatGrocery、d98922036ntu）；PR 作者、該 run 的觸發者及 PR 中任一 commit 的作者／提交者一律不計（rerun 請由非核准者執行），且只採計具寫入權限者；minimum_regression_tests 設為核准基準的完整測試數；範本值即為本版基準的完整測試數，CI 的證據自我檢查也以它為下限，測試被刪減會直接失敗。
+
+新增可信審查者須同步 `.github/CODEOWNERS`、`security/trust-policy.json` 與發布器範本，並由原主分支的既有可信審查者核准這項清單變更。候選 PR 內新增的名字不能核准自己的加入；清單合併後才適用於後續基準變更。部署管理者也須採用已核准版本重新準備外部 `publisher.json` 與基準 pins，候選或已合併的設定都不會自動覆寫正式主機的政策。
 
 範本缺值會回傳 SETTINGS_INCOMPLETE，不產生權杖或檢查。main 基準 SHA 改變後服務會阻擋；新基準需審查及驗證，再由部署管理者更新設定，不能自動追蹤 main。
 
