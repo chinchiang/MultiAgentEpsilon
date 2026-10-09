@@ -50,7 +50,7 @@ def bundle():
            "head_sha": "b"*40, "head_branch": "feature", "head_repository": {"id": 10}, "status": "completed", "conclusion": "success",
            "actor": {"login": "author"}, "triggering_actor": {"login": "author"}, "pull_requests": [{"number": 5}]}
     steps = ["Record evaluator-owned CI provenance", "Check protected changes and exact-head independent approval",
-             "Evaluator regressions and isolation adversarial checks", "Prove seeded defect still blocks",
+             "Evaluator regressions and isolation adversarial checks", "Offline security mutation checks", "Prove seeded defect still blocks",
              "Evaluate candidate through external oracle", "Remove evaluator regression database",
              "Reap cancelled security runs", "Retain evaluator-owned evidence"]
     jobs = [{"name": "trusted-security-evaluation", "conclusion": "success",
@@ -507,3 +507,15 @@ def test_run_base_binding_accepts_the_only_pr_and_fails_closed_on_missing_listin
     pr["head"]["repo"] = None  # fork 已刪除，無法綁定 head 儲存庫。 / deleted fork: the head repository cannot be bound
     with pytest.raises(publisher.Denied, match="RUN_HEAD_BRANCH"):
         publisher.validate_run_base(run, pr, prs, "main")
+
+
+@pytest.mark.parametrize('state', ['failure', 'skipped', 'missing'])
+def test_required_mutation_step_cannot_be_omitted(bundle, state):
+    steps = bundle['jobs'][0]['steps']
+    step = next(s for s in steps if s['name'] == 'Offline security mutation checks')
+    if state == 'missing':
+        steps.remove(step)
+    else:
+        step['conclusion'] = state
+    with pytest.raises(publisher.Denied):
+        publisher.validate_bundle(**bundle)

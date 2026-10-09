@@ -40,6 +40,7 @@ MultiAgentEpsilon/
 
 ```bash
 python3 -I scripts/bootstrap.py
+python3 -I scripts/install_test_tools.py
 python3 -I scripts/build_runtime.py
 python3 -I scripts/dev_db.py start
 .venv/bin/python -m pytest --junitxml=artifacts/pytest.xml
@@ -93,6 +94,10 @@ G2 與 subject digest 共用輸入清冊：生成物名稱只在 repository 根�
 **main 規則集 24512048 已啟用並讀回確認。** 必要檢查仍使用共用 GitHub Actions App 15368；名稱與 App ID 無法唯一識別可信 workflow：有推送權限者可以用自己的 workflow，回訪的 fork 貢獻者也能以 `on: pull_request` 產生同名綠燈。`pull_request_target` 執行的是 PR **base 分支**上的 workflow，同一路徑在其他分支的修改版本有相同 workflow ID。專用 App 綁定前，審查者在核准或合併前應執行 `python3 -I scripts/verify_required_check.py --pr <編號>`：它以 GitHub 的 run 中繼資料確認 PR head 上每一個 `trusted-security-pilot` 都來自可信 workflow 路徑的 `pull_request_target` run，run 的 head 分支與此 PR 相同，且沒有任何（含已關閉）共用同一 head、卻開到其他分支的 PR；任一條件不符即 BLOCK。[專用 App 發布程式與部署範本](docs/trusted-check-publisher.zh-TW.md)已準備，App 與服務尚未部署。基準遷移程序見 [操作文件](docs/trusted-execution.zh-TW.md)，先前遠端基線見 [驗收紀錄](docs/remote-ci-validation.zh-TW.md)。
 
 PR #18 已獲獨立核准並合併至 `main`（`218fd7a`）。合併後的 [CI 執行 37866429806](https://github.com/chinchiang/MultiAgentEpsilon/actions/runs/37866429806) 通過 883 項測試，修正版 32 個案例／0 項缺陷為 ALLOW，指定缺陷版 32 個案例／9 項缺陷為 BLOCK；清理、證據摘要與真實簽章均已核對。專用 GitHub App 部署與真實 LM Studio 驗收仍待完成。
+
+## 離線突變與性質測試
+
+[自動突變與 Hypothesis 操作說明](docs/mutation-testing.zh-TW.md)涵蓋政策、證據 JSON 與模型回應判定。安裝測試工具後可離線執行；存活突變、逾時與工具錯誤均使 CI 失敗。
 
 ## 文件與來源
 
@@ -150,6 +155,7 @@ The [architecture, flows, and full tree](docs/architecture-overview.zh-TW.md#en)
 
 ```bash
 python3 -I scripts/bootstrap.py
+python3 -I scripts/install_test_tools.py
 python3 -I scripts/build_runtime.py
 python3 -I scripts/dev_db.py start
 .venv/bin/python -m pytest --junitxml=artifacts/pytest.xml
@@ -193,6 +199,10 @@ Every path, including fixture and documentation, requires an independent, write-
 Ruleset 24512048 is active without bypass, but the shared Actions App 15368 and a check name do not uniquely identify a trusted workflow. Until the dedicated App is deployed, run `python3 -I scripts/verify_required_check.py --pr <number>` before approval/merge. It validates every same-named check's event, workflow, head repository/branch, whole-run success, and absence of another-base or retargeted PR sharing that head, including closed PRs. See the [publisher guide](docs/trusted-check-publisher.zh-TW.md#en). App deployment and developer-role denial acceptance remain pending.
 
 PR #18 received independent approval and merged into `main` (`218fd7a`). Post-merge [CI run 37866429806](https://github.com/chinchiang/MultiAgentEpsilon/actions/runs/37866429806) passed 883 tests: the fixed target allowed all 32 cases with zero findings, and the seeded target was blocked with exactly nine findings among 32 cases. Cleanup, evidence digests, and real signatures were verified. Dedicated GitHub App deployment and real LM Studio acceptance remain pending.
+
+## Offline mutation and property tests
+
+[Automatic mutations and Hypothesis](docs/mutation-testing.zh-TW.md#en) cover policy, evidence JSON, and model response predicates. Runs are offline after tool installation; survivors, timeouts, and infrastructure errors fail CI.
 
 ## Reading and model operations
 

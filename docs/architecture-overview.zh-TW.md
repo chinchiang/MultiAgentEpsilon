@@ -4,7 +4,7 @@
 
 # 系統架構與流程（Architecture Overview）
 
-正式 main `438d7a4f93be2c1b12fcbe1ab55626b0543cf571` 已合併 PR #16／#17，完成 787 項測試、32 個 AUTH 案例及 9 個指定缺陷的正反例與簽章驗收（[run 37853277868](https://github.com/chinchiang/MultiAgentEpsilon/actions/runs/37853277868)）。本輪另加入 LM Studio 文字 adapter、分批比較與雙語文件，屬待審查變更；地端真實模型尚未驗收。系統目前是 Python 3.12 的資安測試試點，由命令列、GitHub Actions、隔離容器與模型 adapter 組成；多模型採獨立盲審、循序呼叫與本機評分。
+正式 main `8b028cb9914786dee293329a5d028e8a5a91112b` 已合併 PR #19，完成 883 項測試、32 個 AUTH 案例及 9 個指定缺陷的正反例與簽章驗收（[run 37877260388](https://github.com/chinchiang/MultiAgentEpsilon/actions/runs/37877260388)）。LM Studio 文字介接器、分批比較與雙語文件已合併，地端真實模型尚未驗收。本輪新增[離線突變與性質測試](mutation-testing.zh-TW.md)，仍須獨立審查。系統為 Python 3.12 資安測試試點，由命令列、GitHub Actions、隔離容器與模型介接器組成；多模型採獨立盲審、循序呼叫與本機評分。
 
 圖中的實線表示已實作的執行或資料關係；虛線表示暫停、復原或尚待部署的路徑，依節點標示判讀。圖表使用 Mermaid 原始檔，另提供可直接開啟與分享的 SVG。
 
@@ -119,6 +119,7 @@ MultiAgentEpsilon/
 │   ├── milestone-history.zh-TW.md
 │   ├── milestone-status.zh-TW.md
 │   ├── model-gateway.zh-TW.md
+│   ├── mutation-testing.zh-TW.md
 │   ├── pilot-scope.zh-TW.md
 │   ├── remote-ci-evidence.json
 │   ├── remote-ci-validation.zh-TW.md
@@ -145,12 +146,15 @@ MultiAgentEpsilon/
 │   ├── expect_block.py
 │   ├── install_attestation_verifier.py
 │   ├── install_aws_cli.py
+│   ├── install_test_tools.py
 │   ├── isolation_worker.py
 │   ├── model_compare.py
 │   ├── model_process.py
 │   ├── model_review.py
 │   ├── model_smoke.py
 │   ├── model_worker.py
+│   ├── mutation_check.py
+│   ├── mutation_worker.py
 │   ├── preflight.py
 │   ├── prepare_publisher_deployment.py
 │   ├── publish_trusted_check.py
@@ -209,6 +213,7 @@ MultiAgentEpsilon/
 │   └── trusted_publisher.py
 ├── tests/
 │   ├── __init__.py
+│   ├── conftest.py
 │   ├── dependency_evidence.py
 │   ├── model_evidence.py
 │   ├── test_adversarial_authorization.py
@@ -231,6 +236,7 @@ MultiAgentEpsilon/
 │   ├── test_model_hardening.py
 │   ├── test_model_lifecycle.py
 │   ├── test_model_rounds.py
+│   ├── test_mutation_runner.py
 │   ├── test_policy.py
 │   ├── test_preflight.py
 │   ├── test_publisher_deployment.py
@@ -240,6 +246,7 @@ MultiAgentEpsilon/
 │   ├── test_scan_coverage.py
 │   ├── test_scope.py
 │   ├── test_security_boundaries.py
+│   ├── test_security_properties.py
 │   ├── test_trusted_changes.py
 │   ├── test_trusted_publisher.py
 │   ├── test_verify_required_check.py
@@ -250,6 +257,7 @@ MultiAgentEpsilon/
 ├── README.md
 ├── SECURITY.md
 ├── pyproject.toml
+├── requirements-test.lock
 ├── requirements.in
 └── requirements.lock
 ```
@@ -298,7 +306,7 @@ main 已包含評估與簽章共同成功的最終必要關卡；儲存庫已恢
 
 # Architecture Overview and repository structure
 
-Reviewed main 438d7a4 includes PR #16/#17,787 tests,32 AUTH cases/exact nine seeded failures, cleanup and signatures in run 37853277868. This candidate adds LM Studio text integration, cross-batch comparison, and bilingual documentation; real local-model acceptance is pending. The Python 3.12 pilot uses CLIs, Actions, isolated containers, and adapters. Models review independently, execute sequentially, and are scored locally.
+Reviewed main `8b028cb` includes PR #19, 883 tests, 32 AUTH cases/exactly nine seeded failures, cleanup and signatures in [run 37877260388](https://github.com/chinchiang/MultiAgentEpsilon/actions/runs/37877260388). LM Studio text integration, cross-batch comparison and bilingual documentation are merged; real local-model acceptance is pending. This change adds [offline mutation and property tests](mutation-testing.zh-TW.md#en), pending independent review. The Python 3.12 pilot uses CLIs, Actions, isolated containers, and adapters. Models review independently, execute sequentially, and are scored locally.
 
 Solid arrows represent implemented execution/data paths; dashed arrows indicate paused, recovery, or undeployed paths as labeled. Editable Mermaid and standalone SVG are bilingual.
 
