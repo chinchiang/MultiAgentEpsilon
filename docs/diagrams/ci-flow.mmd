@@ -1,21 +1,21 @@
 flowchart TB
-    PR["PR → main<br/>pull_request_target"] --> Checkout["checkout base evaluator 與 head candidate<br/>candidate 僅作資料"]
-    Checkout --> Guard{"全部路徑有最新 head 的可信獨立核准？"}
-    Guard -->|"是"| Evaluate["可信 evaluator 安裝、離線 runtime 建置與完整回歸<br/>缺陷版必須 BLOCK；候選接受外部 oracle 評估"]
-    Guard -->|"否"| Failure["正式檢查失敗"]
-    Other["main push／workflow_dispatch<br/>依事件選 evaluator；手動檢查另用名稱"] --> Evaluate
-    Evaluate --> Contract{"證據自我檢查通過？"}
-    Contract -->|"是"| Success["評估工作成功"]
-    Contract -->|"否或先前步驟失敗"| Failure
-    Success --> Cleanup["always：停止本次 DB、janitor 回收<br/>上傳 evaluator-owned artifacts／audit ZIP"]
-    Failure --> Cleanup
-    Cleanup --> Finished{"評估與清理成功？"}
-    Finished -->|"是"| Attest["獨立全新 runner<br/>只取得 ZIP 摘要，簽署 artifact attestation"]
-    Finished -->|"否"| Block["BLOCK；保留失敗證據<br/>簽署工作不執行"]
-    Attest --> Final{"評估與簽章都是 success？"}
+    PR["PR → main / pull_request_target"] --> Checkout["base evaluator／head candidate 僅當資料<br/>Trusted base evaluates candidate data"]
+    Checkout --> Guard{"全部路徑有精確 head 獨立核准？<br/>Trusted independent approval for all changes?"}
+    Guard -->|"是 / Yes"| Evaluate["可信安裝／離線 runtime／完整回歸<br/>Seeded BLOCK and candidate evaluation"]
+    Guard -->|"否 / No"| Failed["評估失敗／保留證據<br/>Failed evaluation with evidence"]
+    Other["main push／手動 ref：名稱分開<br/>Manual checks cannot satisfy required source"] --> Evaluate
+    Evaluate --> Contract{"證據契約完整？<br/>Publishable evidence contract?"}
+    Contract -->|"是 / Yes"| Success["評估工作成功<br/>Evaluation succeeded"]
+    Contract -->|"否 / No"| Failed
+    Success --> Cleanup["always 清理與上傳 evaluator 證據<br/>Always cleanup and upload audit artifacts"]
+    Failed --> Cleanup
+    Cleanup --> Ready{"評估與清理成功？<br/>Evaluation and cleanup successful?"}
+    Ready -->|"是 / Yes"| Sign["全新 runner 只簽署 ZIP 摘要<br/>Separate artifact attestation job"]
+    Ready -->|"否 / No"| Block["BLOCK／簽署不執行<br/>No signature for failed evaluation"]
+    Sign --> Final{"評估與簽章都是 success？<br/>Both required upstream jobs successful?"}
     Block --> Final
-    Final -->|"是；最終必要檢查成功"| Verify["合併前 verify_required_check.py<br/>核對 workflow／事件／head／分支／base 歷程"]
-    Final -->|"否"| FinalFailure["最終必要檢查失敗<br/>failure／cancelled／skipped 均阻擋"]
-    Verify --> Merge["main Ruleset＋有效獨立核准<br/>符合條件才可合併"]
-    Attest -.-> Publisher["待部署的專用 App<br/>驗證簽章、來源、digest、run attempt、核准與最新 run"]
-    Publisher -.-> Future["待綁定 epsilon/trusted-merge<br/>目前不能當作已生效的合併條件"]
+    Final -->|"是 / Yes"| Verify["核對 workflow／head／base 歷程<br/>Verify required-check provenance"]
+    Final -->|"否 / No"| Deny["最終必要檢查失敗<br/>Failure / cancelled / skipped all block"]
+    Verify --> Merge["main 規則與有效獨立核准皆符合<br/>Merge only with all native conditions"]
+    Sign -.-> App["專用 App 尚未部署<br/>Verify signature / attempt / review / freshness"]
+    App -.-> Future["epsilon/trusted-merge 尚未綁定<br/>Dedicated required source pending"]

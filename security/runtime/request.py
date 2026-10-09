@@ -1,4 +1,6 @@
-"""Bounded HTTP bridge. Socket resolution happens ONLY in the candidate container.
+"""有限額的 HTTP bridge；socket 解析僅在候選容器中進行。回傳位元組均不可信，host oracle 另行驗證回應與資料庫狀態。
+
+Bounded HTTP bridge. Socket resolution happens ONLY in the candidate container.
 
 All returned bytes are untrusted; the host oracle separately checks them and DB state.
 """
@@ -39,5 +41,5 @@ if __name__ == '__main__':
     try:
         main()
     except Exception:
-        # No response, credentials, request or exception text leaves this boundary.
+        # 此邊界不輸出回應、憑證、請求或例外原文。 / No response, credentials, request or exception text leaves this boundary.
         raise SystemExit(1)

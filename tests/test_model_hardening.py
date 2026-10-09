@@ -1,4 +1,6 @@
-"""Regression tests for review binding, text, usage, identity and child-environment hardening."""
+"""驗證審查綁定、文字、用量、身分與子程序環境的強化回歸。
+
+Regression tests for review binding, text, usage, identity and child-environment hardening."""
 import asyncio
 import copy
 import hashlib
@@ -15,7 +17,7 @@ from tests.test_model_gateway import GEMINI, cli_fixture, http_fixture, invoke
 
 
 def test_reviews_cannot_be_swapped_between_providers_for_the_same_case(tmp_path):
-    # B06 is where the two mock reviewers disagree, so a swap changes FP/TN metrics.
+    # B06 是兩個 mock 的分歧案例，交換答案會改變 FP／TN。 / B06 is where the two mock reviewers disagree, so a swap changes FP/TN metrics.
     data, _ = collected(tmp_path, ['mock-review-a', 'mock-review-b'], ['B06'])
     score.summarize(data)
     a, b = data['checks']
@@ -124,8 +126,8 @@ def test_aws_cli_child_receives_only_aws_and_basic_process_context(tmp_path, mon
      'PROVIDER_FAILURE', None),
 ])
 def test_bedrock_cli_failures_are_classified_without_keeping_provider_text(tmp_path, stderr, code, detail):
-    # Observed live: a Claude model without Bedrock structured-output support only
-    # surfaced as an unexplained PROVIDER_FAILURE before.
+    # 真實觀察：不支援 Bedrock 結構化輸出的 Claude 模型， / Observed live: a Claude model without Bedrock structured-output support only
+    # 先前只回報無法解釋的 PROVIDER_FAILURE。 / surfaced as an unexplained PROVIDER_FAILURE before.
     cli = cli_fixture(tmp_path, 'import sys\nsys.stderr.write(' + repr(stderr) + ')\nsys.exit(254)\n')
     result, evidence = invoke(BedrockAdapter('global.anthropic.claude-synthetic', 'ap-southeast-1', cli))
     assert result is None and evidence['code'] == code and evidence['diagnostic'] == detail

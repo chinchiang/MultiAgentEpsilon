@@ -43,8 +43,8 @@ def bundle():
     pr = {"number": 5, "state": "open", "draft": False, "user": {"login": "author"},
           "base": {"ref": "main", "sha": "a"*40, "repo": {"id": 10, "full_name": "owner/repo"}},
           "head": {"sha": "b"*40, "ref": "feature", "repo": {"id": 10, "full_name": "owner/repo"}}}
-    # Observed on GitHub: a pull_request_target run (and its check suite) carries the
-    # PR head SHA; the workflow file and evaluator come from the default branch.
+    # GitHub 實際將 pull_request_target run 與 check suite 記於 / Observed on GitHub: a pull_request_target run (and its check suite) carries the
+    # PR head SHA；workflow 與 evaluator 來自 PR base 分支。 / PR head SHA; the workflow file and evaluator come from the PR base branch.
     run = {"id": 100, "run_attempt": 1, "repository": {"id": 10, "full_name": "owner/repo"},
            "workflow_id": 99, "path": settings["workflow_path"], "event": "pull_request_target",
            "head_sha": "b"*40, "head_branch": "feature", "head_repository": {"id": 10}, "status": "completed", "conclusion": "success",
@@ -88,10 +88,10 @@ def bundle():
              "audit/trusted-guard.json": json.dumps(guard).encode(),
              "trusted/artifacts/latest.txt": run_id.encode(),
              "trusted/artifacts/pytest.xml": b'<testsuites><testsuite tests="360" failures="0" errors="0" skipped="0">' +
-                 b'<testcase name="synthetic"/>'*360 + b'</testsuite></testsuites>',
+                 b''.join(f'<testcase classname="synthetic" name="case_{i}"/>'.encode() for i in range(360)) + b'</testsuite></testsuites>',
              f"trusted/artifacts/{run_id}/report.json": json.dumps(report).encode()}
-    # expect_block runs the evaluator's own vulnerable variant: its subject and history
-    # are the evaluator's (digest e…, base a…), never the candidate's (c…, b…).
+    # expect_block 執行 evaluator 自身缺陷版，其 subject 與歷史 / expect_block runs the evaluator's own vulnerable variant: its subject and history
+    # 屬 evaluator（摘要 e、base a），不屬候選（c、b）。 / are the evaluator's (digest e…, base a…), never the candidate's (c…, b…).
     negative = copy.deepcopy(report)
     negative_id = "22222222-2222-4222-8222-222222222222"
     negative.update(variant="vulnerable", decision="BLOCK", run_id=negative_id,
@@ -119,6 +119,21 @@ def mutate_json(bundle, filename, change):
 def test_verified_bundle_requires_remote_source_current_review_and_complete_evidence(bundle):
     proof = publisher.validate_bundle(**bundle)
     assert proof["head_sha"] == "b"*40 and proof["review_ids"] == [11] and proof["tests"] == 360
+
+
+@pytest.mark.parametrize('attack', ['duplicate', 'missing-class', 'missing-name', 'negative-count', 'missing-count'])
+def test_junit_cannot_inflate_coverage_with_duplicate_or_unnamed_tests(bundle, attack):
+    from xml.etree import ElementTree as ET
+    key = 'trusted/artifacts/pytest.xml'
+    root = ET.fromstring(bundle['files'][key]); suite = root.find('testsuite')
+    if attack == 'duplicate': suite[1].set('name', suite[0].get('name'))
+    elif attack == 'missing-class': suite[0].attrib.pop('classname')
+    elif attack == 'missing-name': suite[0].attrib.pop('name')
+    elif attack == 'negative-count': suite.set('errors', '-1')
+    else: suite.attrib.pop('skipped')
+    bundle['files'][key] = ET.tostring(root)
+    with pytest.raises(publisher.Denied, match='JUNIT_IDENTITY|JUNIT_COUNTS'):
+        publisher.validate_bundle(**bundle)
 
 
 @pytest.mark.parametrize("attack", ["app", "repo", "workflow", "event", "failed_run", "draft", "base",
@@ -271,7 +286,7 @@ def test_verification_error_publishes_failure_and_hides_exception_text(bundle, m
     def fail(*args): raise RuntimeError("credential-like-sensitive-diagnostic")
     monkeypatch.setattr(publisher, "collect", fail)
     report = publisher.publish(Client(), bundle["settings"], bundle["gate_policy"], 5, 100)
-    # One completed check per outcome: no in_progress placeholder that makes the required check flap.
+    # 每種結果只發布一個 completed 檢查，不用 in_progress 造成閃動。 / One completed check per outcome: no in_progress placeholder that makes the required check flap.
     assert len(writes) == 1 and writes[0]["status"] == "completed" and writes[0]["conclusion"] == "failure"
     assert report["decision"] == "BLOCK" and report["code"] == "VERIFICATION_ERROR"
     assert "sensitive" not in json.dumps(writes) + json.dumps(report)
@@ -312,7 +327,7 @@ def test_throttling_backs_off_without_posting(bundle, monkeypatch, code):
 
 
 def test_unrelated_fork_runs_do_not_block_but_a_newer_same_head_run_does(bundle):
-    # GitHub leaves pull_requests empty for fork heads; that must not be a denial lever.
+    # fork head 的 pull_requests 可為空，不可成為阻擋他人的手段。 / GitHub leaves pull_requests empty for fork heads; that must not be a denial lever.
     bundle["newer_runs"] = [bundle["run"], {"id": 500, "head_sha": "d"*40, "pull_requests": []}]
     assert publisher.validate_bundle(**bundle)["run_id"] == 100
     bundle["newer_runs"].append({"id": 501, "head_sha": "b"*40, "head_branch": "feature", "head_repository": {"id": 10}, "pull_requests": []})
@@ -378,7 +393,7 @@ def test_seeded_defect_must_have_real_complete_negative_evidence(bundle, attack)
             failing["passed"], passing["passed"] = True, False
         mutate_json(bundle, path, swap)
     elif attack == "history": mutate_json(bundle, path, lambda d: d["records"][1]["evidence"]["coverage"].update(history_head="d"*40))
-    # A negative run against the candidate proves nothing about the evaluator's oracle.
+    # 對候選執行負例，不能證明 evaluator oracle 正確。 / A negative run against the candidate proves nothing about the evaluator's oracle.
     elif attack == "candidate_history": mutate_json(bundle, path, lambda d: d["records"][1]["evidence"]["coverage"].update(history_head="b"*40))
     elif attack == "candidate_subject":
         def rebind(d):
@@ -489,6 +504,6 @@ def test_run_base_binding_accepts_the_only_pr_and_fails_closed_on_missing_listin
     with pytest.raises(publisher.Denied, match="PR_LISTING_INCOMPLETE"):
         publisher.validate_run_base(*base_binding(listed=False), "main")
     run, pr, prs = base_binding()
-    pr["head"]["repo"] = None  # deleted fork: the head repository cannot be bound
+    pr["head"]["repo"] = None  # fork 已刪除，無法綁定 head 儲存庫。 / deleted fork: the head repository cannot be bound
     with pytest.raises(publisher.Denied, match="RUN_HEAD_BRANCH"):
         publisher.validate_run_base(run, pr, prs, "main")

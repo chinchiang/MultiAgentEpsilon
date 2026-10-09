@@ -1,7 +1,11 @@
 {
   "schema_version": 1,
-  "scope": "synthetic local fixture only; no third-party or production testing",
-  "http_hosts": ["127.0.0.1", "localhost", "::1"],
+  "scope": "僅限本機合成測試，不測試第三方或正式產品 / synthetic local fixture only; no third-party or production testing",
+  "http_hosts": [
+    "127.0.0.1",
+    "localhost",
+    "::1"
+  ],
   "database_name": "epsilon_fixture",
   "max_cases": 50,
   "max_seconds": 120,
@@ -9,6 +13,6 @@
   "allow_redirects": false,
   "external_callback": false,
   "llm_calls": false,
-  "stop": "terminate the harness, then scripts/dev_db.py stop",
-  "retention": "local artifacts are ignored; CI artifacts retained for 7 days"
+  "stop": "終止 harness，再執行 scripts/dev_db.py stop / terminate the harness, then scripts/dev_db.py stop",
+  "retention": "本機證據不納入 Git；CI 保留七天 / local artifacts are ignored; CI artifacts retained for 7 days"
 }

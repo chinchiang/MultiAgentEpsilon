@@ -1,4 +1,6 @@
-"""Verified Gitleaks over an explicit, bounded worktree and HEAD-blob inventory."""
+"""以已驗證 Gitleaks 掃描明確且有限額的工作樹與 HEAD blob 清冊。
+
+Verified Gitleaks over an explicit, bounded worktree and HEAD-blob inventory."""
 from __future__ import annotations
 
 import json
@@ -16,7 +18,9 @@ from .scan_content import ContentInventory, load_binary_allowlist
 
 
 def history_blobs(root, required=False):
-    """HEAD-reachable blobs of the input root's own repository; `required` refuses to
+    """只取輸入根目錄自身儲存庫的 HEAD 可達 blobs；required 模式拒絕將沒有歷史的輸入報成完整涵蓋。
+
+HEAD-reachable blobs of the input root's own repository; `required` refuses to
     report complete coverage for an input without history."""
     if candidate_git.git_dir(root) is None:
         if required:
@@ -73,7 +77,9 @@ def history_blobs(root, required=False):
 
 
 def history_metadata(root, tip):
-    """HEAD commit messages/identities and all tag names/annotated-tag metadata.
+    """掃描 HEAD 提交訊息與身分、所有標籤名稱及附註；不含 HEAD 外的標籤目標歷史。掃描前限制原始位元組，不把中繼資料或標籤名稱寫入診斷。
+
+HEAD commit messages/identities and all tag names/annotated-tag metadata.
 
     Tag target histories outside HEAD remain excluded. Bound raw bytes before
     scanning; never copy metadata or tag names into evidence diagnostics.
@@ -105,7 +111,7 @@ def scan(root: Path, binary: Path, config: Path, expected_hash: str, *, history=
          require_history=False, binary_allowlist: Path | None = None) -> dict:
     if digest_file(binary) != expected_hash:
         raise ValueError('scanner integrity mismatch')
-    # The allowlist sits next to the trusted scanner config, never in the scanned tree.
+    # 允許清單位於可信掃描器設定旁，不取自受掃描樹。 / The allowlist sits next to the trusted scanner config, never in the scanned tree.
     reviewed = load_binary_allowlist(binary_allowlist or config.with_name('binary-allowlist.json'))
     paths = input_files(root)
     if not paths:
@@ -143,7 +149,7 @@ def scan(root: Path, binary: Path, config: Path, expected_hash: str, *, history=
                 inventory.add(data, name, scope='history-metadata', object_id=oid)
                 metadata_count += 1
         report = temp / 'scan.json'
-        # Output goes to a bounded report file, never to a captured diagnostic stream.
+        # 輸出至有限額報告檔，不擷取原始診斷串流。 / Output goes to a bounded report file, never to a captured diagnostic stream.
         process = subprocess.run([str(binary), 'dir', str(snapshot), '--config', str(config),
                                   '--redact=100', '--ignore-gitleaks-allow', '--gitleaks-ignore-path', str(temp),
                                   '--no-banner', '--report-format=json', '--report-path', str(report)],

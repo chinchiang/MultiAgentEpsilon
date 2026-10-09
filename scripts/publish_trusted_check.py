@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
-"""Run only in the independently controlled publisher deployment."""
+"""只能在獨立受控的發布器部署環境執行。
+
+Run only in the independently controlled publisher deployment."""
 import argparse
 import fcntl
 import hashlib
@@ -12,7 +14,8 @@ import time
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(ROOT))
+if __name__ == "__main__":
+    sys.path.insert(0, str(ROOT))
 from security_harness.results import write_json
 from security_harness.trusted_publisher import Denied, installation_client, need, publish, strict_json, validate_settings
 
@@ -29,13 +32,15 @@ def read_config(path, live, owner_uid=0):
         info = os.fstat(stream.fileno())
         need(stat.S_ISREG(info.st_mode) and info.st_size <= 1024**2, "CONFIG_FILE")
         if live:
-            # The service account must not be able to rewrite its own trust policy.
+            # 服務帳號不可重寫自身信任政策。 / The service account must not be able to rewrite its own trust policy.
             need(not info.st_mode & 0o022 and info.st_uid == owner_uid, "CONFIG_WRITABLE")
         return stream.read(1024**2 + 1)
 
 
 def open_config(path, owner_uid):
-    """Walk trusted directory descriptors; a file's owner alone cannot protect it
+    """逐層開啟可信目錄 descriptor；僅保護檔案擁有者，無法防止可寫上層目錄或中途符號連結的替換。
+
+Walk trusted directory descriptors; a file's owner alone cannot protect it
     from replacement through a writable parent or an intermediate symlink."""
     need(".." not in path.parts, "CONFIG_PARENT")
     directory = os.open("/", os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
@@ -48,7 +53,7 @@ def open_config(path, owner_uid):
             os.close(directory)
             directory = next_directory
             info = os.fstat(directory)
-            # Root-owned sticky directories (e.g. /tmp) protect root-owned children.
+            # root 擁有的 sticky 目錄可保護其 root 子目錄。 / Root-owned sticky directories (e.g. /tmp) protect root-owned children.
             sticky_root = info.st_uid == 0 and info.st_mode & stat.S_ISVTX
             need(info.st_uid in (0, owner_uid) and (not info.st_mode & 0o022 or sticky_root), "CONFIG_PARENT")
         return os.open(path.name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=directory)
@@ -57,7 +62,9 @@ def open_config(path, owner_uid):
 
 
 def load_state(path):
-    """Corrupt or foreign state is discarded, never trusted: it only caches
+    """損壞或外來狀態一律丟棄；狀態只快取按內容定址的摘要與此發布器上次結果，不作為信任來源。
+
+Corrupt or foreign state is discarded, never trusted: it only caches
     content-addressed digests and the last outcome this publisher posted."""
     try:
         fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW)
@@ -95,7 +102,7 @@ def revoke(client):
     try:
         client.raw("https://api.github.com/installation/token", "DELETE")
     except Exception:
-        pass  # Best effort; the token still expires within an hour.
+        pass  # 盡力撤銷；權杖本身仍會在一小時內到期。 / Best effort; the token still expires within an hour.
 
 
 def main():
@@ -144,7 +151,7 @@ def main():
                     result = publish(client, settings, gate_policy, args.pr, args.run_id, state)
                 finally:
                     revoke(client)
-            result["deployed"] = False  # A one-shot check does not certify a running deployment.
+            result["deployed"] = False  # 單次查核不代表服務已持續部署。 / A one-shot check does not certify a running deployment.
     except Exception as exc:
         result.update(decision="BLOCK", code=str(exc) if isinstance(exc, Denied) else "PUBLISHER_ERROR")
     finally:

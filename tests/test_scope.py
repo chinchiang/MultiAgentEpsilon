@@ -25,6 +25,14 @@ def test_scope_expansion_rejected(field, value):
 MODEL_ROE = json.loads((Path(__file__).resolve().parents[1] / "security/model-roe.json").read_text())
 
 
+@pytest.mark.parametrize('providers', [['unknown'], ['gemini', 'unknown'], ['mock-anything'],
+                                      ['gemini', 'gemini'], [None], [], 'gemini'])
+def test_unknown_or_duplicate_provider_cannot_escape_the_roe(providers):
+    from security_harness.scope import validate_model_roe
+    with pytest.raises(ValueError):
+        validate_model_roe(MODEL_ROE, providers)
+
+
 def test_security_gates_and_model_calls_keep_separate_rules_of_engagement():
     from security_harness.scope import validate_model_roe
     assert validate_roe(ROE)["llm_calls"] is False
@@ -51,13 +59,13 @@ def test_model_roe_must_list_every_live_provider():
 def test_live_review_cli_refuses_without_a_valid_model_roe(tmp_path, monkeypatch):
     import scripts.model_review as review
     import scripts.model_smoke as smoke
-    monkeypatch.setattr(smoke, "ROOT", tmp_path)  # no security/model-roe.json there
+    monkeypatch.setattr(smoke, "ROOT", tmp_path)  # 此處沒有 security/model-roe.json。 / no security/model-roe.json there
     monkeypatch.setattr("sys.argv", ["model_review", "--provider", "gemini", "--live", "--case", "B01"])
     created = []
     monkeypatch.setattr(review, "initial_report", lambda *args: created.append(args))
     with pytest.raises(SystemExit) as exit_info:
         review.main()
-    # argparse error before any report, budget reservation or provider call exists.
+    # 在任何報告、預算預留或供應商呼叫前產生 argparse 錯誤。 / argparse error before any report, budget reservation or provider call exists.
     assert exit_info.value.code == 2 and created == []
 
 

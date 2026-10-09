@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
-"""Own only a labeled disposable PostgreSQL container and local bridge network."""
+"""僅管理有本工具標籤的暫用 PostgreSQL 容器與本機橋接網路。
+
+Own only a labeled disposable PostgreSQL container and local bridge network."""
 import argparse
 import json
 import os
@@ -11,7 +13,8 @@ import time
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(ROOT))
+if __name__ == "__main__":
+    sys.path.insert(0, str(ROOT))
 from security_harness.processes import docker_command, docker_environment
 
 STATE = ROOT / ".state/db.json"
@@ -92,7 +95,7 @@ def start():
 def stop():
     if owned():
         docker("rm", "--force", NAME)
-    # Do not remove networks unless ownership and isolation are still as expected.
+    # 除非擁有權與隔離仍符合預期，否則不移除網路。 / Do not remove networks unless ownership and isolation are still as expected.
     current = docker("network", "inspect", NETWORK, check=False)
     if current.returncode == 0:
         info = json.loads(current.stdout)[0]

@@ -11,7 +11,7 @@ import httpx
 
 @pytest.mark.integration
 def test_identical_oracle_rejects_vulnerable_and_accepts_fixed():
-    dsn = database_url()  # Missing PostgreSQL is a failure, never a silent skip.
+    dsn = database_url()  # 缺少 PostgreSQL 必須失敗，不可默默略過。 / Missing PostgreSQL is a failure, never a silent skip.
     vulnerable = run_authorization(dsn, "vulnerable")
     fixed = run_authorization(dsn, "fixed")
     contract = json.loads((Path(__file__).resolve().parents[1] / "security/policy.json").read_text())["gate_contracts"]["AUTH"]

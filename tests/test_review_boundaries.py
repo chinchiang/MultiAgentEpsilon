@@ -1,4 +1,6 @@
-"""Executable synthetic counterexamples; no real internal network or secrets."""
+"""可執行的合成反例，不接觸真實內網或機密。
+
+Executable synthetic counterexamples; no real internal network or secrets."""
 import asyncio
 import json
 import subprocess
@@ -24,7 +26,7 @@ ROOT = Path(__file__).resolve().parents[1]
 
 def fixture(case_id):
     namespace = {}
-    # Trusted checked-in snippets only; never execute a model response.
+    # 只執行已審查的版本管理片段，不執行模型回應。 / Trusted checked-in snippets only; never execute a model response.
     exec(bench.load_cases()[case_id]['source'], namespace)
     return namespace
 

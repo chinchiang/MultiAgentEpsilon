@@ -1,12 +1,15 @@
 #!/usr/bin/env python3
-"""Start a real HTTP server, verify login and isolation, then remove owned state."""
+"""啟動真實 HTTP 伺服器、驗證登入與隔離，再移除本次擁有的狀態。
+
+Start a real HTTP server, verify login and isolation, then remove owned state."""
 import subprocess
 import sys
 import time
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(ROOT))
+if __name__ == "__main__":
+    sys.path.insert(0, str(ROOT))
 import httpx
 from fixture_app.app import database_url, seed, cleanup
 from security_harness.results import write_json

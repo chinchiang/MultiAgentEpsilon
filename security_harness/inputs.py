@@ -1,4 +1,6 @@
-"""One worktree scope for scanning and subject binding; never follow symlinks."""
+"""掃描與 subject 綁定共用同一工作樹範圍，不跟隨符號連結。
+
+One worktree scope for scanning and subject binding; never follow symlinks."""
 import os
 from pathlib import Path
 from . import candidate_git
@@ -15,7 +17,7 @@ def excluded(relative: Path) -> bool:
 def input_files(root: Path) -> list[Path]:
     if root.is_symlink() or not root.is_dir():
         raise ValueError("input root must be a real directory")
-    # A tracked file in a reserved generated area is not silently omitted.
+    # 受保留生成目錄中的已追蹤檔案不可默默略過。 / A tracked file in a reserved generated area is not silently omitted.
     if candidate_git.git_dir(root):
         tracked = candidate_git.run(root, "ls-files", "-z", capture_output=True, check=True, timeout=10)
         if any(excluded(Path(n)) for n in tracked.stdout.decode().split("\0") if n):

@@ -56,7 +56,7 @@ def test_digest_frames_binary_contents_with_same_paths_and_count(tmp_path):
         data = b"".join(p.name.encode() + b"\x000\x00" + p.read_bytes() + b"\0"
                         for p in sorted(root.iterdir()))
         return hashlib.sha256(data).hexdigest()
-    assert legacy(left) == legacy(right)  # This fixture exercised the old collision.
+    assert legacy(left) == legacy(right)  # 此測試資料重現舊版碰撞。 / This fixture exercised the old collision.
     assert subject_digest(left) != subject_digest(right)
     assert subject_digest(left).startswith("worktree-manifest-v1:sha256:")
 
@@ -78,7 +78,7 @@ def test_unreadable_directory_blocks_inventory_digest_and_scan(tmp_path, monkeyp
     (hidden / "source.py").write_text("hidden source")
     hidden.chmod(0)
     real_scandir = os.scandir
-    # Root can read mode 000; model the kernel denial there too, without skips.
+    # root 能讀取 mode 000；仍模擬 kernel 拒絕，不跳過測試。 / Root can read mode 000; model the kernel denial there too, without skips.
     if os.geteuid() == 0:
         def scandir(path):
             if os.fspath(path) == str(hidden):
@@ -102,7 +102,7 @@ def test_file_swapped_for_symlink_after_inventory_is_not_followed(tmp_path):
     (root / "app.py").write_text("print('synthetic')\n")
     paths = input_files(root)
     (root / "app.py").unlink()
-    (root / "app.py").symlink_to(outside)  # swapped between inventory and read
+    (root / "app.py").symlink_to(outside)  # 在列清冊與讀取之間被替換。 / swapped between inventory and read
     with pytest.raises(OSError):
         read_regular(paths[0], 1024)
     with pytest.raises(ValueError, match="read limit"):

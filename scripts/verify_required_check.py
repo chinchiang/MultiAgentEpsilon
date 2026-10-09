@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
-"""Reviewer-side source check for the required Actions check (interim, read-only).
+"""審查者使用的必要 Actions 檢查來源核對工具，暫行且唯讀。專用 App 尚未發布前，其他工作流程也能用共用 App 產生同名 trusted-security-pilot；核准或合併前須從 GitHub 中繼資料確認 head 上每個同名檢查皆來自正確 head 的可信 pull_request_target。任何外來或手動 run 都阻擋。該事件使用 PR base 分支 YAML，而 run 未記錄 base，故另綁定 head 分支，拒絕同 SHA／儲存庫／分支的任何狀態 PR 指向其他 base 或曾改 base。這只是暫行中繼資料查核，專用發布器另需密碼學簽章。
+
+Reviewer-side source check for the required Actions check (interim, read-only).
 
 Until the dedicated App publishes epsilon/trusted-merge, any workflow can report a
 check named trusted-security-pilot from the shared GitHub Actions app. Before
@@ -19,7 +21,8 @@ import re
 import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+if __name__ == "__main__":
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from security_harness.trusted_publisher import validate_run_base, related_pull_path, head_scope
 
 REQUIRED_CHECK = "trusted-security-pilot"
@@ -51,8 +54,8 @@ def verify(api, repo, number, pages):
     histories = {p["number"]: pages(f"repos/{repo}/issues/{p['number']}/timeline?per_page=100")
                  for p in pull_requests if head_scope(p) == head_scope(pr)}
     for check in checks:
-        # A same-named check from another app is not what the ruleset counts, but it
-        # still signals tampering on this head.
+        # 其他 App 的同名檢查不被規則集採計， / A same-named check from another app is not what the ruleset counts, but it
+        # 但仍代表此 head 有竄改跡象。 / still signals tampering on this head.
         need(check["app"]["id"] == ACTIONS_APP_ID and check["head_sha"] == head, "FOREIGN_CHECK_SOURCE")
         runs = api(f"repos/{repo}/actions/runs?check_suite_id={check['check_suite']['id']}&per_page=100")["workflow_runs"]
         need(len(runs) == 1, "CHECK_RUN_SOURCE_AMBIGUOUS")

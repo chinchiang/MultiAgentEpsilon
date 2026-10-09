@@ -1,3 +1,7 @@
+[正體中文](#zh-tw) | [English](#en)
+
+<a id="zh-tw"></a>
+
 # 專用 GitHub App 必要檢查：部署準備
 
 已提供發布程式、CI 來源紀錄、設定及獨立 Linux 主機的 systemd 範本。**尚未建立 App、部署服務或發布真實的 `epsilon/trusted-merge` 檢查。** main 已啟用規則集 24512048，目前必要檢查仍是 GitHub Actions App（15368）的 `trusted-security-pilot`。
@@ -65,13 +69,13 @@ python3.12 -I /opt/epsilon-publisher/app/scripts/publish_trusted_check.py \
 python3.12 -I /opt/epsilon-publisher/app/scripts/publish_trusted_check.py \
   --settings /etc/epsilon-publisher/publisher.json \
   --gate-policy /etc/epsilon-publisher/gate-policy.json \
-  --private-key /etc/epsilon-publisher/github-app.pem \
+  --private-key <可讀取的-systemd-credential-副本> \
   --lock-file /var/lib/epsilon-publisher/publisher.lock \
   --state-file /var/lib/epsilon-publisher/pr-<編號>-state.json \
   --pr <編號> --output /var/lib/epsilon-publisher/pr-<編號>.json
 ```
 
-請使用非草稿的驗收 PR；草稿 PR 不能用來宣稱正向發布成功。手動 workflow_dispatch 不授權。PR 清單依 head 擁有者與分支查詢，再依 SHA、repository ID 與分支過濾；分頁上限為 10,000 筆，剛好完整頁時會查下一頁證明完整，超限拒絕。
+服務帳號無法直接讀取 root 專用的原始私鑰；正式執行請透過下方 unit 的 `LoadCredential` 副本。請使用非草稿的驗收 PR；草稿 PR 不能用來宣稱正向發布成功。手動 workflow_dispatch 不授權。PR 清單依 head 擁有者與分支查詢，再依 SHA、repository ID 與分支過濾；分頁上限為 10,000 筆，剛好完整頁時會查下一頁證明完整，超限拒絕。
 
 **執行與簽章身分：** `pull_request_target` 使用 PR **base 分支**的 workflow；目前 PR 的 base 不能證明舊 run 的來源。發布程式以提交 SHA、head repository ID 與分支綁定 PR／run，讀取包含已關閉 PR 的完整 timeline；同一範圍曾發生 `base_ref_changed` 時，一律拒絕，改用新 head 分支建立 PR。不同 fork 或分支上的相同 SHA 不互相取代。
 
@@ -114,3 +118,93 @@ sudo install -o root -g root -m 0755 /tmp/epsilon-gh-verified /opt/epsilon-publi
 ```
 
 `publisher.json` 的 `attestation_verifier` 與 `attestation_verifier_sha256` 必須與核准的工具鎖定檔相符。所有上層目錄須由 root 持有且不能被服務帳號替換。驗證器的設定與可信根快取使用每次獨立的暫存目錄，避免依賴服務帳號的家目錄。更新工具或來源版本須重新審查、更新 pin 並驗收。首次部署需確認 App 已授予 Attestations 讀取；既有 Connector 的權限不等同專用 App 權限。
+
+<a id="en"></a>
+
+# Dedicated GitHub App required check: deployment preparation
+
+Publisher, provenance, configuration, and Linux systemd templates exist. No App/service/live epsilon/trusted-merge check has been deployed. Active main ruleset 24512048 still requires shared Actions App 15368's trusted-security-pilot. The dedicated App reads GitHub and publishes checks; it never executes candidate code or receives model credentials. Deploy independently reviewed code/policy to controlled read-only locations; candidate settings are not authority.
+
+## Create and install the App
+
+The owner opens [New GitHub App](https://github.com/settings/apps/new), chooses a name such as epsilon-trusted-check-chinchiang and repository homepage, and disables Webhook Active because this implementation polls. Grant repository Actions, Contents, Pull requests, Attestations read; Checks read/write; required Metadata read. No additional writes. Record App ID, generate a private key, and transfer it securely to the host—not chat/issues/source or this repository's Actions secrets. Install only on chinchiang/MultiAgentEpsilon and record the Installation ID from the installation URL. github-app-permissions.json documents permissions, not an App-creation manifest. This App needs no Administration; the owner or separate administrative connection updates rules.
+
+## Trusted baseline and host
+
+Use administrator-controlled Linux with Python 3.12, OpenSSL, systemd, verified TLS access to api.github.com and *.blob.core.windows.net, preserving proxy/CA settings. No Docker/model credentials are needed. Initial migration and CatGrocery write access are historical prerequisites already completed; still verify evaluator_sha is independently reviewed, merged main with completed testing. Baseline updates never automatically authorize deployment or rule exceptions.
+
+From a clean, reviewed checkout:
+
+```bash
+python3.12 -I scripts/prepare_publisher_deployment.py --evaluator-sha <approved-full-main-SHA> --app-id <real-App-ID> --installation-id <real-Installation-ID> --output-dir /controlled/epsilon-deployment
+```
+
+Outputs: app.tar, publisher.json, unchanged gate-policy.json, preparation.json, SHA256SUMS. Dirty/untracked worktree, mismatched HEAD, output inside checkout, or existing output directory rejects; production configuration is never overwritten. Archive content/executable inventory must match evaluator; export-ignore/export-subst changes reject. IDs may be omitted for preparation, remaining null and unusable live. This tool pins local inputs; it neither verifies GitHub approval nor deploys/authorizes updates.
+
+After secure transfer, run sha256sum -c SHA256SUMS. Root installs code under /opt/epsilon-publisher/app and configuration under /etc/epsilon-publisher. Every ancestor must be root-owned and unreplaceable by the service account, without intermediate symlinks; descriptor-by-descriptor opening enforces this. Root-owned sticky ancestors are permitted only with protected descendants.
+
+| Path | Ownership/use |
+|---|---|
+| /opt/epsilon-publisher/app | Reviewed code, administrator-owned, service read-only |
+| /etc/epsilon-publisher/publisher.json | Root-owned 0644/0444; live rejects non-root or group/other-writable configuration |
+| /etc/epsilon-publisher/gate-policy.json | Unchanged approved security/policy.json, root-owned/read-only |
+| /etc/epsilon-publisher/github-app.pem | Root-owned 0600 outside checkout; systemd LoadCredential supplies a private read-only copy, original inaccessible to service |
+| /var/lib/epsilon-publisher | Service-owned 0700 lock/results/per-PR state, verified blob cache, last result, backoff deadline |
+
+Read back repository ID 1403706385/workflow ID 374309318 before deployment. Set real App/installation IDs, approved evaluator SHA/worktree manifest digest, and exact gate-policy SHA-256. Reviewers match baseline_reviewers (chinchiang, CatGrocery, d98922036ntu); exclude PR author, original/rerun actors, every PR commit author/committer, and non-writers. Rerun as a non-approver. minimum_regression_tests must equal the approved complete baseline; CI self-check uses it to reject deleted coverage. JUnit identities must also be nonempty/unique; duplicate records cannot inflate this minimum.
+
+Reviewer additions must synchronize CODEOWNERS, trust-policy, and publisher template and be approved by an existing base reviewer. New candidate names cannot approve their own admission. Deployment administrators explicitly regenerate external policy/pins from approved code; merged files never overwrite host configuration automatically. Missing settings return SETTINGS_INCOMPLETE before token/check creation. A changed main SHA blocks until an explicitly reviewed/accepted pin update.
+
+## Validation and first execution
+
+```bash
+python3.12 -I /opt/epsilon-publisher/app/scripts/publish_trusted_check.py --settings /etc/epsilon-publisher/publisher.json --gate-policy /etc/epsilon-publisher/gate-policy.json --validate-config
+```
+
+This proves only configuration/policy digest validity. For an independently reviewed, non-draft acceptance PR, use the service account and a key accessible through the intended credential mechanism:
+
+```bash
+python3.12 -I /opt/epsilon-publisher/app/scripts/publish_trusted_check.py --settings /etc/epsilon-publisher/publisher.json --gate-policy /etc/epsilon-publisher/gate-policy.json --private-key <readable-systemd-credential-copy> --lock-file /var/lib/epsilon-publisher/publisher.lock --state-file /var/lib/epsilon-publisher/pr-<number>-state.json --pr <number> --output /var/lib/epsilon-publisher/pr-<number>.json
+```
+
+The service cannot directly read the root-only original key. Use the supplied unit/LoadCredential for live execution. Draft PRs/manual dispatch never authorize successful publication. Related-PR lookup binds owner/branch/SHA/repository ID, paginates to 10,000, and fetches an additional page after full pages to prove completeness; excess rejects.
+
+**Run/signature identity:** pull_request_target executes base-branch YAML; current base cannot prove old provenance. Complete timelines including closed PRs bind SHA/head repository/branch and reject any base_ref_changed in that scope; use a new branch/PR. Same SHA in unrelated forks/branches does not supersede runs.
+
+trusted-security-evaluation precedes independent attest-evidence. The fresh signing runner signs the uploaded ZIP digest without candidate checkout, evaluator imports, or model credentials. A pinned, root-owned, hash-matching GitHub CLI verifies offline Sigstore bundles against this repository's security.yml, approved evaluator commit, refs/heads/main, hosted runner, and verified SLSA run/attempt/digest. Unsigned JSON, other revisions/batches, and missing signatures cannot pass. Final trusted-security-pilot requires both evaluation/signing success, with publisher checking all three jobs/required steps; manual completion is named manual-security-completion. Unsupported private-repository attestation requires fixing platform/repository eligibility, never removing signatures. CLI receives no App/model secrets; trusted-root refresh still requires tuf-repo.github.com and Sigstore root services.
+
+**Negative evidence:** expect_block.py runs the evaluator's seeded variant, binding evaluator manifest/SHA rather than candidate. Findings must exactly match policy seeded IDs. CI check_publishable_evidence.py uses the same validate_evidence contract before upload.
+
+After full source/review/evidence checks, publish a completed check only when head/conclusion/code/run/attempt/approval changes. No periodic in_progress flicker. Evidence expires after one hour, causing failure publication on change. 429, rate-limited 403, or API-budget exhaustion produces no publication and a 15-minute stateful backoff—even on first PR lookup. Existing checks remain unchanged during backoff/outage and require monitoring; ordinary 403 is a permission failure. A failed write cannot guarantee revocation of a previous green check. Installation tokens are revoked at completion; JWT verifies App/installation, token scope is minimum permissions/this repository only, artifact downloads do not forward tokens to storage. Keys/tokens/raw API errors/artifact content are not logged.
+
+## Continuous operation and limits
+
+Administrator installs epsilon-publisher account, code/settings, and epsilon-publisher@.service/.timer into /etc/systemd/system. /usr/bin/python3 must be Python 3.12 or PYTHON_VERSION rejects. Verify paths/ownership/proxy configuration:
+
+```bash
+systemd-analyze verify /etc/systemd/system/epsilon-publisher@.service /etc/systemd/system/epsilon-publisher@.timer
+systemctl daemon-reload
+systemctl enable --now epsilon-publisher@<acceptance-PR-number>.timer
+```
+
+All instances share a repository lock. Each PR needs its own timer, waiting 120 seconds after completion. Content-addressed verified blob caching reduces ordinary cycles to roughly 20 requests. Hard bounds: 300 API calls, 240-second API phase; unit 300 seconds/256 MiB/64 tasks; source inventory 200 files, 1 MiB/file, 20 MiB total. Exceeding limits fails; never shrink the inventory to pass.
+
+This is a one-shot publisher plus polling template, without webhook reception, PR auto-discovery, or high availability. Successful Checks have no native expiry; polling/outages delay revocation. Retain native reviews/existing required checks, monitor stale status/service health, and test revocation. Local regressions/templates do not prove instantaneous non-bypassable enforcement.
+
+## Source binding and remote acceptance
+
+After real publication, read back check_run.app.id equals the dedicated App ID. Add epsilon/trusted-merge to main Ruleset with that Expected source; retain trusted-security-pilot, strict checks, all review/no-force-push rules. Do not select shared 15368 or invent IDs.
+
+First use isolated acceptance branches/PRs and a non-admin developer to reject wrong-App same-name success, other workflows/repositories, wrong SHA/attempt, stale/incomplete reports, absent/dismissed approval, changed versions, failed checks, and direct pushes; valid conditions alone pass. Preserve actual identity/rules/responses. Self-review or draft blocking is insufficient; do not risk successful unsafe main merges. App registration, host deployment, real API compatibility, binding, and behavior remain pending.
+
+## Install the signature verifier
+
+From independently approved Linux x86_64 code, verify archive and executable hashes:
+
+```bash
+python3 -I scripts/install_attestation_verifier.py --output /tmp/epsilon-gh-verified
+sudo install -d -o root -g root -m 0755 /opt/epsilon-publisher/tools
+sudo install -o root -g root -m 0755 /tmp/epsilon-gh-verified /opt/epsilon-publisher/tools/gh
+```
+
+Set attestation_verifier and attestation_verifier_sha256 from approved tool locks. Ancestors remain root-owned/unreplaceable. Each verification uses isolated temporary config/root caches rather than service home state. Tool/source updates require reviewed new pins and acceptance. Ensure the dedicated App has Attestations read; connector permissions are separate.

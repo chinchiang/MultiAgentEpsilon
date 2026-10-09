@@ -40,7 +40,7 @@ def test_candidate_repository_config_never_runs_host_programs(tmp_path, key):
         git(repo, "config", key, str(hooks))
     else:
         git(repo, "config", key, str(hook))
-    # Control: the unhardened command used before would execute the configured program.
+    # 對照：強化前的命令會執行儲存庫設定指定的程式。 / Control: the unhardened command used before would execute the configured program.
     if key == "core.fsmonitor":
         subprocess.run(["git", "-C", str(repo), "ls-files", "-z"], capture_output=True)
         assert marker.exists()

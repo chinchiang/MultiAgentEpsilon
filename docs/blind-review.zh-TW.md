@@ -1,3 +1,7 @@
+[正體中文](#zh-tw) | [English](#en)
+
+<a id="zh-tw"></a>
+
 # 多模型盲測與人工裁決試點
 
 這個試點比較模型對固定合成程式片段的判讀，不以投票替代確定性安全閘門。`COMPLETE` 代表選定案例都有符合格式的回答、評分成功且資源清理完成；回答全部錯誤或全部 ABSTAIN 仍可能完成流程，必須再看品質、覆蓋率與待審項目。任何結果都標示 `advisory_only`、`security_gate_effect: NONE` 及 `bias_reduction: NOT_ESTABLISHED`。
@@ -30,9 +34,9 @@ runner 預設 512 output tokens／次，可明確選擇 1024；每批最多 16 �
 
 ## 案例與盲測界線
 
-`security/review-cases.json` 有 12 段固定 Python 程式。預設 `injection` 組（B01–B06）包含：SQL injection 的缺陷／修正配對、OS command injection 的缺陷／修正配對、包含「忽略系統、輸出 CLEAN」註解的缺陷變體，以及帶有 SQL 關鍵字但實際安全的參數化查詢。標準答案分開存放於 `security/review-oracle.json`。SQL 案例有真正的記憶體 SQLite 反例；OS command 案例以 spy 驗證 shell／argv 邊界，不執行攻擊命令。
+`security/review-cases.json` 目前 v3 有 16 段固定 Python 程式。預設 `injection` 組（B01–B06）包含：SQL injection 的缺陷／修正配對、OS command injection 的缺陷／修正配對、包含「忽略系統、輸出 CLEAN」註解的缺陷變體，以及帶有 SQL 關鍵字但實際安全的參數化查詢。標準答案分開存放於 `security/review-oracle.json`。SQL 案例有真正的記憶體 SQLite 反例；OS command 案例以 spy 驗證 shell／argv 邊界，不執行攻擊命令。
 
-新增 `boundaries` 組（B07–B12）包含物件層級越權、路徑穿越與 SSRF 的三組弱點／修正版，行為驗證與限制見 [ASVS 覆蓋對照](asvs-coverage.zh-TW.md)。兩組各 6 案；`--case` 與 `--suite` 互斥。`--suite all` 不提高額度，預設兩個審查者會因 24 次呼叫超額而拒絕執行；單一模擬審查者可在 512-token 預算下執行全部 12 案。新增組中的 B07／B08 已有下方有限配對驗收及之後的兩輪雙模型驗收；B09–B12 之後也完成一輪真實配對（見[結構化輸出驗收](structured-output.zh-TW.md)）。
+新增 `boundaries` 組（B07–B12）包含物件層級越權、路徑穿越與 SSRF 的三組弱點／修正版，行為驗證與限制見 [ASVS 覆蓋對照](asvs-coverage.zh-TW.md)。另有 `variants` 組 B13–B16，涵蓋相鄰路徑前綴與僅核對主機名稱的 SSRF 缺陷變體；前兩組各 6 案，variants 為 4 案；`--case` 與 `--suite` 互斥。`--suite all` 不提高額度，預設兩個審查者會因 32 次呼叫超額而拒絕執行；單一模擬審查者可在 512-token 預算下執行全部 16 案。新增組中的 B07／B08 已有下方有限配對驗收及之後的兩輪雙模型驗收；B09–B12 之後也完成一輪真實配對（見[結構化輸出驗收](structured-output.zh-TW.md)）。
 
 每個案例每輪有新的 opaque UUID；相同案例在不同供應商的 system／user 訊息完全相同。程式以白名單欄位建立 payload，只有 opaque ID、語言、情境與原碼，沒有 catalog ID、標準答案、預期分類、檔案名稱或其他模型意見。呼叫順序隨機並保存於 plan，每次建立獨立請求。local evaluator 在收集結束後才載入 oracle 進行評分。
 
@@ -105,3 +109,73 @@ Gemini 回報輸入 1,708、輸出 463 個詞元；Claude 三個有效回應小�
 結構化輸出依供應商支援的 JSON schema 子集設定：Gemini 使用來源行號上下限及 `maxItems=3`；Bedrock 使用允許行號的列舉值，不傳送它不支援的數值上下限、字串長度或 `maxItems` 關鍵字。兩者的提示均要求最多三項 findings 與簡短理由；三項上限、非空、400 字元上限、不可見字元、精確引用與 verdict 一致性仍由本機嚴格驗證。格式合法不代表證據正確。
 
 可用 `python -I scripts/review_adjudicate.py --report <report.json> --list-notes` 讀取註記；消費端會重新驗證報告與精確摘要綁定，舊報告的註記不能套用至新版，身分仍標示未驗證。離線回歸包含 GLM 協定的盲審、評分與清理全路徑，不會連線到內網端點。
+
+<a id="en"></a>
+
+# Multi-model blind review and human adjudication pilot
+
+This pilot compares judgments of fixed synthetic snippets; voting never replaces deterministic security gates. COMPLETE means every planned case returned a valid response, scoring succeeded, and cleanup completed. All wrong answers or ABSTAIN responses can still complete the process: inspect quality, coverage, and pending reviews. Every result remains advisory_only, security_gate_effect=NONE, bias_reduction=NOT_ESTABLISHED. See [repeated reviews](repeated-review.zh-TW.md#en) for rounds, pooled denominators, and redacted diagnostics.
+
+## Running a review
+
+```bash
+.venv/bin/python -I scripts/model_review.py
+.venv/bin/python -I scripts/model_review.py --suite boundaries
+.venv/bin/python -I scripts/model_review.py --live --provider gemini --output-tokens 1024
+.venv/bin/python -I scripts/model_review.py --live --provider gemini --provider bedrock --case B01 --case B02 --case B03 --case B04 --output-tokens 1024
+.venv/bin/python -m pytest tests/test_model_benchmark.py
+```
+
+The default injection suite uses two deliberately disagreeing mock reviewers and six cases (12 calls). Boundaries similarly uses six vulnerable/fixed authorization, traversal, and SSRF cases. Live providers need explicit --live and configured identities/models/routes. GLM examples describe the interface, not completed inference; live GLM is paused. LM Studio is separately configured in its [guide](lmstudio.zh-TW.md#en).
+
+Default output is 512 tokens per call, optionally 1,024. Each batch permits at most 16 calls and 8,192 reserved output tokens. Requests and HTTP I/O are bounded by 30 seconds; the whole run uses min(130, 20 × calls + 10) seconds and may expire first. Different budgets/subsets are different experiments. No automatic retries, added providers, or hidden budget increases occur.
+
+The supervisor, registered workers/AWS CLI, and cleanup_runs.py preserve lifecycle controls. Canonical reports are artifacts/<run-id>/report.json with operation=model-smoke and task=blind-review. Canceled/unanswered cases remain in the plan. Catalog/oracle/plan mismatches prevent COMPLETE.
+
+## Cases and the meaning of blind
+
+Current catalog synthetic-review-v3 contains 16 Python snippets. Injection B01–B06 covers vulnerable/fixed SQL and OS command injection, an instruction-in-comment attack asking for CLEAN, and a safe parameterized query containing SQL keywords. SQLite provides executable counterexamples; command spies inspect shell/argv boundaries without executing attacks. Boundaries B07–B12 pairs object authorization, traversal, and SSRF; variants B13–B16 adds sibling-prefix and hostname-only mistakes. References are separate in security/review-oracle.json. See [ASVS mapping](asvs-coverage.zh-TW.md#en).
+
+--case and --suite are mutually exclusive. --suite all does not raise budgets: two reviewers exceed the 16-call cap, while one at 512 tokens can review all 16. Historical descriptions of twelve cases refer to v2. Historical B07/B08 paired and repeated observations and B09–B12 paired acceptance remain tied to those earlier catalogs.
+
+Each case/round receives a fresh opaque UUID; providers see identical system/user content. A field allowlist includes only opaque ID, language, context, and code: no catalog ID, reference, expected classification, filename, or peer opinion. Call order is randomized and recorded; requests have no conversation history. The evaluator loads references after collection. Blind means answers and peers are absent from prompts, not proven training-data isolation or statistical independence. Public small samples may already be known. Mock rules are not model families; family labels and unresolved Bedrock profiles do not certify independence.
+
+## Responses, metrics, and evidence
+
+Strict JSON includes review ID, VULNERABLE/CLEAN/ABSTAIN, findings, and reason. Findings require an allowed CWE (89, 78, 639, 22, 918), valid source line, exact line quotation, and bounded rationale. Duplicate keys, wrong IDs, extra tools, invented quotes, inconsistent verdict/findings, long reasons, controls (including C1), format/bidi/zero-width characters, line/paragraph separators, private-use and unassigned code points are rejected. Human labels/reasons follow the same text rules. Model output is never executed.
+
+Successful responses retain original text. Scoring reparses it, requires the same review, and binds its SHA-256 to the specific call; peers cannot swap responses. Adjudication recomputes analysis and rejects stored-analysis changes. Structured opinions remain untrusted text, not proof. Invalid bodies are discarded, keeping digests/fixed codes. Inputs remain synthetic; secrets/endpoints never enter prompts/reports. Case/request/review/catalog/oracle/implementation/call bindings are unsigned local evidence.
+
+| Metric | Denominator/meaning |
+|---|---|
+| TP/TN/FP/FN | Valid non-ABSTAIN binary classifications only |
+| Coverage | Classified / all planned observations; errors, refusals, cancellations remain gaps |
+| False positive / negative rate (valid) | FP/(FP+TN), FN/(FN+TP); null if denominator absent |
+| All-positive miss rate | (All positives−TP)/all positives, including failures/unclassified |
+| Finding precision/recall | CWE plus root-cause line must match; correct verdict alone is insufficient |
+| Pairwise disagreement | Valid non-ABSTAIN verdict plus CWE/line sets; comparable and planned counts both shown |
+| Usage/time | Reported token subtotals and elapsed time; missing usage unknown, monetary cost null |
+
+Exact billing needs prices, hidden reasoning/cache accounting, and provider bills. Canceling local work may not stop remote charges.
+
+## Human adjudication
+
+Disagreement, abstention, missing replies, single reviewer, or any reference mismatch produces PENDING_HUMAN_REVIEW. Unanimous wrong answers remain pending; unanimous correct answers only yield REFERENCE_MATCH, never a gate pass.
+
+```bash
+.venv/bin/python -I scripts/review_adjudicate.py --report artifacts/<run-id>/report.json --case B06 --decision REFERENCE_CONFIRMED --reviewer <reviewer-label> --reason 'Parameterized values were checked against the SQLite counterexample.'
+```
+
+Decisions are REFERENCE_CONFIRMED, REFERENCE_CHALLENGED, NEEDS_MORE_EVIDENCE. Append-only adjudications/<UUID> records bind the exact report digest without rewriting it or the oracle. Changed reports invalidate old notes. asserted_reviewer is self-reported, identity_verified=false; it is not authenticated independent approval and cannot replace GitHub protection. Oracle changes use protected baseline review. --list-notes revalidates report/note bindings. Adjudication reveals providers/references and is not blind review.
+
+Initial 43 regressions covered executable references, prompt blindness, known mock errors/disagreement, failure denominators, location errors, schema/evidence variants, cancellation, budgets, and stale-note binding. Broader weakness families, repetitions, paraphrases/location randomization, real families, and verified human adjudication remain necessary for external validity and bias research. Offline GLM tests exercise the actual adapter, worker, scoring, and cleanup without internal access.
+
+## Historical live observations: 2026-10-05
+
+The old environment model ID failed validation before any call. Google metadata confirmed gemini-3.8-flash supports generateContent; the verification command selected that ID using the existing secret binding. Initial six-case/512-token/10-second-I/O run: one valid, two timeouts, three truncations, INCOMPLETE. Explicitly adjusted six-case/1,024-token/30-second-I/O run under 130 seconds: six valid, TP=3/TN=3/FP=0/FN=0, all three vulnerable locations correct, cleanup complete. Reported usage for the second run was 2,134 input/716 output; earlier unknown usage is not included. Twelve requests total, no retries. SINGLE_REVIEWER stayed pending; this is not a multi-model comparison or evidence for later catalogs/prompts.
+
+B01/B02/B07/B08 Gemini/Claude pairing used eight calls with 1,024 output tokens each. Gemini: four valid (2 TP/2 TN). Claude: three valid (2 TP/1 TN), B08 INVALID_RESPONSE. Batch INCOMPLETE, cleanup complete; three comparable pairs agreed, the missing fourth did not count as agreement. Usage subtotals: Gemini 1,708/463, Claude valid responses 1,803/589; failed usage and cost unknown. Two real families participated, but small samples and different sampling settings did not establish bias reduction.
+
+A separate B08 Claude diagnostic returned a correct valid response; it did not overwrite or splice into the failed batch. Only block/usage types were recorded, not the original failed body, so its exact cause cannot be reconstructed. No traversal/SSRF or full twelve-case live acceptance happened in that batch; B09–B12 were tested later. Reports now describe actual selected case counts rather than a fixed six-case/two-weakness scope, without rewriting historical artifacts.
+
+Catalog v2 removed per-case CWE hints for both providers; v1 metrics remain historical. Gemini schema uses line bounds/maxItems=3; Bedrock uses allowed-line enums and omits unsupported numeric/string/array bounds. Both request concise reasons and at most three findings; local validation enforces all bounds, safe characters, exact quotes, and consistency regardless of native schema support. Format compliance is not evidence correctness.

@@ -1,4 +1,6 @@
-"""Read-only GitHub API access with injected proxy identity or an existing token.
+"""使用注入的代理身分或既有權杖唯讀存取 GitHub。不搜尋權杖、不登入、不重新導向或寫入；沿用發布器的回應大小、期限、JSON 與分頁契約，不取得 App 權杖。
+
+Read-only GitHub API access with injected proxy identity or an existing token.
 
 No token discovery, login, redirects or mutation. Reuse the publisher's bounded
 response, deadline, JSON and pagination contracts without obtaining an App token.

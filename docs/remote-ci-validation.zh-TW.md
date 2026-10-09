@@ -1,3 +1,7 @@
+[正體中文](#zh-tw) | [English](#en)
+
+<a id="zh-tw"></a>
+
 # 遠端 CI 驗收與尚未生效的合併保護
 
 驗收日期：2026-10-04（Asia/Taipei）。原始執行索引與 SHA 見 [remote-ci-evidence.json](remote-ci-evidence.json)。
@@ -42,3 +46,29 @@ gh api --method POST repos/chinchiang/MultiAgentEpsilon/rulesets \
 因此 owner review 是目前提案中必要的治理控制；若要求完全自動且能辨識可信 evaluator，還需平台支援的 required workflow 或獨立 GitHub App 等來源綁定，再做偽造同名 status／workflow 替換的驗收。不得把這次政策降級負例成功擴張成所有惡意 YAML 都無法繞過。
 
 本輪公開版本採獨立的 Git 起始歷史；原始附件、內部參考文件與衍生治理表單留於本地，沒有透過祖先 commit 發布。模型服務的內部 URL 也不存入公開 Git。
+
+<a id="en"></a>
+
+# Historical remote CI acceptance: 2026-10-04
+
+This is a dated record, not current protection status; see [milestone status](milestone-status.zh-TW.md#en).
+
+| Scenario | Run | Historical result |
+|---|---|---|
+| Main baseline | 37170856594 | 51 tests passed |
+| PR #1 normal documentation | 37170578652 | Positive workflow acceptance |
+| PR #2 authorization defect | 37170653595 | 49 tests passed, one authorization failure |
+| PR #3 removes AUTH policy | 37170656488 | Guard rejected before installation; exposed missing early failure artifact |
+| PR #4 early evidence correction | 37170892081 | Correct guard failure and uploaded BLOCK audit evidence with base/head/path data |
+
+All four acceptance PRs were closed unmerged and their temporary branches removed. The old main baseline used 14 AUTH cases, fixed zero findings, vulnerable five. Early audit was separated from target dependency installation; upload fails on missing artifacts rather than hiding evidence loss.
+
+At that time main was unprotected, rulesets empty, and ruleset creation returned Resource not accessible by integration (403). Red CI alone did not prevent merging. Contents/PR/Actions write permissions did not imply Administration. This limitation was separate from successful CI execution. A rules template was prepared:
+
+```bash
+gh api --method POST repos/chinchiang/MultiAgentEpsilon/rulesets --input docs/github-main-ruleset.json
+```
+
+The template requires PR/CODEOWNER approval, one independent approval, stale-review dismissal, other-person last-push approval, resolved conversations, strict required checks, no deletion/force push/bypass. Current template uses trusted-security-pilot and shared App 15368; old security-pilot naming belongs to that historical workflow. CODEOWNERS alone does not enforce approval, especially with only the author.
+
+Actual ordinary-developer denial remained pending. Candidate-controlled workflow YAML could create misleading same-name success; later base-evaluator/source/timeline/signature work improves provenance, but dedicated App binding is still separate. Repository history was published from a safe public baseline without private attachments or internal model URLs. Historical remote-ci-evidence.json is retained as machine evidence, not translated or rewritten into current proof.

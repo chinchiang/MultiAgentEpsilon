@@ -1,4 +1,6 @@
-"""G1: stdlib-only, fail-closed PyPI lock verification before wheel-only install.
+"""G1 安裝前以標準函式庫核對 PyPI lock，錯誤即阻擋，後續只安裝 wheels。本模組驗證來源中繼資料，不分析惡意行為或 CVE；不匯入或執行套件與建置後端，OSV 由另一模組處理。
+
+G1: stdlib-only, fail-closed PyPI lock verification before wheel-only install.
 
 This MVP checks provenance metadata, not malicious package behavior or CVEs.
 No dependency or build backend is imported/executed by this module.
@@ -47,7 +49,7 @@ class NoRedirect(urllib.request.HTTPRedirectHandler):
 
 
 def fetch_metadata(name: str, version: str) -> dict:
-    # Name/version are restricted by parse_lock; host cannot be supplied by the target.
+    # parse_lock 限制名稱與版本，目標不能指定主機。 / Name/version are restricted by parse_lock; host cannot be supplied by the target.
     request = urllib.request.Request(f"https://pypi.org/pypi/{name}/{version}/json",
                                      headers={"Accept": "application/json"})
     with urllib.request.build_opener(NoRedirect()).open(request, timeout=20) as response:

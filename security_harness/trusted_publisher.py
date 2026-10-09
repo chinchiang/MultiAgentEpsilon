@@ -1,4 +1,6 @@
-"""Dedicated-App publisher: validate remote data, never execute candidate contents.
+"""專用 App 發布器驗證遠端資料，不執行候選內容。程式與政策須在候選工作流程外唯讀部署，仍需原生審查、檢查與事件傳遞；本工具不是簽署或代管服務，GitHub 成功檢查也不會自動到期。
+
+Dedicated-App publisher: validate remote data, never execute candidate contents.
 
 Deploy this code and its policy read-only outside candidate workflows. Native
 review/check rules and event delivery remain required; this is not a signing or
@@ -33,7 +35,9 @@ MANIFEST = re.compile(r"worktree-manifest-v1:sha256:[0-9a-f]{64}")
 
 
 class Denied(ValueError):
-    """Only fixed diagnostic codes may leave the publisher."""
+    """發布器只輸出固定診斷碼。
+
+Only fixed diagnostic codes may leave the publisher."""
 
 
 def need(condition, code):
@@ -74,8 +78,8 @@ def validate_settings(settings, gate_policy):
 
 
 def reject_newer_runs(run, newer_runs, head):
-    # SHA alone is shared across forks. Only the same repository/branch evaluation
-    # supersedes this run; missing identity on a same-SHA newer run fails closed.
+    # 不同 fork 可共用 SHA；只有相同儲存庫／分支的評估 / SHA alone is shared across forks. Only the same repository/branch evaluation
+    # 能取代此 run，同 SHA 較新 run 缺身分時故障即阻擋。 / supersedes this run; missing identity on a same-SHA newer run fails closed.
     for other in newer_runs:
         need(type(other.get("id")) is int and SHA.fullmatch(other.get("head_sha") or ""), "RUN_LISTING")
         if other["id"] > run["id"] and other["head_sha"] == head:
@@ -113,7 +117,9 @@ def validate_pr(pr, settings):
 
 
 def validate_review(pr, reviews, permissions, settings, excluded):
-    """excluded: identities that touched the head (run actors, commit author/committer).
+    """excluded 包含接觸 head 的 run actor 與提交作者／提交者；這些自報或事件範圍身分只能移除核准，真實推送者仍以規則集原生最後推送核准為準。
+
+excluded: identities that touched the head (run actors, commit author/committer).
     They are self-asserted or event-scoped, so they may only remove approvals; the
     ruleset's native last-push approval stays authoritative for the actual pusher."""
     latest = {}
@@ -157,7 +163,9 @@ def expected_provenance(settings, run_id, run_attempt, pr_number, base_sha, cand
 
 
 def validate_evidence(settings, gate_policy, files, *, provenance, candidate_sha, subject, now):
-    """Artifact-only contract, shared by the publisher and the CI self-check.
+    """發布器與 CI 共用純 artifact 契約。修正版報告評估候選，缺陷版是 evaluator 自我測試，因此負例綁定 evaluator 摘要與歷史，不綁候選。
+
+Artifact-only contract, shared by the publisher and the CI self-check.
 
     The fixed report evaluates the candidate. The seeded-defect report is the
     evaluator's self-test (expect_block runs the trusted tree's vulnerable variant),
@@ -170,8 +178,18 @@ def validate_evidence(settings, gate_policy, files, *, provenance, candidate_sha
     need(tree.tag in ("testsuite", "testsuites"), "JUNIT_ROOT")
     suites = [tree] if tree.tag == "testsuite" else tree.findall("testsuite")
     need(bool(suites), "NO_REGRESSIONS")
+    identities = set()
     for suite in suites:
         cases = suite.findall("testcase")
+        # 每項測試須有唯一識別；重複項目不能灌高已通過數量。
+        # Require unique test identities; duplicate entries cannot inflate coverage.
+        for case in cases:
+            identity = (case.get('classname'), case.get('name'))
+            need(all(type(v) is str and v.strip() for v in identity)
+                 and identity not in identities, 'JUNIT_IDENTITY')
+            identities.add(identity)
+        need(all(re.fullmatch(r'0|[1-9][0-9]*', suite.get(k, ''))
+                 for k in ('tests', 'failures', 'errors', 'skipped')), 'JUNIT_COUNTS')
         need(len(cases) == int(suite.get("tests", "0"))
              and all(not any(c.find(tag) is not None for tag in ("failure", "error", "skipped")) for c in cases), "JUNIT_CASES")
     counts = {k: sum(int(s.get(k, "0")) for s in suites) for k in ("tests", "failures", "errors", "skipped")}
@@ -227,14 +245,14 @@ def validate_bundle(settings, gate_policy, pr, run, newer_runs, jobs, files, rev
     validate_pr(pr, settings)
     need(run["repository"]["id"] == settings["repository_id"]
          and run["repository"]["full_name"] == settings["repository"], "RUN_REPOSITORY")
-    # A pull_request_target run executes this path from the PR's *base* branch, and the
-    # run does not record which base: workflow_id/path also match a modified copy on
-    # another branch. validate_run_base binds the run to this PR before collection.
+    # pull_request_target 從 PR 的 base 分支執行此路徑， / A pull_request_target run executes this path from the PR's *base* branch, and the
+    # run 未記錄 base；其他分支修改副本也有相同 workflow_id／path， / run does not record which base: workflow_id/path also match a modified copy on
+    # 因此 collect 前由 validate_run_base 綁定此 PR。 / another branch. validate_run_base binds the run to this PR before collection.
     need(run["workflow_id"] == settings["workflow_id"] and run["path"] == settings["workflow_path"]
          and run["event"] == "pull_request_target", "RUN_SOURCE")
     need(run["status"] == "completed" and run["conclusion"] == "success", "RUN_NOT_SUCCESS")
-    # GitHub reports pull_request_target runs (and their check suites) on the PR head
-    # commit; the evaluator commit is bound below via the trusted workflow's provenance.
+    # GitHub 將 pull_request_target run 與 check suite 記在 PR head， / GitHub reports pull_request_target runs (and their check suites) on the PR head
+    # evaluator commit 則由下方可信 workflow provenance 綁定。 / commit; the evaluator commit is bound below via the trusted workflow's provenance.
     need(run["head_sha"] == pr["head"]["sha"], "RUN_SHA")
     need(type(run["run_attempt"]) is int and run["run_attempt"] >= 1, "RUN_ATTEMPT")
     reject_newer_runs(run, newer_runs, pr["head"]["sha"])
@@ -305,7 +323,7 @@ class GitHub:
                 location = exc.headers.get("Location", "")
                 host = urllib.parse.urlsplit(location).hostname or ""
                 need(host.endswith(".blob.core.windows.net"), "ARTIFACT_REDIRECT_HOST")
-                # Installation/JWT credentials must never follow storage redirects.
+                # Installation／JWT 憑證不可跟隨儲存服務重新導向。 / Installation/JWT credentials must never follow storage redirects.
                 return self.raw(location, authenticated=False, limit=limit)
             if exc.code in (403, 429) and (exc.code == 429 or exc.headers.get("Retry-After")
                     or exc.headers.get("X-RateLimit-Remaining") == "0"):
@@ -356,7 +374,9 @@ def installation_client(settings, key_file):
 
 
 def remote_subject(client, repo, sha, blob_cache=None):
-    """blob_cache maps verified Git blob IDs to SHA-256. Blob IDs are content
+    """blob_cache 將已驗證 Git blob ID 對應 SHA-256；快取前核對內容定址，命中快取不會改變摘要。
+
+blob_cache maps verified Git blob IDs to SHA-256. Blob IDs are content
     addresses checked below before caching, so a cache hit cannot change a digest."""
     tree = client.api(f"/repos/{repo}/git/trees/{sha}?recursive=1")
     need(tree.get("truncated") is False, "SOURCE_TREE_TRUNCATED")
@@ -371,8 +391,8 @@ def remote_subject(client, repo, sha, blob_cache=None):
              and not path.is_absolute() and ".." not in path.parts and not excluded(Path(entry["path"])), "SOURCE_INPUT")
         size = entry["size"]
         total += size
-        # GitHub's JSON/base64 response has a separate, deliberately lower
-        # ceiling than the scanner's streaming file allowance.
+        # GitHub JSON／base64 回應採獨立且刻意較低的 / GitHub's JSON/base64 response has a separate, deliberately lower
+        # 大小上限，不沿用掃描器串流檔案上限。 / ceiling than the scanner's streaming file allowance.
         need(type(size) is int and 0 <= size <= min(LIMITS.max_file_bytes, 1024**2)
              and total <= min(LIMITS.max_input_bytes, 20 * 1024**2)
              and len(files) < min(LIMITS.max_files, 200), "SOURCE_LIMIT")
@@ -425,7 +445,9 @@ def run_base_history(client, prefix, pr, pulls):
 
 
 def validate_run_base(run, pr, pull_requests, base_branch, histories=None):
-    """Bind a pull_request_target run to this PR's base without trusting run evidence.
+    """不信任 run 自報證據，將 pull_request_target 綁定此 PR 的 base。現況不能證明歷史 workflow；相同 head／repo／branch 曾改 base 即拒絕，包括來回切換與重跑，時間戳不能證明排隊事件來源。可用新 head 分支開新 PR，timeline 必須是完整 API 資料。
+
+Bind a pull_request_target run to this PR's base without trusting run evidence.
 
     Current PR state cannot prove historical workflow source. Without a signed
     source identity, any base-retargeted PR sharing this exact head/repo/branch is
@@ -449,17 +471,19 @@ def validate_run_base(run, pr, pull_requests, base_branch, histories=None):
         need(isinstance(events, list) and all(isinstance(e, dict) and isinstance(e.get("event"), str)
                                              for e in events), "BASE_HISTORY_MISSING")
         need(not any(e["event"] == "base_ref_changed" for e in events), "BASE_RETARGETED_UNVERIFIABLE")
-    # Associated PR snapshots, when present, may only constrain trust further.
+    # 關聯 PR 快照若存在，只能進一步限縮信任。 / Associated PR snapshots, when present, may only constrain trust further.
     for linked in run.get("pull_requests", []):
         if linked.get("number") == pr["number"] and linked.get("base"):
             need(linked["base"].get("ref") == base_branch, "RUN_ORIGINAL_BASE")
 
 
-PR_COMMIT_LIMIT = 250  # GitHub lists at most 250 commits for a pull request.
+PR_COMMIT_LIMIT = 250  # GitHub 每個 PR 最多列出 250 個 commits。 / GitHub lists at most 250 commits for a pull request.
 
 
 def pr_commit_identities(commits, head):
-    """Accounts GitHub attributes any PR commit to. Self-asserted, so only ever used to
+    """GitHub 歸屬於任一 PR commit 的帳號屬自報資料，只用來排除核准；曾提交先前 commit 的審查者不獨立。
+
+Accounts GitHub attributes any PR commit to. Self-asserted, so only ever used to
     exclude approvers: a reviewer who pushed earlier commits is not independent."""
     need(isinstance(commits, list) and 0 < len(commits) < PR_COMMIT_LIMIT, "PR_COMMITS_TRUNCATED")
     need(all(isinstance(c, dict) for c in commits) and commits[-1].get("sha") == head, "PR_COMMITS_HEAD")
@@ -467,7 +491,9 @@ def pr_commit_identities(commits, head):
 
 
 def verify_artifact_attestation(client, settings, run, raw):
-    """Use a pinned verifier for cryptography, then bind its verified SLSA statement
+    """以固定驗證器處理密碼學，再把已驗證 SLSA 綁定精確 run attempt；artifact JSON 本身不是來源身分。離線 bundle 避免子程序取得安裝權杖或模型金鑰。
+
+Use a pinned verifier for cryptography, then bind its verified SLSA statement
     to the precise run attempt. Artifact JSON is never itself a source identity.
     Offline bundles avoid giving the subprocess the installation token or model keys.
     """
@@ -570,7 +596,9 @@ THROTTLED = ("GITHUB_RATE_LIMIT", "API_BUDGET")
 
 
 def publish(client, settings, gate_policy, number, run_id=None, state=None):
-    """Publish one completed check only when the verified outcome changes.
+    """僅在已驗證結果改變時發布 completed 檢查，不發布會造成必要檢查閃動的 in_progress。狀態保存 blob 快取、上次結果與限流退避期限；退避期間無法發布。
+
+Publish one completed check only when the verified outcome changes.
 
     No in_progress placeholder is posted: re-verification every cycle would make the
     required check flap. state persists the blob cache, the last published outcome
@@ -591,7 +619,7 @@ def publish(client, settings, gate_policy, number, run_id=None, state=None):
             run_id = discover_run(client, settings, pr)
         proof = collect(client, settings, number, run_id, gate_policy, state.setdefault("blobs", {}))
         need(proof["head_sha"] == head, "HEAD_CHANGED")
-        # Recheck mutable PR/reviews/latest attempt immediately before green.
+        # 發布成功前立即重新查核可變 PR、審查與最新 attempt。 / Recheck mutable PR/reviews/latest attempt immediately before green.
         fresh = client.api(f"{prefix}/pulls/{number}")
         validate_pr(fresh, settings)
         need(fresh["head"]["sha"] == head, "HEAD_CHANGED")

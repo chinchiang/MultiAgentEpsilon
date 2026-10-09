@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
-"""Read-only configuration audit; never substitutes admin observations for developer probes."""
+"""唯讀設定稽核；管理者的觀察不能取代一般開發者的行為驗收。
+
+Read-only configuration audit; never substitutes admin observations for developer probes."""
 import argparse
 import base64
 import json
@@ -7,7 +9,8 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(ROOT))
+if __name__ == "__main__":
+    sys.path.insert(0, str(ROOT))
 from security_harness.results import write_json
 
 
@@ -15,7 +18,9 @@ ACTIONS_APP_ID = 15368
 
 
 def codeowners_reviewers(text):
-    """Owners GitHub would request for every path ('*'), from the base branch file."""
+    """依 base 分支檔案取得 GitHub 對所有路徑（*）要求的擁有者。
+
+Owners GitHub would request for every path ('*'), from the base branch file."""
     rules = {}
     for line in (text or "").splitlines():
         parts = line.split("#", 1)[0].split()
@@ -23,8 +28,8 @@ def codeowners_reviewers(text):
             rules[parts[0]] = {p[1:] for p in parts[1:] if p.startswith("@") and "/" not in p}
     if "*" not in rules:
         return []
-    # Conservative: a common personal owner must appear in every effective rule.
-    # Team resolution and GitHub's full glob semantics require native per-path review.
+    # 保守判定：共同個人擁有者須出現在每個有效規則。 / Conservative: a common personal owner must appear in every effective rule.
+    # 團隊解析與完整 glob 語意仍需 GitHub 原生逐路徑審查。 / Team resolution and GitHub's full glob semantics require native per-path review.
     return sorted(set.intersection(*rules.values()))
 
 
@@ -38,7 +43,7 @@ def inspect_configuration(branch, rulesets, pr, collaborators, reviewers, codeow
     reviews = [r.get('parameters', {}) for r in rules if r['type'] == 'pull_request']
     checks = [check for r in rules if r['type'] == 'required_status_checks'
               for check in r.get('parameters', {}).get('required_status_checks', [])]
-    # A context name alone is forgeable; only the expected integration counts.
+    # 檢查名稱可偽造，只採計預期整合來源。 / A context name alone is forgeable; only the expected integration counts.
     required = [c for c in checks if c.get('context') == 'trusted-security-pilot'
                 and c.get('integration_id') == ACTIONS_APP_ID]
     dedicated = [c for c in checks if c.get('context') == 'epsilon/trusted-merge' and publisher_app_id
@@ -53,7 +58,7 @@ def inspect_configuration(branch, rulesets, pr, collaborators, reviewers, codeow
     configuration = {
         'main_protected': bool(branch.get('protected')),
         'active_main_ruleset': bool(active),
-        # GitHub omits bypass_actors for callers without ruleset write access: unknown is not "none".
+        # 無規則集寫入權限時 GitHub 省略 bypass_actors；未知不等於沒有。 / GitHub omits bypass_actors for callers without ruleset write access: unknown is not "none".
         'no_bypass': bool(active) and all(isinstance(r.get('bypass_actors'), list) and not r['bypass_actors']
                                           for r in active),
         'no_delete_or_force_push': {'deletion', 'non_fast_forward'} <= kinds,
@@ -84,7 +89,7 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--pr', type=int, default=5)
     parser.add_argument('--output', type=Path, default=ROOT/'artifacts/merge-protection-audit.json')
-    parser.add_argument('--publisher-app-id', type=int, help='dedicated App ID, once registered')
+    parser.add_argument('--publisher-app-id', type=int, help='完成註冊後的專用 App ID / dedicated App ID, once registered')
     args = parser.parse_args()
     evidence = {'decision': 'BLOCK', 'acceptance_complete': False, 'errors': []}
     try:
@@ -113,7 +118,7 @@ def main():
         evidence['errors'].append(type(exc).__name__)
     write_json(args.output, evidence)
     print(f"{evidence['decision']}: {args.output}")
-    return 1  # This read-only command cannot certify behavioral probes it did not execute.
+    return 1  # 唯讀命令不能宣稱未執行的行為驗收已通過。 / This read-only command cannot certify behavioral probes it did not execute.
 
 
 if __name__ == '__main__':

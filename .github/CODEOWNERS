@@ -1,3 +1,3 @@
-# A code owner other than the PR author must review changes before they enter the protected branch.
-# GitHub rulesets must enforce this file; its presence alone does not enforce review.
+# 須由 PR 作者以外的程式碼擁有者審查後才能進入受保護分支。 / A code owner other than the PR author must review changes before they enter the protected branch.
+# 須由 GitHub 規則集強制執行，本檔存在不代表已生效。 / GitHub rulesets must enforce this file; its presence alone does not enforce review.
 * @chinchiang @CatGrocery @d98922036ntu

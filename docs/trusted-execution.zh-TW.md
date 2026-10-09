@@ -1,3 +1,7 @@
+[正體中文](#zh-tw) | [English](#en)
+
+<a id="zh-tw"></a>
+
 # 可信執行、基準更新與合併保護
 
 此版本修正覆蓋判定、掃描範圍與早期錯誤證據，並將候選程式移出評分器行程。主分支是否受到 GitHub 保護必須另行讀回驗證；本文件與規則 JSON 不構成已啟用的證據。
@@ -20,11 +24,11 @@
 - Gitleaks 使用重新命名的快照，映射回原始檔名；原始 `.git` 等名字不能觸發工具的隱含略過，候選 inline allow 與 ignore file 不能自行抑制可信掃描。壓縮檔除了展開成員，也掃描容器本身的可讀字串（註解、檔名、extra 欄位、gzip 標頭）；zip 中不屬於任何列出成員的位元組、帶資料的目錄項目，以及 tar 結尾之後的非零資料一律阻擋。
 - 對候選 repository 的 git 呼叫一律經 `security_harness/candidate_git.py`：以命令列 `-c` 停用 fsmonitor、hooks 與任何 transport，清除繼承的 `GIT_*` 環境變數，不讀取系統／全域設定，並以明確的 `--git-dir` 指向候選自己的 `.git` 目錄（gitfile 或 symlink 拒絕）。候選的 `.git/config` 是資料，不能讓 host 執行程式。
 - Audit envelope 在設定解析之前寫出，subject／policy 尚不可得時保留 null。錯誤只記錄階段與例外型別。報告採原子替換，初始 RUNNING 報告一律 BLOCK；沒有成功完成的證據不得放行。
-- `artifacts/latest.txt` 僅索引 security run；其他入口各有 `<operation>-latest.txt`。目前 artifact 未簽章，CI 保存 7 天，不是長期不可竄改證據庫。
+- `artifacts/latest.txt` 僅索引 security run；其他入口各有 `<operation>-latest.txt`。本機 artifact 未簽章；CI 另以獨立工作簽署上傳 ZIP，保存 7 天，仍不是長期不可竄改證據庫。
 
 ## 合法基準更新
 
-一般 app Python 與 Markdown 文件變更可走既有基準；其他路徑預設受保護，包括新增 `conftest.py`、Python import 入口、ignore/config、workflow、工具與測試。
+所有路徑均須獨立核准，包括 app Python、Markdown 文件及新增 `conftest.py`、Python import 入口、ignore/config、workflow、工具與測試。
 
 受保護變更使用以下流程：
 
@@ -43,11 +47,11 @@
 
 1. 確認獨立審查者具 write 權限（CatGrocery 已於 2026-10-07 讀回為 write）；以 `python3 scripts/audit_merge_protection.py` 讀回確認。
 2. 審查者審閱可信閘門 PR 的差異、遠端手動 run（`manual-security-evaluation`）的結果，以及 artifact 中 `audit/publishable-evidence.json` 為 PUBLISHABLE，並以審查者帳號核准目前 head。
-3. 擁有者在規則集設定中**暫時**將自己加入 bypass，只用於合併這一個 PR；合併後立即移除，並以 `gh api repos/chinchiang/MultiAgentEpsilon/rulesets/24512048` 讀回確認 bypass 為空。不要刪除或停用整個規則集。
+3. 使用現行 guard 的獨立核准流程，完整重跑正式 CI、核對簽章及必要檢查來源後正常合併。不要把歷史停用規則的遷移方式當成日常操作；若平台設定確實無法支援遷移，先另行設計並審查受控遷移程序。
 4. 合併後，main 的 CODEOWNERS 包含兩位審查者，`pull_request_target` workflow 生效：之後的 PR 會在 head 上產生 `trusted-security-pilot`。專用 App 綁定前，每次核准或合併前以 `python3 scripts/verify_required_check.py --pr <編號>` 確認該檢查來自可信 workflow 的 `pull_request_target` run。
 5. 疊在其上的發布程式與多模型 PR 改以 main 為 base 後，依一般流程審查；它們會由已合併的新 evaluator 評估。
 
-**GitHub Actions app ID + check 名稱仍不唯一綁定 evaluator workflow。** `pull_request_target` 執行的是 PR **base 分支**上的 workflow 檔案，而 run 中繼資料不記錄 base；同一路徑在其他分支的修改版本有相同 workflow ID。因此 `verify_required_check.py` 與發布程式另外要求：run 的 head 分支與 head repository 必須等於此 PR，且任何狀態（含已關閉）的 PR 只要共用同一 head 卻以其他分支為 base，就 BLOCK。PR 無法刪除，所以「開到其他分支、取得綠燈後關閉」的雙胞胎 PR 仍會被看見。較強的做法是以 GitHub artifact attestation（OIDC 簽署的 `security.yml@refs/heads/main` 身分）綁定證據，此項需要修改 workflow 權限，尚待擁有者決定。 若要把檢查視為不可偽造的自動閘門，需額外採平台支援的 required workflow，或獨立 GitHub App：App 必須查核 repository、workflow 身分／可信 evaluator SHA、事件、候選 SHA、run attempt、完整報告與結論後，才對候選 SHA 發佈必要檢查。其他 workflow 的 GITHUB_TOKEN 不應能以該 App 身分發佈檢查。此獨立來源機制目前未部署，不能聲稱一般開發者無法偽造同名檢查。
+**GitHub Actions app ID + check 名稱仍不唯一綁定 evaluator workflow。** `pull_request_target` 執行的是 PR **base 分支**上的 workflow 檔案，而 run 中繼資料不記錄 base；同一路徑在其他分支的修改版本有相同 workflow ID。因此 `verify_required_check.py` 與發布程式另外要求：run 的 head 分支與 head repository 必須等於此 PR，且任何狀態（含已關閉）的 PR 只要共用同一 head 卻以其他分支為 base，就 BLOCK。PR 無法刪除，所以「開到其他分支、取得綠燈後關閉」的雙胞胎 PR 仍會被看見。較強的做法是以 GitHub artifact attestation（OIDC 簽署的 `security.yml@refs/heads/main` 身分）綁定證據，此項已實作並通過 main 真實簽章驗收。 若要把檢查視為不可偽造的自動閘門，需額外採平台支援的 required workflow，或獨立 GitHub App：App 必須查核 repository、workflow 身分／可信 evaluator SHA、事件、候選 SHA、run attempt、完整報告與結論後，才對候選 SHA 發佈必要檢查。其他 workflow 的 GITHUB_TOKEN 不應能以該 App 身分發佈檢查。此獨立來源機制目前未部署，不能聲稱一般開發者無法偽造同名檢查。
 
 管理驗收至少包含：普通開發者直接 push 失敗、未核准政策修改阻擋、同名假檢查不放行、核准後換 SHA 失效、合法更新成功、規則讀回顯示 active。需使用普通開發者角色，不以 owner/admin 的測試代替。若 ruleset API 回覆 403，程式與 CI 驗證仍可完成，但遠端保護必須維持未完成狀態。
 
@@ -72,3 +76,71 @@ python3 scripts/dev_db.py stop
 G2 現在也掃描 HEAD 可達提交的訊息、作者與提交者中繼資料，以及所有標籤名稱與附註標籤內容；標籤指向但 HEAD 不可達的檔案歷史仍不在範圍。原始中繼資料不寫入證據，超過清冊或位元組限制時保持 BLOCK。Git manifest 只使用 Git 儲存的擁有者執行權限分類，避免 checkout umask 不同造成摘要誤差。
 
 Gitfile（linked worktree 或部分 submodule 使用的 `.git` 文字檔）會在檢查候選 repository 時提前拒絕；這是目前輸入格式限制，不是掃描完成或容器執行失敗。請使用一般 clone 的實體 `.git` 目錄，不接受可指向任意 host 路徑的 gitfile。跨開機清理先比較 boot ID，程序登記持久化前的子程序只能等待握手，不能執行候選工作。
+
+<a id="en"></a>
+
+# Trusted execution, baseline updates, and merge protection
+
+Coverage, scan scope, and early-error evidence are enforced, and candidate code runs outside the evaluator process. Documents/rules JSON alone do not prove GitHub enforcement; read back remote settings separately.
+
+## Execution boundary
+
+1. pull_request_target checks out the evaluator from base SHA. Head is separate candidate data, never host-executed bootstrap, pytest, conftest, Dockerfile, or imports.
+2. Trusted bootstrap installs baseline locked wheels. Runtime builds offline using a pinned Python image and --require-hashes, never candidate build instructions. Image ID and lock/entrypoint/builder hashes are recorded; changes require rebuilding.
+3. AUTH snapshots the limited Python fixture read-only into a non-root, read-only-root, capability-dropped, no-new-privileges, networkless container with CPU/memory/PID limits.
+4. Candidate gets only synthetic app settings, read-only PostgreSQL Unix socket mount, and bounded HTTP-socket tmpfs. It has no writable host HTTP directory, DB admin password, evaluator, reports, GitHub/model credentials, or Docker socket.
+5. PostgreSQL is a separate networkless SCRAM-authenticated container; app privileges are schema/table-specific. Host oracle seeds and inspects complete state independently. A read-only in-container bridge performs HTTP without redirects/compression/oversized responses. Host receives bounded, timed Docker exec output rather than connecting to candidate-controlled host sockets. Bridge never scores.
+6. Parent cleans uniquely labeled containers on timeout/cancel and normal completion. Errors, incomplete gates, or changing source/evaluator block.
+
+Linux containers still share a kernel; this is not kernel/runtime-exploit resistance. Hostile multi-tenancy needs dedicated short-lived VM/microVM workers and platform isolation. Candidate damage to its own synthetic data/service should fail tests; self-reported results are never the oracle.
+
+## Cases, input, and error evidence
+
+Gate contracts specify kind and exact unique AUTH case IDs, consistent counts/findings/per-case results. Schema 3 rejects versions 1/2 and mixed run IDs. G2 requires the candidate's own HEAD history: missing .git/commits or a nested directory inside another repository cannot ALLOW.
+
+Scanning and subject hashing share inputs.py. Generated directories are excluded only at root; Python/pytest caches are explicit exceptions, and tracked reserved generated paths are rejected. Candidate mounts contain only inventoried fixture Python. Gitleaks scans renamed snapshots mapped back to original names: .git names, inline allow comments, and candidate ignore files cannot silently skip trusted scanning. Archive container strings/metadata and expanded members are scanned; unlisted ZIP bytes, data-bearing directory entries, and nonzero trailing TAR bytes block.
+
+Candidate Git calls use candidate_git.py, disabling fsmonitor/hooks/transports with -c, clearing inherited GIT_*, ignoring system/global config, and explicitly selecting a real candidate .git directory. Gitfiles/symlinks are rejected. Candidate configuration is data, never host execution authority.
+
+An audit envelope exists before settings parsing, with null subject/policy when unavailable. Errors retain phase/type only. Atomic initial RUNNING reports stay BLOCK. artifacts/latest.txt indexes security only; other operations have separate indexes. Local artifacts are unsigned; CI separately signs the uploaded ZIP and retains it seven days, not a permanent immutable archive.
+
+## Legitimate baseline updates
+
+Every path requires independent approval, including fixture Python, Markdown, conftest/imports, ignores/configuration, workflows/tools/tests.
+
+1. Open a PR and review its diff/candidate verification; rejection by the old baseline can be expected.
+2. A reviewer trusted by base security/trust-policy.json approves the exact current head, distinct from the author. Candidate-added reviewers cannot authorize themselves.
+3. Rerun trusted CI. Live guard verifies open PR, matching base/head, latest effective APPROVED decision and commit ID, and write/maintain/admin permissions. Any PR commit author/committer is excluded; reaching GitHub's 250-commit listing cap rejects. Lookup failure, dismissal, CHANGES_REQUESTED, lost permissions, or changed head does not authorize.
+4. Evaluation still uses old evaluator/policy. Approval does not prove the new evaluator correct; review its candidate evidence. Only the merged commit becomes the next baseline.
+
+Review submission does not automatically trigger pull_request_target. Rerun the correct head as the author or another non-approver: publisher excludes both original actor and triggering actor. Evidence expires after 3,600 seconds and needs rerun. Labels, candidate files, arbitrary CLI approval strings, or self-approval cannot replace live independent review.
+
+## Initial migration and GitHub administration
+
+The old guard could not adopt this workflow normally; initial migration was explicit, not a disguised pass. Manual workflow_dispatch evaluates the chosen ref and is named manual-security-evaluation. A developer can modify their branch YAML/job names, so a same-name green manual run is not trusted; verify_required_check.py rejects workflow_dispatch.
+
+The minimum rules template requires no deletion/force push/bypass, independent CODEOWNER review, stale-review dismissal, and strict trusted-security-pilot. Ruleset 24512048 was enabled before migration, when old jobs only produced security-pilot and CODEOWNERS contained only the author, preventing normal merges. On October 6 the owner temporarily disabled rules and merged #6/#7 without independent review, then restored enforcement after acceptance. This historical exception is not routine guidance.
+
+For subsequent updates: confirm independent write access (CatGrocery confirmed October 7), review diff/manual candidate run/PUBLISHABLE evidence, approve exact head, then use current guard, full formal CI, signature and source verification for normal merge. If platform constraints genuinely prevent migration, separately design/review a controlled migration instead of reusing historical disablement. CODEOWNERS/main workflow then apply to later PRs. Until dedicated App binding, run verify_required_check.py --pr <number> before approval/merge. Stacked PRs retargeted to main follow normal review and new evaluator rules.
+
+Shared Actions App ID plus check name does not uniquely identify YAML. pull_request_target uses base-branch workflow and run metadata omits base; alternate-base YAML can share workflow ID/path. Publisher/verifier require matching head repository/branch and reject any related PR (including closed ones) targeting another base or ever changing base. Closing a twin PR does not erase it. Implemented GitHub artifact attestation binds security.yml@refs/heads/main and evaluator SHA, with real main signature acceptance. An unforgeable automated required source still needs platform required-workflow support or a dedicated App validating repository/workflow/evaluator/event/candidate/attempt/full evidence. Ordinary GITHUB_TOKEN must not impersonate it. Dedicated source is not deployed; same-name forgery resistance is not claimed.
+
+Acceptance needs actual non-admin direct-push denial, unapproved policy rejection, spoofed-name rejection, stale-SHA rejection, legitimate update success, and active rule readback. Owner tests do not substitute. Administration API 403 leaves remote acceptance incomplete even if local/CI tests pass.
+
+## Local acceptance
+
+```bash
+python3 scripts/bootstrap.py
+python3 scripts/build_runtime.py
+python3 scripts/dev_db.py start
+.venv/bin/python -m pytest --junitxml=artifacts/pytest.xml
+.venv/bin/python scripts/expect_block.py
+.venv/bin/python scripts/run_security.py
+python3 scripts/dev_db.py stop
+```
+
+Isolation regressions attempt writes to read-only source/entrypoint, reads of evaluator/Docker socket/tokens, and IP egress. Required results: exact 32 cases; fixed zero findings/ALLOW; seeded exact nine policy IDs/BLOCK. Seven additional real-container variants cover wrong-password login, 404 disclosure, cross-tenant export, hidden unrelated-row mutation, admin cross-tenant writes, expired sessions, and cross-tenant deletion. Redirecting the HTTP socket to a host endpoint must fail without contacting that endpoint.
+
+Candidate lock must match verified runtime lock; arbitrary candidate dependency images are unsupported. Protected diffs disable rename collapsing and check both old/new paths. Schema 3 uses versioned per-file manifests. See [remote gaps](remote-merge-protection.zh-TW.md#en).
+
+G2 also scans HEAD-reachable commit messages/authors/committers and all tag names/annotations, but not file history reachable only from tags. Raw metadata is not retained; limits block. Manifest executable classification follows Git owner-executable bits, not checkout umask. Linked-worktree/submodule gitfiles are an explicit unsupported input, not completed scanning or runtime failure; use a normal clone with real .git. Cross-boot cleanup checks boot ID first, and registered children wait for persistent-registration handshake.

@@ -1,6 +1,10 @@
+[正體中文](#zh-tw) | [English](#en)
+
+<a id="zh-tw"></a>
+
 # 第一個里程碑：實作狀態與驗收方式
 
-本文件記錄**現況與可辨識的歷史驗收**（2026-10-08）。各批次的原始紀錄與當時的數字移至[里程碑歷史紀錄](milestone-history.zh-TW.md)。
+本文件記錄**現況與可辨識的歷史驗收**（2026-10-09）。正式 main `438d7a4` 已合併 PR #16／#17；787 項測試、32／0 正例與 32／9 負例、完整清理及真實簽章通過（[run 37853277868](https://github.com/chinchiang/MultiAgentEpsilon/actions/runs/37853277868)）。本輪 LM Studio 與雙語變更另行驗收。各批次的原始紀錄與當時的數字移至[里程碑歷史紀錄](milestone-history.zh-TW.md)。
 
 ## 遠端治理
 
@@ -51,7 +55,7 @@ PR #12 已由 CatGrocery 對最新 head `58d9bc0` 獨立核准，正式 [run 375
 
 1. **決定是否清除 git 歷史中的 AWS 帳號識別資訊。** 目前文件已移除，但 commit `2158448` 起的歷史仍含該帳號 ID 與權限集名稱；帳號 ID 不是 API 金鑰；完全移除需另行核准的歷史改寫與協作安排，本輪不暫停規則集或強推，且公開期間可能已被快取。清除後可加入針對帳號 ID 的 Gitleaks 規則（歷史仍含該值時，加入規則會使每次掃描 BLOCK）。
 2. **開啟 repository 的 Secret scanning、Push Protection、Dependabot alerts 與 Private vulnerability reporting**（`SECURITY.md` 指向此回報管道）。
-3. **完成專用 App 消費與部署驗收。** PR #15 已經獨立核准並合併；main `a5d1ba1` 的 704 項測試及真實遠端簽章已驗證。待辦是受控主機上的 App 消費、必要檢查來源綁定及普通開發者拒絕探測，不能與已完成的簽章生成混為一談。
+3. **完成專用 App 消費與部署驗收。** PR #16／#17 已經獨立核准並合併；main `438d7a4` 的 787 項測試及真實遠端簽章已驗證。待辦是受控主機上的 App 消費、必要檢查來源綁定及普通開發者拒絕探測，不能與已完成的簽章生成混為一談。
 4. 把 fork PR 的 workflow 核准政策改為所有外部貢獻者都需核准；開啟 Actions 的 SHA pinning 強制。
 5. 建立並部署專用 App、把 `epsilon/trusted-merge` 加入規則集，並以普通開發者身分完成繞過驗收。
 6. 選定授權條款（目前沒有 LICENSE，公開程式碼等同保留所有權利）。
@@ -83,10 +87,10 @@ W 編號與 G0–G6 閘門編號都來自本地保留的原始規劃。依公開
 | W02 | 公開程式碼與操作文件已發布 | 內部參考資料保留本地。 |
 | W03 | 固定 checksum／digest、wheel-only、DB 限權、候選 git 強化 | 不受信 PR／惡意套件的強隔離（VM／microVM）尚未驗證。 |
 | W04 | 嚴格狀態、必要 coverage 與歷史、subject／policy 綁定；main 真實簽章已驗證 | 專用 App 消費與正式發布。 |
-| W05、W09 | main 為 18 案例／五種變體；本輪候選為 32 案例／七種變體 | 完整 G5。 |
-| W06、W20 | G1 metadata 與 G2；本輪候選新增鎖定檔 SBOM／OSV SCA | G1 行為分析、安裝映像及其他生態系、G3。 |
+| W05、W09 | main 已有 32 案例／七種變體 | 完整 G5。 |
+| W06、W20 | G1 metadata、鎖定檔 SBOM／OSV SCA 與 G2 | G1 行為分析、安裝映像及其他生態系、G3。 |
 | W08 | main 規則集 active、遠端正反例、run 與 PR base 綁定、全 commit 核准排除 | 專用可信檢查來源與普通開發者繞過驗收；main artifact attestation 已驗證。 |
-| W10–W14 | gateway、三種 adapter、盲測與多輪框架；Gemini／Claude 真實小樣本驗收 | GLM 真實推論、較大樣本的穩定性與偏誤實驗。 |
+| W10–W14 | gateway、模型 adapter、盲測與多輪框架；Gemini／Claude 真實小樣本驗收 | LM Studio 真實推論、較大樣本的穩定性與偏誤實驗；GLM 真實連線暫停。 |
 | W15–W19 | 待完成 | 產品適用性、簽章證據、完整 release、營運與正式資料／預算治理。 |
 | W21 | 限縮本地 RoE；模型 RoE 呼叫上限實際執行 | 任意網路掃描、redirect／DNS／工具委派與外部資產授權。 |
 | W22–W25 | 待完成 | 一手來源查核、組織成熟度評分、供應商驗收及產品弱點處理。 |
@@ -95,6 +99,75 @@ W 編號與 G0–G6 閘門編號都來自本地保留的原始規劃。依公開
 
 本輪完整 703 項回歸通過，新增歷程／混合審查／重跑者／fork 身分／預留／程序與掃描範圍等變體，並備妥獨立簽署與固定驗證器。完整對照、真實模型結果及外部待辦見[安全邊界修正](security-boundaries-20261008.zh-TW.md)。上述 627 等數字屬各段歷史基準，不是本輪測試下限；專用 App 尚未部署的狀態維持不變。
 
-## 2026-10-08 後續擴充（待審查合併）
+## 2026-10-08 後續擴充（已合併）
 
-本輪候選版本將 G1 擴充為鎖定檔 CycloneDX 1.6 清冊與 OSV 精確版本查詢，AUTH 增至 32 案例／9 個指定缺陷；目錄版本為 synthetic-review-v3，增加 B13–B16。尚未合併前，正式 main 仍是 `a5d1ba1` 的 704 項基準及 18／6 AUTH 契約。歷史段落的 627／703 數字保留供辨識批次，不是目前下限。完整新增驗收與外部缺口見[後續擴充紀錄](security-expansion-20261008.zh-TW.md)。
+本輪候選版本將 G1 擴充為鎖定檔 CycloneDX 1.6 清冊與 OSV 精確版本查詢，AUTH 增至 32 案例／9 個指定缺陷；目錄版本為 synthetic-review-v3，增加 B13–B16。該輪已合併至正式 main `438d7a4`，基準為 787 項測試及 32／9 AUTH 契約；704 與 18／6 僅屬先前基準。歷史段落的 627／703 數字保留供辨識批次，不是目前下限。完整新增驗收與外部缺口見[後續擴充紀錄](security-expansion-20261008.zh-TW.md)。
+
+<a id="en"></a>
+
+# Milestone status and acceptance
+
+Current reviewed main is 438d7a4 (2026-10-09), including PR #16/#17. Run [37853277868](https://github.com/chinchiang/MultiAgentEpsilon/actions/runs/37853277868) passed 787 tests, fixed32/0 and seeded32/9 AUTH, cleanup, and real signature verification. New LM Studio/bilingual work requires its own acceptance. Original dated totals remain in [history](milestone-history.zh-TW.md#en).
+
+## Remote governance
+
+Main ruleset 24512048 is active/no bypass, with PR/CODEOWNER review, stale-approval dismissal, other-person last-push approval, additional approval for unattributed changes, and required trusted-security-pilot from shared Actions App 15368. Read current state with audit_merge_protection.py. Baseline reviewers are chinchiang, CatGrocery, d98922036ntu; CatGrocery write confirmed October 7, d98922036ntu October 8. PR #14 synchronized all three lists. Future PRs use normal rules, never disabling them; author/any-commit identities/run actors cannot count as independent reviewers.
+
+Initial October 6 migration temporarily disabled rules and merged #6 da567d8 and #7 0ac31cb; #10 also merged without reviews in that interval. Enforcement was restored. Same-name checks can still originate from other workflows. Before approval/merge, verify_required_check.py --pr <number> binds pull_request_target, exact head repository/branch, and all related PR/base timelines including closed PRs. Dedicated epsilon/trusted-merge App/service/binding remain absent.
+
+| Historical October 6 scenario | Run | Result |
+|---|---|---|
+| #7 retargeted to main | 37446641158 | Base da567d8 evaluator;29 protected changes/no independent approval blocked before candidate execution; check on head |
+| Main push0ac31cb | 37446694680 |532 tests;18/0 ALLOW, exact 6 seeded BLOCK; PUBLISHABLE |
+| #8 admin cross-tenant mutation | 37447163081 | Then-current fixture exemption allowed guard;532 evaluator tests, one precise candidate AUTH finding/BLOCK |
+| #9 removes AUTH policy | 37447183081 | Protected-policy guard BLOCK |
+| #10 Markdown-only | 37448552469 | Then-current guard passed, full trusted run succeeded; merge occurred while rules disabled without reviews |
+
+Historical exemptions no longer apply: all paths now need review. Live source verification rejected #5 head9a47966's manual candidate green as UNTRUSTED_CHECK_SOURCE; #7's real but failed run as LATEST_CHECK_NOT_SUCCESS. October 7 readback accepted #10's base binding and rejected #7-as-#10 with RUN_HEAD_BRANCH.
+
+## October 7 implementation/acceptance
+
+Manual candidate607b8c6 run 37567019081:610 passes/no failures,18/0 ALLOW, exact 6 BLOCK, own-candidate G2 history heads, PUBLISHABLE610. PR #12 received CatGrocery exact-head58d9bc0 approval. Formal run 37568335787 attempt2 used old main's532 tests and verified source/digests/18 positive/six seeded/cleanup. It merged under active/no-bypass rules as41339c6; main run 37598381087 used new 610-test baseline/PUBLISHABLE. Old/new test totals must not be mixed.
+
+Fixes hardened candidate Git configuration/hooks/transports/environment/.git discovery; required candidate-owned history; scanned archive metadata/unlisted payload/trailing bytes; required exact clean expect_block completion; blocked worker decisions without cleanup handoff; preserved latest index during janitor; bound required checks to PR source; excluded every PR commit author/committer with 250-list fail-closed cap; enforced actual live RoE count/catalog binding/fixed stop reasons/placeholder rejection/redacted model labels. Credential-free CLI overbudget tests cannot make paid calls, and cleanup removes only all-mock evidence. Event-specific workflow concurrency, no-follow reads, fixed Docker daemon, centralized rlimits, removed unused worker, and public account-ID redaction completed related fixes.
+
+Publisher rechecks mutable same-head PRs/timelines immediately before green, opens root-owned configuration through protected directory descriptors, and prepares immutable clean-checkout archives with exact evaluator/policy digests and SHA256SUMS. Seventeen new regressions brought that historical baseline to627. Preparation/offline/manual CI is not independent approval or live deployment.
+
+## Remaining external work
+
+Owner decisions/actions: whether to separately authorize rewriting historical AWS account identifiers (not API secrets; may already be cached); enable/verify Secret scanning, Push Protection, Dependabot and private reporting with capable administrative access; choose a source license; provision dedicated App/installation/key/controlled Linux host and perform developer-role source/merge denial acceptance. Never paste credentials, disable rules, force-push history, or treat connector403 as an automatic-review denial. Current private-reporting enable attempt still returns403.
+
+Deployment must use approved merged main and explicit regenerated evaluator/policy pins, not a candidate. Existing main 438d7a4 is the reviewed deployment baseline until a later independently accepted merge. Real LM Studio endpoint/model/schema acceptance and renewed AWS credentials for new v3 Gemini/Claude samples remain separate; GLM live stays paused.
+
+## Local acceptance and evidence
+
+```bash
+python3 scripts/bootstrap.py
+python3 scripts/build_runtime.py
+python3 scripts/dev_db.py start
+.venv/bin/python -m pytest --junitxml=artifacts/pytest.xml
+.venv/bin/python scripts/smoke_http.py
+.venv/bin/python scripts/expect_block.py
+.venv/bin/python scripts/run_security.py
+python3 scripts/dev_db.py stop
+```
+
+pytest.xml records collected parametrized items, not test-function count. http-smoke.json verifies real loopback health/login/allowed and cross-owner reads. Each run report binds current subject/policy; latest.txt is only an index. expect_block requires COMPLETED/no errors/cleanup/vulnerable variant/all gates complete/G1-G2 clean/exact nine seeded IDs among32 AUTH cases. Tool errors, source drift, empty/different cases, or cleanup failure are failed negative acceptance.
+
+| Roadmap item | Implemented scope | Remaining |
+|---|---|---|
+| W01/W07 | Synthetic pilot scope | Product inventory/owners/ASVS level |
+| W02 | Public code/docs | Private references stay local |
+| W03 | Checksums, wheel-only, DB least privilege, Git hardening | Hostile multi-tenant VM/microVM isolation |
+| W04 | Strict state/coverage/history/digest and main signatures | Dedicated publisher operation |
+| W05/W09 |32 AUTH cases/seven real mutations | Full G5 |
+| W06/W20 | G1 provenance/lock SBOM/OSV and G2 | Behavior/installed images/other ecosystems/G3 |
+| W08 | Active rules, remote positive/negative CI, run/base binding, all-commit exclusions | Dedicated source and actual non-admin anti-bypass probes |
+| W10–W14 | Gateway/adapters/blind/repeated framework; small Gemini/Claude live samples; LM Studio candidate | Local real inference, larger stability/bias experiments; GLM paused |
+| W15–W19 | Roadmap | Product applicability, long-term signed evidence/release/operations/data-budget governance |
+| W21 | Bounded local/model RoE and actual caps | Arbitrary assets/network scans/DNS/redirect/tool delegation authorization |
+| W22–W25 | Roadmap | Primary-source checks, maturity scoring, supplier acceptance, product vulnerability handling |
+
+W/G numbering originates from retained private planning: G0/G4 scope/authorization/threats, G1 dependencies, G2 secrets, G5 web/API authorization, G6 models; G3 remains unimplemented. No private planning is republished.
+
+October 8 boundary work had 703 then704 tests; see [boundary record](security-boundaries-20261008.zh-TW.md#en). Expansion added CycloneDX1.6/exact-version OSV,32/9 AUTH, and v3 B13–B16, merged as438d7a4 with 787 tests; see [expansion](security-expansion-20261008.zh-TW.md#en). Historical627/703/704 and18/6 figures are not current minimums.

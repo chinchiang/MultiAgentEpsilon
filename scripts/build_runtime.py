@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
-"""Build the trusted runtime offline from verified wheels; never use a candidate Dockerfile."""
+"""以已驗證 wheels 離線建置可信 runtime，不採用候選 Dockerfile。
+
+Build the trusted runtime offline from verified wheels; never use a candidate Dockerfile."""
 import hashlib
 import json
 import shutil
@@ -9,7 +11,8 @@ import tempfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(ROOT))
+if __name__ == "__main__":
+    sys.path.insert(0, str(ROOT))
 from security_harness.audit import AuditRun
 from security_harness.processes import docker_command, docker_environment
 from security_harness.results import write_json

@@ -1,3 +1,7 @@
+[正體中文](#zh-tw) | [English](#en)
+
+<a id="zh-tw"></a>
+
 # 里程碑歷史紀錄
 
 本文件依日期保存歷次批次的原始紀錄，內容只代表當時狀態（例如「main 未受保護」、14／16 個授權案例、5 個 findings、81／103／125／431／532 項測試）。現況與剩餘工作以[里程碑狀態](milestone-status.zh-TW.md)為準。
@@ -87,3 +91,41 @@ ruleset 管理 API 再次回覆 HTTP 403，main 仍未受保護；獨立可信�
 Git HTTPS、PR 與 Actions 結果的讀取／交付已成功；ruleset 寫入明確回覆 `Resource not accessible by integration`。此管理權限不足阻止合併保護生效，不影響已完成的 CI 執行證據。可套用設定見 `github-main-ruleset.json`。
 
 下一步是建立遠端可信 PR 閘門，驗證普通開發者無法更改評分規則、跳過 required workflow 或以偽造同名 status 放行。其後再擴 G3／完整 G5，盤點一雲一地與至少兩模型家族，逐步串接 G6。安全憑證透過環境設定提供，不寫入原碼或聊天。
+
+<a id="en"></a>
+
+# Milestone history
+
+These dated records preserve original batch observations, including unprotected-main statements and older 14/16/18-case, five/six-finding, and 50–532-test totals. They are not current claims. See [current status](milestone-status.zh-TW.md#en).
+
+## 2026-10-06 acceptance and fixes
+
+Commit 2158448, manual run 37441975087: 532 passed/no failures/errors/skips; trusted-gate-only PR run 37407823134 had 266. Fixed 18/0 ALLOW; seeded exact six policy IDs BLOCK; shared publisher contract PUBLISHABLE. Manual check was manual-security-evaluation, not trusted-security-pilot. WSL also tested non-Docker subsets and real admin cross-tenant mutations; temporary local Docker timeout relaxation was not committed, and remote original-limit results are authoritative. Subsequent commits then changed only docs/template minimums.
+
+Fixes separated manual names/source verification, required write-capable base approval excluding head authors/committers, added admin same-tenant allow/cross-tenant no-side-effect denial, and matched seeded exact sets. Publisher bound negative evidence to evaluator and runs to head; unrelated forks stopped superseding runs; published completed checks only on changes; added blob cache/backoff/token revocation/root settings/LoadCredential/unit hardening. Merge audit treated absent bypass data as unknown and checked integration ID/dedicated source/base CODEOWNERS. G2 required reviewed binary hashes but still scanned readable strings. Janitor continued after per-run failure, supervisor retained cleanup after timeout, and container cleanup allowed 30 seconds. Models rederived reviews from hashed raw responses, rejected unsafe Unicode, accounted for Gemini thinking, tracked keyed per-run serving identities, restricted AWS environment, retained fixed error categories, revalidated adjudication analysis, and required separate model RoE.
+
+## 2026-10-05 repeated reviews and second model
+
+Added one-to-four shared-budget rounds, fixed redacted diagnostics, per-round/pooled metrics, failure denominators, and stability; 32 new regressions. Gemini two cases/two rounds returned four valid reference matches; expired AWS credentials prevented repeated pairing then. See [repeated reviews](repeated-review.zh-TW.md#en).
+
+Bedrock ACK later worked after replacing CLI pipe JSON with sealed anonymous memory and omitting unsupported fixed temperature. Four-case Gemini/Claude pair returned seven valid; batch stayed incomplete, separate Claude diagnostic did not overwrite it. Independent reviewer names in a candidate did not yet prove remote write/administrative/source permissions or actual approval. See [blind review](blind-review.zh-TW.md#en) and [gateway](model-gateway.zh-TW.md#en).
+
+The blind framework added twelve synthetic cases (six injection/six boundaries), separate oracle, opaque payloads, strict JSON/quotes, classification/location/coverage/disagreement metrics, and append-only report-bound human notes. Majority never changed gates. Initial 43 blind plus 44 boundary regressions did not establish bias reduction or complete ASVS. Model supervisor/registered worker/AWS/janitor integration added 29 lifecycle regressions; schema 2 awaited cleanup before success. That lifecycle round made no paid calls and left Bedrock/GLM/protection live acceptance separate.
+
+## 2026-10-04 gateway, coverage, and core boundaries
+
+Gateway/mocks/Gemini/Bedrock/GLM plus 56 offline tests were added. Gemini ACK worked; GLM proxy CONNECT403 and Bedrock profile/model settings blocked inference then. Opinions remained advisory and isolated from deterministic gates. Later updates supersede those connection statuses.
+
+Coverage/lifecycle round: 125 passes/no failures/skips, real cancellation/orphan cleanup, bounded gzip/ZIP/TAR expansion and HEAD-reachable blobs, unknown/overlimit/incomplete input BLOCK, supervisor process/deadline limits, cleanup-before-ALLOW. See [coverage acceptance](coverage-lifecycle-acceptance.zh-TW.md#en).
+
+Core round: 103 passes and one Starlette warning, four real-container mutations (wrong password, 404 disclosure, cross-tenant export, hidden unrelated-row change) producing intended findings. AUTH became 16 cases with full JSON and users/items/sessions state; worktree-manifest-v1/schema 3 rejected old evidence. Rename endpoints/unreadable directories/runtime-lock mismatch blocked. HTTP sockets moved into bounded container tmpfs, host used timed Docker exec bridge, and host-socket redirection contacted nothing. Arbitrary candidate dependency builds stayed unsupported. Fixed 16/0 ALLOW, original seeded 16/5 BLOCK; use each run's actual report, not older hashes/remote runs. No new remote PR/CI acceptance was claimed in that local batch.
+
+Earlier isolation round: 81 passes, 14/5 seeded BLOCK, 14/0 fixed ALLOW, real HTTP smoke, one warning. Added exact-head independent review/base-evaluator pull_request_target. PR #5 awaited adoption; manual run 37184958648 passed but did not exercise PR-review guard. Separate live PR lookup correctly blocked unapproved baseline changes. Rules API still returned403; main unprotected, author-only reviewer and dedicated-source/developer denial gaps remained. No self-approval substituted.
+
+## First local/public baseline
+
+Original private references/planning stayed local. Public pilot implemented Python harness, preinstall PyPI checks, real Gitleaks, PostgreSQL fixture, 14 AUTH cases, negative policy case, and Actions. Remote baseline later had 51 passes and PR positive/negative/early-BLOCK evidence; rules writes remained forbidden. ASVS's345 requirements had no product applicability determination, endpoints were UNVERIFIED. See [historical remote record](remote-ci-validation.zh-TW.md#en).
+
+Fresh virtualenv/download/hash verification and fresh PostgreSQL rebuild succeeded. Initial local pytest50/no failures/errors/skips included real Gitleaks/PostgreSQL; HTTP smoke passed four checks. Both before/after DB rebuild, separate run IDs/schemas produced G1 23 packages complete/G2 complete, vulnerable14/5 BLOCK and fixed14/0 ALLOW. Dependency compatibility passed with one Starlette TestClient/httpx warning; no similarly named package was installed as a speculative fix. YAML/action SHA/permissions/links were checked locally before remote Actions existed. artifacts/latest.txt and exact reports remain evidence; this prose is not publication proof.
+
+Git HTTPS/PR/Actions delivery worked while ruleset administration returned Resource not accessible by integration. The historical next sequence was trusted remote PR gates/developer anti-bypass acceptance, then G3/full G5, cloud/local families, and G6. Later status supersedes implemented items. Credentials remain in secure settings, never source/chat.

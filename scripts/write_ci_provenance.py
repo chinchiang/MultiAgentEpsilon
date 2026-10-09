@@ -1,12 +1,15 @@
 #!/usr/bin/env python3
-"""Write evaluator-owned source bindings; never import candidate code."""
+"""寫入 evaluator 擁有的來源綁定；不可匯入候選程式。
+
+Write evaluator-owned source bindings; never import candidate code."""
 import json
 import os
 import re
 import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+if __name__ == "__main__":
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from security_harness import candidate_git
 
 

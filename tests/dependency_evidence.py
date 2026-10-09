@@ -1,4 +1,6 @@
-"""Offline evidence fixtures; they never query a public database."""
+"""離線證據測試資料，不查詢公開資料庫。
+
+Offline evidence fixtures; they never query a public database."""
 import tempfile
 from pathlib import Path
 from security_harness.dependencies import scan

@@ -1,4 +1,6 @@
-"""Variant truth comes from real temporary file reads and isolated mock requests."""
+"""缺陷變體標準答案由真實暫存檔讀取與隔離 mock 請求驗證。
+
+Variant truth comes from real temporary file reads and isolated mock requests."""
 import asyncio
 import uuid
 import httpx

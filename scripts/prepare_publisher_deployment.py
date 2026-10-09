@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
-"""Prepare immutable deployment inputs without credentials or remote writes.
+"""準備不可變的部署輸入，不含憑證或遠端寫入。部署擁有者須選擇已獨立審查的 main 提交；產生檔案不代表核准、服務部署或檢查發布。
+
+Prepare immutable deployment inputs without credentials or remote writes.
 
 The deployment owner must select an independently reviewed main commit. Preparing
 these files does not establish approval, install a service, or publish a check.
@@ -13,14 +15,17 @@ import tarfile
 from pathlib import Path, PurePosixPath
 
 ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(ROOT))
+if __name__ == "__main__":
+    sys.path.insert(0, str(ROOT))
 from security_harness import candidate_git
 from security_harness.results import subject_digest, validate_policy, executable_bits
 from security_harness.trusted_publisher import Denied, need, strict_json, validate_settings
 
 
 def archive_digest(data):
-    """git archive honors export-ignore/subst; verify bytes actually being deployed,
+    """git archive 會套用 export-ignore/subst；必須核對實際部署位元組，而不只核對來源工作樹乾淨。
+
+git archive honors export-ignore/subst; verify bytes actually being deployed,
     not just the clean worktree from which the archive command was invoked."""
     need(len(data) <= 20 * 1024**2, "ARCHIVE_LIMIT")
     files, names = [], set()
@@ -84,7 +89,7 @@ def prepare(root, output, evaluator_sha, app_id=None, installation_id=None):
     payloads = {"publisher.json": (json.dumps(settings, indent=2) + "\n").encode(),
                 "gate-policy.json": raw_policy, "app.tar": archive,
                 "preparation.json": (json.dumps(summary, indent=2) + "\n").encode()}
-    # Refuse an existing directory rather than overwrite a deployed pin or key.
+    # 拒絕既有目錄，避免覆寫部署 pin 或私鑰。 / Refuse an existing directory rather than overwrite a deployed pin or key.
     output.mkdir(mode=0o700)
     for name, data in payloads.items():
         with (output / name).open("xb") as stream:

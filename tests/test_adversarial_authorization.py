@@ -1,4 +1,6 @@
-"""Reviewed synthetic regressions must produce AUTH findings in real isolation."""
+"""已審查的合成缺陷回歸必須在真實隔離環境產生 AUTH findings。
+
+Reviewed synthetic regressions must produce AUTH findings in real isolation."""
 import json
 import shutil
 from pathlib import Path
@@ -36,7 +38,7 @@ MUTATIONS = {'wrong_password_accepted': ('if not user or not hmac.compare_digest
                                      '(user["tenant"],)).fetchall()\n'
                                      '            return [{**row, "leaked": '
                                      'other} for row in rows]'),
- # The admin branch of the write predicate escapes the tenant boundary.
+ # 寫入條件中的 admin 分支越過租戶邊界。 / The admin branch of the write predicate escapes the tenant boundary.
  'admin_cross_tenant_write': ("UPDATE items SET value=%s WHERE id=%s AND tenant=%s AND (owner=%s OR %s='admin') RETURNING *",
                               "UPDATE items SET value=%s WHERE id=%s AND ((tenant=%s AND owner=%s) OR %s='admin') RETURNING *"),
  'denied_write_changes_other_row': ('if not row:\n'
@@ -86,7 +88,7 @@ def test_real_candidate_mutations_are_blocked(tmp_path, mutation):
     validate_cases(cases, POLICY['gate_contracts']['AUTH'])
     failures = {c['case'] for c in cases if not c['passed']}
     assert failures == EXPECTED[mutation]
-    # Connect the real observations to the policy decision, without pretending to run G1/G2.
+    # 把真實觀察接到政策判定，不假裝已執行 G1／G2。 / Connect the real observations to the policy decision, without pretending to run G1/G2.
     policy = {**POLICY, 'required_gates': ['AUTH'], 'gate_contracts': {'AUTH': POLICY['gate_contracts']['AUTH']}}
     record = result('AUTH', 'COMPLETED', 'test', len(cases), len(failures), 'subject', 'policy',
                     'real isolated mutation', run_id='mutation', cases=cases)

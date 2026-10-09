@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
-"""Fresh run-bound evidence, mandatory case IDs and fail-closed early errors."""
+"""每次建立綁定執行的新證據、必要案例識別與故障即阻擋的早期錯誤處理。
+
+Fresh run-bound evidence, mandatory case IDs and fail-closed early errors."""
 import argparse
 import json
 import subprocess
@@ -7,7 +9,8 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(ROOT))
+if __name__ == "__main__":
+    sys.path.insert(0, str(ROOT))
 from security_harness import candidate_git
 from security_harness.audit import AuditRun
 from security_harness.limits import WORKER_RLIMITS
@@ -18,14 +21,21 @@ from security_harness.secrets import scan
 from security_harness.scope import validate_roe
 
 
+
+def argument_parser():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--variant", choices=["fixed", "vulnerable"], default="fixed",
+                        help="受測版本 / fixture variant")
+    parser.add_argument("--candidate", type=Path, default=ROOT,
+                        help="候選儲存庫路徑 / candidate repository path")
+    return parser
+
+
 def main(audit=None, defer_final=False):
     audit = audit or AuditRun(ROOT, "security")
     try:
         audit.stage("arguments")
-        parser = argparse.ArgumentParser()
-        parser.add_argument("--variant", choices=["fixed", "vulnerable"], default="fixed")
-        parser.add_argument("--candidate", type=Path, default=ROOT)
-        args = parser.parse_args()
+        args = argument_parser().parse_args()
         audit.data["variant"] = args.variant
         candidate = args.candidate.resolve()
         audit.stage("configuration")
@@ -111,14 +121,13 @@ def main(audit=None, defer_final=False):
 
 
 def supervised_main():
+    if sys.argv[1:] in (["--help"], ["-h"]):
+        argument_parser().parse_args()
     from security_harness.lifecycle import supervise
     audit = AuditRun(ROOT, "security")
     try:
         audit.stage("arguments")
-        parser = argparse.ArgumentParser()
-        parser.add_argument("--variant", choices=["fixed", "vulnerable"], default="fixed")
-        parser.add_argument("--candidate", type=Path, default=ROOT)
-        args = parser.parse_args()
+        args = argument_parser().parse_args()
         roe = validate_roe(json.loads((ROOT / "security/roe.json").read_text()))
         audit.data["resource_limits"] = {"total_seconds": roe["max_total_seconds"], **WORKER_RLIMITS}
         audit.save()

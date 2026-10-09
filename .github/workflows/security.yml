@@ -19,14 +19,14 @@ permissions:
   actions: read
 
 concurrency:
-  # The event keeps a manual evaluation from cancelling the trusted push run on main.
+  # 依事件區分，避免手動執行取消 main 可信 push。 / The event keeps a manual evaluation from cancelling the trusted push run on main.
   group: trusted-security-${{ github.event_name }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 jobs:
   trusted-security-pilot:
-    # A manual run evaluates a maintainer-selected ref (possibly the candidate
-    # itself), so it must never report under the required check name.
+    # 手動執行使用維護者選擇的 ref（可能就是候選）， / A manual run evaluates a maintainer-selected ref (possibly the candidate
+    # 因此不可使用正式必要檢查名稱。 / itself), so it must never report under the required check name.
     name: ${{ github.event_name == 'workflow_dispatch' && 'manual-security-evaluation' || 'trusted-security-evaluation' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 20
@@ -44,7 +44,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           path: candidate
-          # Candidate checkout is data only; execution stays in the restricted runtime.
+          # 候選 checkout 只當資料，執行限於受限 runtime。 / Candidate checkout is data only; execution stays in the restricted runtime.
           allow-unsafe-pr-checkout: true
           ref: ${{ github.event.pull_request.head.sha || inputs.candidate_sha || github.sha }}
           fetch-depth: 0
@@ -73,6 +73,9 @@ jobs:
       - name: Start evaluator regression database
         working-directory: trusted
         run: python -I scripts/dev_db.py start
+      - name: Bilingual documentation checks / 雙語文件檢查
+        working-directory: trusted
+        run: python -I scripts/check_docs.py
       - name: Evaluator regressions and isolation adversarial checks
         working-directory: trusted
         run: .venv/bin/python -m pytest --junitxml=artifacts/pytest.xml
@@ -120,7 +123,7 @@ jobs:
       id-token: write
       attestations: write
     steps:
-      # A fresh runner receives no candidate files, evaluator imports or model credentials.
+      # 全新 runner 不取得候選檔案、evaluator 匯入或模型憑證。 / A fresh runner receives no candidate files, evaluator imports or model credentials.
       - name: Sign evaluator-owned evidence
         uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8
         with:
@@ -128,7 +131,7 @@ jobs:
           subject-digest: sha256:${{ needs.trusted-security-pilot.outputs.evidence-digest }}
 
   security-completion:
-    # The ruleset counts this final job; evaluator success alone cannot satisfy it.
+    # 規則集採計最終工作，僅評估成功不足以放行。 / The ruleset counts this final job; evaluator success alone cannot satisfy it.
     name: ${{ github.event_name == 'workflow_dispatch' && 'manual-security-completion' || 'trusted-security-pilot' }}
     needs: [trusted-security-pilot, attest-evidence]
     if: always()

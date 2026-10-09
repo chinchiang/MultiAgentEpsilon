@@ -1,22 +1,24 @@
-"""Trusted output shape only; never includes a case, oracle or expected answer."""
+"""只定義可信輸出格式，不包含案例、oracle 或預期答案。
+
+Trusted output shape only; never includes a case, oracle or expected answer."""
 
 REVIEW_FORMAT = 'security-review-json-v1'
 
 
 def review_schema(provider='bedrock', source_lines=None):
-    # Use the common provider-supported subset. Semantic limits, exact evidence,
-    # duplicate keys and verdict/finding consistency remain locally enforced.
-    if provider not in ('bedrock', 'gemini'):
+    # 採用供應商共通支援子集；語意上限、精確引用、 / Use the common provider-supported subset. Semantic limits, exact evidence,
+    # 重複鍵與判定／finding 一致性仍由本機強制驗證。 / duplicate keys and verdict/finding consistency remain locally enforced.
+    if provider not in ('bedrock', 'gemini', 'lmstudio'):
         raise ValueError('unsupported structured output provider')
     if source_lines is not None and (type(source_lines) is not int or not 1 <= source_lines <= 512):
         raise ValueError('invalid source line count')
     line = {'type': 'integer', 'description': 'A 1-based root-cause source line.'}
-    if provider == 'gemini':
+    if provider in ('gemini', 'lmstudio'):
         line.update(minimum=1)
         if source_lines is not None:
             line['maximum'] = source_lines
     elif source_lines is not None:
-        # Bedrock rejects minimum/maximum, but enum expresses the permitted lines.
+        # Bedrock 拒絕 minimum/maximum，以 enum 列出允許行號。 / Bedrock rejects minimum/maximum, but enum expresses the permitted lines.
         line['enum'] = list(range(1, source_lines + 1))
     schema = {
         'type': 'object', 'additionalProperties': False,
@@ -36,9 +38,9 @@ def review_schema(provider='bedrock', source_lines=None):
             'reason': {'type': 'string', 'description': 'One concise sentence, nonempty, at most 400 characters; preferably under 120.'},
         },
     }
-    # Bedrock documents only minItems=0/1 among array constraints. Its live
-    # validator rejects maxItems; retain the three-finding limit locally.
-    if provider == 'gemini':
+    # Bedrock 的陣列約束只列出 minItems=0/1；真實 / Bedrock documents only minItems=0/1 among array constraints. Its live
+    # 驗證器拒絕 maxItems，本機仍維持最多三項 finding。 / validator rejects maxItems; retain the three-finding limit locally.
+    if provider in ('gemini', 'lmstudio'):
         schema['properties']['findings']['maxItems'] = 3
     return schema
 
