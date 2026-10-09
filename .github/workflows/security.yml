@@ -67,6 +67,9 @@ jobs:
       - name: Install only evaluator dependencies
         working-directory: trusted
         run: python -I scripts/bootstrap.py
+      - name: Install verified property-test tools / 安裝已驗證性質測試工具
+        working-directory: trusted
+        run: python -I scripts/install_test_tools.py
       - name: Build offline runtime from trusted wheels
         working-directory: trusted
         run: python -I scripts/build_runtime.py
@@ -79,6 +82,9 @@ jobs:
       - name: Evaluator regressions and isolation adversarial checks
         working-directory: trusted
         run: .venv/bin/python -m pytest --junitxml=artifacts/pytest.xml
+      - name: Offline security mutation checks
+        working-directory: trusted
+        run: .venv/bin/python -I scripts/mutation_check.py
       - name: Prove seeded defect still blocks
         working-directory: trusted
         run: .venv/bin/python -I scripts/expect_block.py

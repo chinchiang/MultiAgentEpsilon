@@ -163,7 +163,7 @@ def decide(records: list[dict], policy: dict, subject: str, policy_digest: str,
             reasons.append("malformed evidence")
             continue
         gate = record.get("gate", "INVALID")
-        if not isinstance(gate, str) or gate not in required:
+        if gate not in required:
             reasons.append("unexpected gate")
             continue
         if gate in seen:

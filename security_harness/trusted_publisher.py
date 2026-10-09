@@ -11,6 +11,7 @@ import copy
 import hashlib
 import io
 import json
+import math
 import os
 import re
 import stat
@@ -54,7 +55,11 @@ def strict_json(data):
         return result
     def constant(_):
         raise Denied("NONFINITE_JSON")
-    return json.loads(data, object_pairs_hook=pairs, parse_constant=constant)
+    def finite(raw):
+        value = float(raw)
+        need(math.isfinite(value), "NONFINITE_JSON")
+        return value
+    return json.loads(data, object_pairs_hook=pairs, parse_constant=constant, parse_float=finite)
 
 
 def validate_settings(settings, gate_policy):
@@ -143,7 +148,7 @@ excluded: identities that touched the head (run actors, commit author/committer)
 
 
 REQUIRED_STEPS = ("Record evaluator-owned CI provenance", "Check protected changes and exact-head independent approval",
-                  "Evaluator regressions and isolation adversarial checks", "Prove seeded defect still blocks",
+                  "Evaluator regressions and isolation adversarial checks", "Offline security mutation checks", "Prove seeded defect still blocks",
                   "Evaluate candidate through external oracle", "Remove evaluator regression database",
                   "Reap cancelled security runs", "Retain evaluator-owned evidence")
 CLEANUP_KEYS = ("completed", "temporary_directory_removed", "run_directory_removed", "process_group_terminated")

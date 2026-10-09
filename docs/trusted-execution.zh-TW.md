@@ -59,6 +59,7 @@
 
 ```bash
 python3 -I scripts/bootstrap.py
+python3 -I scripts/install_test_tools.py
 python3 -I scripts/build_runtime.py
 python3 -I scripts/dev_db.py start
 .venv/bin/python -m pytest --junitxml=artifacts/pytest.xml
@@ -131,6 +132,7 @@ Acceptance needs actual non-admin direct-push denial, unapproved policy rejectio
 
 ```bash
 python3 -I scripts/bootstrap.py
+python3 -I scripts/install_test_tools.py
 python3 -I scripts/build_runtime.py
 python3 -I scripts/dev_db.py start
 .venv/bin/python -m pytest --junitxml=artifacts/pytest.xml
