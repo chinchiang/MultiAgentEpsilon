@@ -1,4 +1,6 @@
-"""Trusted entry point, executed only inside the networkless candidate container."""
+"""可信啟動入口，只在無網路候選容器內執行。
+
+Trusted entry point, executed only inside the networkless candidate container."""
 import json
 import sys
 import uvicorn

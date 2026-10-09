@@ -1,4 +1,6 @@
-"""Git over untrusted repositories; stdlib only so pre-install scripts can use it.
+"""以標準函式庫操作不可信儲存庫，安裝前亦可使用。儲存庫設定屬候選資料；命令列 -c 優先覆寫，防止 fsmonitor、hooks、transport 執行程式，明確 git 目錄亦避免誤用外層儲存庫。
+
+Git over untrusted repositories; stdlib only so pre-install scripts can use it.
 
 Repository config is candidate data. Command-line `-c` outranks it, so programs it
 names (fsmonitor, hooks, transports) never run, and the explicit git dir stops
@@ -25,7 +27,9 @@ def environment() -> dict:
 
 
 def git_dir(root: Path) -> Path | None:
-    """The candidate's own `.git` directory; gitfiles and symlinks could point anywhere."""
+    """只接受候選自身的 .git 目錄；gitfile 與符號連結可能指向任意位置。
+
+The candidate's own `.git` directory; gitfiles and symlinks could point anywhere."""
     dot = Path(root) / ".git"
     if not os.path.lexists(dot):
         return None

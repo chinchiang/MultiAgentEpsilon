@@ -1,4 +1,6 @@
-"""Supervised, bounded collection of independent reviews of fixed synthetic cases."""
+"""受監督且有限額地收集固定合成案例的獨立審查。
+
+Supervised, bounded collection of independent reviews of fixed synthetic cases."""
 import asyncio
 import json
 import signal
@@ -69,7 +71,7 @@ async def run_worker(root, run_id):
     try:
         from .benchmark_score import file_digest
         if file_digest(CASES_PATH) != report['case_catalog_sha256']:
-            # Calls must review the catalog the plan was bound to; never spend first, detect later.
+            # 呼叫前須核對計畫綁定的目錄；不可先花費再偵測。 / Calls must review the catalog the plan was bound to; never spend first, detect later.
             report['code'] = 'CONFIGURATION'
             for check in report['checks']:
                 check.update(status='ERROR', code='CONFIGURATION')
@@ -104,7 +106,7 @@ async def run_worker(root, run_id):
                 except ModelError as exc:
                     check.update(status='ERROR', code='REVIEW_' + exc.code, diagnostic=exc.detail)
                 else:
-                    # The raw text binds this review to its own call's response_sha256.
+                    # 原始文字將此審查綁定自身呼叫的 response_sha256。 / The raw text binds this review to its own call's response_sha256.
                     check.update(status='SUCCESS', review=value, review_sha256=digest(json.dumps(value, sort_keys=True)),
                                  response_text=reply.text)
             save()

@@ -1,4 +1,6 @@
-"""Minimal evidence exists before configuration parsing or external tool calls."""
+"""設定解析或外部工具呼叫前即保留最小證據。
+
+Minimal evidence exists before configuration parsing or external tool calls."""
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
@@ -30,7 +32,7 @@ class AuditRun:
         self.save()
 
     def fail(self, exc):
-        # Never serialize exception text, subprocess output, DSNs or URLs.
+        # 不序列化例外文字、子程序輸出、DSN 或 URL。 / Never serialize exception text, subprocess output, DSNs or URLs.
         self.data["errors"].append({"stage": self.data["stage"], "error_type": type(exc).__name__})
         self.data.update(execution="ERROR", decision="BLOCK", reasons=["run failed; see redacted errors"])
 

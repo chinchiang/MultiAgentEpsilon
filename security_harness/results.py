@@ -1,4 +1,6 @@
-"""Small, strict result contract. These are local evidence records, not attestations."""
+"""精簡且嚴格的結果契約；屬本機證據，不是簽章證明。
+
+Small, strict result contract. These are local evidence records, not attestations."""
 from __future__ import annotations
 
 import hashlib
@@ -16,12 +18,16 @@ SUBJECT_FORMAT = "worktree-manifest-v1"
 
 
 def executable_bits(mode):
-    """Git stores only the owner execute classification, not checkout umask bits."""
+    """Git 只保存擁有者執行分類，不保存 checkout 的 umask 權限。
+
+Git stores only the owner execute classification, not checkout umask bits."""
     return 0o111 if mode & 0o100 else 0
 
 
 def file_identity(path: Path) -> tuple[os.stat_result, str]:
-    """Stream regular files without following a final symlink; detect read-time changes."""
+    """串流讀取一般檔案，不跟隨末端符號連結，並偵測讀取期間變更。
+
+Stream regular files without following a final symlink; detect read-time changes."""
     fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
     with os.fdopen(fd, "rb") as stream:
         before = os.fstat(stream.fileno())
@@ -38,7 +44,9 @@ def file_identity(path: Path) -> tuple[os.stat_result, str]:
 
 
 def read_regular(path: Path, limit: int) -> bytes:
-    """Bytes of a regular file read without following a final symlink, so content
+    """不跟隨末端符號連結讀取一般檔案，避免清冊建立後被替換內容混入掃描或複製。
+
+Bytes of a regular file read without following a final symlink, so content
     swapped in after the inventory was taken cannot be scanned or copied instead."""
     fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
     with os.fdopen(fd, "rb") as stream:
@@ -56,7 +64,9 @@ def digest_file(path: Path) -> str:
 
 
 def subject_digest(root: Path) -> str:
-    """Bind the complete input worktree, including docs and untracked source files.
+    """綁定完整輸入工作樹，包含文件與未追蹤原碼；明確排除生成環境、狀態與執行證據。內容摘要不代表簽署者身分或不可變儲存。
+
+Bind the complete input worktree, including docs and untracked source files.
 
     Generated environments/state/run evidence are explicitly outside this subject.
     This content digest does not establish signer identity or immutable storage.
@@ -109,7 +119,9 @@ def validate_policy(policy: dict) -> None:
 
 
 def seeded_defects(contract: dict) -> set[str]:
-    """Exact cases the seeded vulnerable variant must fail; a count alone would let a
+    """缺陷版必須命中精確案例集合；只看總數可能掩蓋不同違規互相抵銷。
+
+Exact cases the seeded vulnerable variant must fail; a count alone would let a
     regression trade one detected violation for another."""
     seeded = contract.get("seeded_defect_case_ids")
     if (not isinstance(seeded, list) or not seeded or

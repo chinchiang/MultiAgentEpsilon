@@ -1,4 +1,6 @@
-"""Parent-owned run directories, process groups and cleanup after cancellation."""
+"""父程序管理執行目錄、程序群組與取消後清理。
+
+Parent-owned run directories, process groups and cleanup after cancellation."""
 import json
 import os
 import re
@@ -38,7 +40,7 @@ def run_directory(root, run_id):
 def temporary_directory(run_id):
     if not re.fullmatch(r'[a-f0-9-]{32,36}', run_id):
         raise ValueError('invalid run identity')
-    # Keep PostgreSQL Unix socket paths below Linux's 108-byte limit.
+    # PostgreSQL Unix socket 路徑須低於 Linux 的 108 位元組上限。 / Keep PostgreSQL Unix socket paths below Linux's 108-byte limit.
     return Path('/tmp') / f'epsilon-run-{os.getuid()}-{run_id}'
 
 
@@ -48,7 +50,7 @@ def prepare_run(root, run_id, operation='security'):
               'uid': os.getuid(), 'boot': Path('/proc/sys/kernel/random/boot_id').read_text().strip()}
     work.mkdir(parents=True, mode=0o700)
     try:
-        # A recoverable owner precedes external temporary resource allocation.
+        # 配置外部暫存資源前，先登記可復原的擁有者。 / A recoverable owner precedes external temporary resource allocation.
         write_json(work / 'owner.json', marker)
         temporary_directory(run_id).mkdir(mode=0o700)
     except Exception:
@@ -70,7 +72,7 @@ def owner_alive(marker):
 def terminate_group(pid):
     if type(pid) is not int or pid <= 1 or pid == os.getpgrp():
         raise ValueError('invalid owned process group')
-    # Kill descendants even if the immediate worker has already exited.
+    # 即使直接 worker 已退出，也須終止其後代程序。 / Kill descendants even if the immediate worker has already exited.
     for signum, delay in ((signal.SIGTERM, 0.3), (signal.SIGKILL, 0)):
         try:
             os.killpg(pid, signum)
@@ -92,7 +94,7 @@ def kill_group(process):
 
 def cleanup(root, run_id):
     from .isolation import cleanup_run
-    # The daemon may still be finishing a request when its CLI is terminated.
+    # CLI 終止後，daemon 仍可能正在完成請求。 / The daemon may still be finishing a request when its CLI is terminated.
     for _ in range(3):
         cleanup_run(run_id)
         time.sleep(0.1)
@@ -112,7 +114,9 @@ def cleanup(root, run_id):
 
 
 class SweepIncomplete(RuntimeError):
-    """Some stale runs could not be reaped; the others were still processed."""
+    """部分過期執行無法回收，其他項目仍繼續處理。
+
+Some stale runs could not be reaped; the others were still processed."""
 
     def __init__(self, cleaned, failures):
         super().__init__('stale run cleanup incomplete')
@@ -129,8 +133,8 @@ def sweep_stale(root):
             try:
                 marker = json.loads((work / 'owner.json').read_text())
             except FileNotFoundError:
-                # Another janitor removed it, or initialization has not published
-                # ownership yet. No external resources exist before that marker.
+                # 另一 janitor 已移除，或初始化尚未發布擁有者標記； / Another janitor removed it, or initialization has not published
+                # 該標記之前不會建立外部資源。 / ownership yet. No external resources exist before that marker.
                 continue
             if marker['run_id'] != work.name or marker['uid'] != os.getuid():
                 raise ValueError('invalid run owner')
@@ -145,7 +149,7 @@ def sweep_stale(root):
                     try:
                         same_worker = identity(marker['worker_pid']) == marker['worker_start']
                     except FileNotFoundError:
-                        same_worker = True  # An extant old process group can outlive its leader.
+                        same_worker = True  # 舊程序群組可能比其領導程序存活更久。 / An extant old process group can outlive its leader.
                     if same_worker:
                         terminate_group(marker['worker_pid'])
                 cleanup(root, work.name)
@@ -161,11 +165,11 @@ def sweep_stale(root):
                                                'temporary_directory_removed': not temporary_directory(work.name).exists(),
                                                'process_group_terminated': True, 'error_type': None,
                                                'boot_changed': not same_boot})
-                    # A reaped old run must not displace the index of a newer run.
+                    # 回收舊執行不可覆寫較新執行的索引。 / A reaped old run must not displace the index of a newer run.
                     audit.finish((('G1', 'scan'), ('G2', 'scan'), ('AUTH', 'test')), update_pointer=False)
                 cleaned.append(work.name)
         except Exception as exc:
-            # Keep reaping the remaining runs; report every failure, without its text.
+            # 繼續回收其他執行；每個失敗均回報，但不保存原文。 / Keep reaping the remaining runs; report every failure, without its text.
             failures.append({'run_id': work.name, 'error_type': type(exc).__name__})
     if failures:
         raise SweepIncomplete(cleaned, failures)
@@ -184,7 +188,7 @@ def supervise(root, audit, command, max_seconds):
     try:
         for signum in (signal.SIGTERM, signal.SIGINT):
             handlers[signum] = signal.signal(signum, lambda number, frame: cancelled.append(number))
-        # The gate exits on EOF if the supervisor dies before registration.
+        # supervisor 在登記前死亡時，閘門讀到 EOF 即退出。 / The gate exits on EOF if the supervisor dies before registration.
         gated = [sys.executable, '-I', str(SOURCE_ROOT / 'scripts/model_process.py'), *command]
         process = subprocess.Popen(gated, cwd=root, start_new_session=True, stdin=subprocess.PIPE,
                                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
@@ -219,7 +223,7 @@ def supervise(root, audit, command, max_seconds):
             cleanup_error = type(exc).__name__
         for signum, handler in handlers.items():
             signal.signal(signum, handler)
-    # Read the worker's last atomically persisted progress, not a stale parent copy.
+    # 讀取 worker 最後原子保存的進度，不使用父程序舊副本。 / Read the worker's last atomically persisted progress, not a stale parent copy.
     audit.data = json.loads((audit.output / 'report.json').read_text())
     finalized = False
     if (reason is None and not cancelled and cleanup_error is None and process is not None
@@ -243,7 +247,7 @@ def supervise(root, audit, command, max_seconds):
             audit.add(stage, reason, 'test' if stage == 'AUTH' else 'scan', 0, 0, 'supervisor stopped run')
         audit.data.update(execution=reason, decision='BLOCK', reasons=['supervisor ' + reason.lower()])
     elif not finalized:
-        # Only the cleanup-gated handoff may publish a worker decision.
+        # 只有完成清理交接後才能發布 worker 判定。 / Only the cleanup-gated handoff may publish a worker decision.
         audit.fail(RuntimeError('worker did not complete'))
     if cleanup_error:
         audit.data.update(execution='ERROR', decision='BLOCK', reasons=['cleanup incomplete'])

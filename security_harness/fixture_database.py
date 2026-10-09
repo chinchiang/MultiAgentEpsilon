@@ -1,4 +1,6 @@
-"""Trusted synthetic seed and DB oracle; never imported from candidate code."""
+"""可信合成 seed 與資料庫 oracle，不從候選程式匯入。
+
+Trusted synthetic seed and DB oracle; never imported from candidate code."""
 import hashlib
 import re
 import secrets

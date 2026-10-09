@@ -1,4 +1,6 @@
-"""Bounded lockfile SBOM and exact-version OSV queries; no package execution.
+"""有限額的鎖定檔 SBOM 與精確版本 OSV 查詢，不執行套件。清冊描述宣告的 Python lock，不代表已安裝 wheels 或映像；所有已發布公告皆阻擋，未知嚴重度不能當成低風險。
+
+Bounded lockfile SBOM and exact-version OSV queries; no package execution.
 
 The inventory describes the declared Python lock, not installed wheels or images.
 Every published advisory blocks; unknown severity is never treated as low risk.
@@ -6,6 +8,7 @@ Every published advisory blocks; unknown severity is never treated as low risk.
 import concurrent.futures
 import hashlib
 import json
+import math
 import re
 import urllib.request
 from datetime import datetime, timezone
@@ -38,7 +41,12 @@ def strict_json(raw):
         return result
     def constant(_):
         raise DependencyError('nonfinite JSON')
-    return json.loads(raw, object_pairs_hook=pairs, parse_constant=constant)
+    def finite(value):
+        parsed = float(value)
+        if not math.isfinite(parsed):
+            raise DependencyError('nonfinite JSON')
+        return parsed
+    return json.loads(raw, object_pairs_hook=pairs, parse_constant=constant, parse_float=finite)
 
 
 def sbom(records):
@@ -78,7 +86,7 @@ def identifier(value):
 
 def findings_for(record, response):
     if not isinstance(response, dict) or set(response) - {'vulns'}:
-        # next_page_token also refuses partial database coverage.
+        # next_page_token 表示資料庫涵蓋不完整，必須拒絕。 / next_page_token also refuses partial database coverage.
         raise DependencyError('incomplete query response')
     vulnerabilities = response.get('vulns', [])
     if not isinstance(vulnerabilities, list) or len(vulnerabilities) > 256:
@@ -111,7 +119,7 @@ def scan(lock, fetch=query, now=None):
     records = parse_lock(lock)
     inventory = sbom(records)
     findings, queries, incomplete = [], [], False
-    # Each failed query stays in the inventory. No retries/caches.
+    # 每個失敗查詢都留在清冊，不重試或快取。 / Each failed query stays in the inventory. No retries/caches.
     with concurrent.futures.ThreadPoolExecutor(max_workers=4) as pool:
         futures = [pool.submit(fetch, r['name'], r['version']) for r in records]
         for record, future in zip(records, futures, strict=True):

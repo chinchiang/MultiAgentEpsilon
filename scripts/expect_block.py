@@ -1,17 +1,22 @@
 #!/usr/bin/env python3
-"""An arbitrary error is not proof that the seeded defect was detected."""
+"""任意工具錯誤不能證明指定缺陷已被偵測。
+
+An arbitrary error is not proof that the seeded defect was detected."""
 import json
 import subprocess
 import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(ROOT))
+if __name__ == "__main__":
+    sys.path.insert(0, str(ROOT))
 from security_harness.results import seeded_defects
 
 
 def seeded_block_verified(report: dict, contract: dict, returncode: int) -> bool:
-    """Exactly the seeded AUTH failures from a run that itself completed cleanly."""
+    """要求執行與清理均完成，且 AUTH 失敗集合恰好符合指定缺陷。
+
+Exactly the seeded AUTH failures from a run that itself completed cleanly."""
     expected = seeded_defects(contract)
     auth = [r for r in report.get("records", []) if r.get("gate") == "AUTH"]
     if len(auth) != 1:

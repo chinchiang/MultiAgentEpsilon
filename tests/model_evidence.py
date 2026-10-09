@@ -1,4 +1,6 @@
-"""Keep model CLI tests from leaving advisory reports in the evaluator's uploaded artifacts/."""
+"""避免模型 CLI 測試留下參考性報告，混入 evaluator 上傳的 artifacts。
+
+Keep model CLI tests from leaving advisory reports in the evaluator's uploaded artifacts/."""
 import contextlib
 import json
 import re
@@ -23,14 +25,16 @@ def remove_new_model_evidence(root: Path):
             except (OSError, ValueError):
                 continue
             providers = report.get("providers")
-            # Never gate evidence, and never a concurrent live run's advisory evidence.
+            # 不可刪除閘門證據或同時執行中的真實模型證據。 / Never gate evidence, and never a concurrent live run's advisory evidence.
             if (report.get("operation") == "model-smoke" and isinstance(providers, list) and providers
                     and all(isinstance(p, str) and p.startswith("mock") for p in providers)):
                 shutil.rmtree(path)
 
 
 def provider_answer(report, check):
-    """Make `check` look as if its provider had returned exactly check['review'].
+    """模擬供應商恰好回傳 check 的 review；審查綁定原始文字與該次摘要，替換答案時三者須同步更新。
+
+Make `check` look as if its provider had returned exactly check['review'].
 
     Reviews are bound to the raw provider text and that call's response digest, so
     a test simulating another model answer must change all three together.

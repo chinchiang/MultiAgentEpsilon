@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
-"""CI self-check: would the dedicated publisher accept the evidence this run uploads?
+"""CI 自我檢查本次上傳證據是否符合專用發布器契約。依 upload-artifact 的方式封裝 trusted/artifacts 與 audit，再使用發布器的解包與驗證邏輯，讓證據漂移在產生當下就失敗。GitHub 審查、執行清單與設定 pins 仍由發布器驗證。
+
+CI self-check: would the dedicated publisher accept the evidence this run uploads?
 
 Zips trusted/artifacts/ and audit/ the way upload-artifact does and runs the
 publisher's own unpack and artifact contract, so evidence/contract drift fails the
@@ -17,7 +19,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(ROOT))
+if __name__ == "__main__":
+    sys.path.insert(0, str(ROOT))
 from security_harness import candidate_git
 from security_harness.results import subject_digest, write_json
 from security_harness.trusted_publisher import Denied, strict_json, unpack_evidence, validate_evidence

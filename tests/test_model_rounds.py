@@ -1,4 +1,6 @@
-"""Failure categories and repeated observations remain bounded and evidence-bound."""
+"""錯誤分類與多輪觀察維持限額及證據綁定。
+
+Failure categories and repeated observations remain bounded and evidence-bound."""
 import asyncio
 import json
 import subprocess
@@ -86,7 +88,7 @@ def test_rounds_share_one_budget_and_preserve_opaque_ids(tmp_path):
 def test_failure_is_not_replaced_by_success_in_another_round(tmp_path):
     d=collect(tmp_path)
     c=next(c for c in d['checks'] if c['provider']=='mock-review-a' and c['case_id']=='B01' and c['round_index']==2)
-    # As the runner records a parse failure: no trusted review and no bound response text.
+    # 模擬 runner 記錄解析失敗：沒有可信審查或綁定原文。 / As the runner records a parse failure: no trusted review and no bound response text.
     c.update(status='ERROR',code='REVIEW_INVALID_RESPONSE',diagnostic='JSON_SYNTAX',review=None)
     c.pop('response_text')
     d['status']='INCOMPLETE'
@@ -175,7 +177,7 @@ def test_review_stage_limit_is_not_misclassified_as_unassessed():
 
 def test_changed_case_catalog_spends_no_calls(tmp_path, monkeypatch):
     report = runner.initial_report(['mock-review-a'], ['B01'], str(uuid.uuid4()), 512, 1)
-    report['case_catalog_sha256'] = '0' * 64  # catalog edited after the plan was bound
+    report['case_catalog_sha256'] = '0' * 64  # 計畫綁定後目錄被修改。 / catalog edited after the plan was bound
     path = tmp_path/'artifacts'/report['run_id']/'report.json'
     life.persist(path, report); prepare_run(tmp_path, report['run_id'], operation='model-smoke')
     async def forbidden(self, request): raise AssertionError('call spent against an unbound catalog')

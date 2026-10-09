@@ -1,4 +1,6 @@
-"""Model supervisor and recovery using the shared run inventory, without Docker."""
+"""使用共用執行清冊管理模型 supervisor 與復原，不使用 Docker。
+
+Model supervisor and recovery using the shared run inventory, without Docker."""
 import fcntl
 import json
 import math
@@ -18,13 +20,13 @@ from .gateway import ModelError
 from .transport import strict_json
 
 SOURCE_ROOT = Path(__file__).resolve().parents[2]
-# 16 reviews x 16 KiB bound raw responses, plus metadata.
+# 最多 16 筆審查乘以 16 KiB 原文，另加中繼資料。 / 16 reviews x 16 KiB bound raw responses, plus metadata.
 REPORT_LIMIT = 1024 * 1024
 
 
 def persist(path, data):
     write_json(path, data)
-    # Registration must survive an owner crash before the child is released.
+    # 放行子程序前，登記必須能承受擁有者崩潰。 / Registration must survive an owner crash before the child is released.
     with path.open('rb') as handle:
         os.fsync(handle.fileno())
     descriptor = os.open(path.parent, os.O_RDONLY | os.O_DIRECTORY)
@@ -83,12 +85,12 @@ def stop_registered(work):
         if type(pid) is not int or pid <= 1 or group['uid'] != os.getuid() or path.name != f'{pid}.json':
             raise ValueError('invalid process identity')
         if group['boot'] != current_boot:
-            return  # Host reboot: never signal a new boot's processes.
+            return  # host 重開機後不可對新開機的程序傳送訊號。 / Host reboot: never signal a new boot's processes.
         try:
             if identity(pid) != group['start']:
-                return  # PID reuse: do not signal the new process group.
+                return  # PID 重用時不可對新群組傳送訊號。 / PID reuse: do not signal the new process group.
         except FileNotFoundError:
-            pass  # A registered group can outlive its original leader.
+            pass  # 已登記群組可能比原領導程序存活更久。 / A registered group can outlive its original leader.
         terminate_group(pid)
         deadline = time.monotonic() + 3
         while True:
@@ -106,8 +108,8 @@ def stop_registered(work):
             if time.monotonic() >= deadline:
                 raise TimeoutError('model process cleanup incomplete')
             time.sleep(0.02)
-    # Freeze the producer first, then enumerate again: it could register another
-    # child while receiving SIGTERM. A pre-registration gated child sees EOF.
+    # 先停止產生者再重新列舉；接收 SIGTERM 時仍可能 / Freeze the producer first, then enumerate again: it could register another
+    # 登記新子程序，尚未登記的閘門子程序則讀到 EOF。 / child while receiving SIGTERM. A pre-registration gated child sees EOF.
     for path in sorted((work / 'groups').glob('*.json')):
         if path.is_symlink():
             raise ValueError('invalid process registration')
@@ -119,7 +121,7 @@ def stop_registered(work):
 
 @contextmanager
 def cleanup_lock(work):
-    # Nonblocking flock serializes concurrent janitors. Never recreate a run.
+    # 非阻塞 flock 序列化同時執行的 janitor，不重新建立執行目錄。 / Nonblocking flock serializes concurrent janitors. Never recreate a run.
     try:
         fd = os.open(work / 'cleanup.lock', os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, 0o600)
     except FileNotFoundError:
@@ -137,7 +139,7 @@ def cleanup_lock(work):
 
 
 def complete_worker_report(data, providers, returncode):
-    # No vacuous success, stale report or success from missing provider attempts.
+    # 不可因空集合、過期報告或缺少供應商嘗試而成功。 / No vacuous success, stale report or success from missing provider attempts.
     checks, calls = data.get('checks', []), data.get('calls', [])
     return (returncode == 0 and data.get('status') == 'AWAITING_CLEANUP' and
             data.get('pending_status') == 'COMPLETE' and bool(providers) and
@@ -156,7 +158,7 @@ def finish(root, run_id, *, providers=(), returncode=None, reason=None, recovere
         stop_registered(work)
     except Exception as exc:
         cleanup_error = type(exc).__name__
-    # Workers can no longer overwrite evidence after their groups are stopped.
+    # 群組停止後，worker 才無法繼續覆寫證據。 / Workers can no longer overwrite evidence after their groups are stopped.
     data = read_report(root, run_id)
     try:
         completed = cleanup_error is None and reason is None and complete_worker_report(data, providers, returncode)
@@ -178,7 +180,7 @@ def finish(root, run_id, *, providers=(), returncode=None, reason=None, recovere
             completed = False
             data.update(analysis=None, code='EVALUATION_INVALID')
     elif expected_report is not None:
-        # Smoke workers are bound to the supervisor's immutable plan and limits too.
+        # Smoke worker 也綁定 supervisor 不可變計畫與限額。 / Smoke workers are bound to the supervisor's immutable plan and limits too.
         immutable = ('providers', 'fixture', 'implementation_sha256', 'model_roe_sha256',
                      'limits', 'total_timeout_seconds', 'max_output_tokens_per_call')
         calls = data.get('calls', [])
@@ -200,7 +202,7 @@ def finish(root, run_id, *, providers=(), returncode=None, reason=None, recovere
             raise ValueError('invalid model run directory')
         if temp.exists():
             shutil.rmtree(temp)
-        # Persist a blocking checkpoint before removing the recovery inventory.
+        # 移除復原清冊前，先保存阻擋狀態的檢查點。 / Persist a blocking checkpoint before removing the recovery inventory.
         persist(report, data)
         shutil.rmtree(work)
     except Exception as exc:
@@ -270,7 +272,7 @@ def supervise(root, report, command, max_seconds):
     except Exception:
         reason = 'SUPERVISOR_FAILED'
     finally:
-        # Even an unregistered gated child is owned by this Popen handle.
+        # 尚未登記的閘門子程序仍由此 Popen handle 擁有。 / Even an unregistered gated child is owned by this Popen handle.
         if process is not None:
             if process.stdin and not process.stdin.closed:
                 process.stdin.close()
@@ -279,7 +281,7 @@ def supervise(root, report, command, max_seconds):
             try:
                 process.wait(timeout=5)
             except subprocess.TimeoutExpired:
-                # A worker that outlives its group kill must not skip finalization below.
+                # 群組終止後仍存活的 worker 不可略過後續收尾。 / A worker that outlives its group kill must not skip finalization below.
                 reason = reason or 'SUPERVISOR_FAILED'
                 process.kill()
                 try:

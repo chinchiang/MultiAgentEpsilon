@@ -1,4 +1,6 @@
-"""Blind request construction and strict, untrusted review parsing. No oracle import."""
+"""建立盲測請求並嚴格解析不可信審查結果；不匯入 oracle。
+
+Blind request construction and strict, untrusted review parsing. No oracle import."""
 import json
 import random
 import unicodedata
@@ -12,7 +14,7 @@ from .transport import strict_json
 ROOT = Path(__file__).resolve().parents[2]
 CASES_PATH = ROOT / 'security/review-cases.json'
 ORACLE_PATH = ROOT / 'security/review-oracle.json'
-PROVIDERS = ('mock-review-a', 'mock-review-b', 'gemini', 'bedrock', 'glm')
+PROVIDERS = ('mock-review-a', 'mock-review-b', 'gemini', 'bedrock', 'glm', 'lmstudio')
 OUTPUT_TOKENS = 512
 CWES = ('CWE-89', 'CWE-78', 'CWE-639', 'CWE-22', 'CWE-918')
 SUITES = {'injection': tuple(f'B{i:02}' for i in range(1, 7)),
@@ -65,15 +67,15 @@ def make_plan(providers, case_ids, rounds=1):
 
 
 def review_request(case, review_id, output_tokens=OUTPUT_TOKENS):
-    # Explicit projection: no catalog ID, truth, filename, category or peer output.
+    # 明確欄位投影，不含目錄 ID、答案、檔名、類別或同儕輸出。 / Explicit projection: no catalog ID, truth, filename, category or peer output.
     return Request(SYSTEM, json.dumps({'review_id': review_id, 'language': case['language'],
                    'context': case['context'], 'source': case['source']}, ensure_ascii=True),
                    max_output_tokens=output_tokens, response_format=REVIEW_FORMAT)
 
 
-# Control (incl. C1), format (bidi overrides, zero-width), line/paragraph separators,
-# private-use, surrogate and unassigned code points can make text read differently
-# to a human adjudicator than it is stored.
+# 控制字元（含 C1）、格式字元、雙向覆寫、零寬與行段分隔符， / Control (incl. C1), format (bidi overrides, zero-width), line/paragraph separators,
+# 以及私用、代理與未指派碼位，可能讓 / private-use, surrogate and unassigned code points can make text read differently
+# 人工看到的內容不同於實際儲存內容。 / to a human adjudicator than it is stored.
 INVISIBLE_CATEGORIES = frozenset({'Cc', 'Cf', 'Cs', 'Co', 'Cn', 'Zl', 'Zp'})
 
 
@@ -113,7 +115,9 @@ def parse_review(text, case, review_id):
 
 
 class MockReviewer:
-    """A small heuristic fixture, intentionally divergent; not a measured LLM."""
+    """刻意產生分歧的小型規則測試替身，不是受測 LLM。
+
+A small heuristic fixture, intentionally divergent; not a measured LLM."""
     family = 'mock'
     model = 'review-contract-v1'
 
@@ -137,7 +141,7 @@ class MockReviewer:
                 cwe = 'CWE-22'
             elif 'urlsplit(target).hostname' in line:
                 cwe = 'CWE-918'
-            # Intentional false positive for the clean, misleading-comment case.
+            # 對安全但含誤導註解的案例刻意產生誤報。 / Intentional false positive for the clean, misleading-comment case.
             if self.provider == 'mock-review-b' and 'OR 1=1' in line:
                 cwe = 'CWE-89'
             if cwe:

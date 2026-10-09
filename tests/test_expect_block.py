@@ -31,7 +31,7 @@ def swap_one_seeded_case(report):
 
 
 @pytest.mark.parametrize("mutate", [
-    lambda r: r.update(execution="ERROR"),        # e.g. source changed or cleanup incomplete after all gates
+    lambda r: r.update(execution="ERROR"),        # 例如所有 gate 後來源變更或清理不完整。 / e.g. source changed or cleanup incomplete after all gates
     lambda r: r.update(execution="TIMEOUT"),
     lambda r: r.update(execution="CANCELLED"),
     lambda r: r["errors"].append({"stage": "decision", "error_type": "ValueError"}),

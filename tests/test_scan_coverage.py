@@ -40,7 +40,7 @@ def test_archived_secret_is_scanned_even_with_wrong_extension(tmp_path, kind):
     assert result['findings'][0]['file'].startswith('ordinary.py!')
     assert canary.decode() not in json.dumps(result)
     assert result['coverage']['archives'] == 1
-    # The member payload plus the container's own readable strings.
+    # 成員 payload 加上容器本身的可讀字串。 / The member payload plus the container's own readable strings.
     assert result['coverage']['scanned_leaves'] == 2
     assert result['coverage']['status'] == 'COMPLETE'
 
@@ -218,7 +218,7 @@ def zip_directory_with_data(canary):
 def zip_with_unlisted_payload(canary):
     data = zipped(lambda output: output.writestr('clean.txt', 'synthetic'))
     hidden = zipped(lambda output: output.writestr('secret.txt', canary))
-    # Prepend a compressed, unlisted local entry; offsets in the central directory still resolve.
+    # 前置未列出的壓縮 local entry，中央目錄偏移仍可解析。 / Prepend a compressed, unlisted local entry; offsets in the central directory still resolve.
     with zipfile.ZipFile(io.BytesIO(data)) as archive:
         start = archive.start_dir
     local = hidden[:hidden.index(b'PK\x01\x02')]

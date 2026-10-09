@@ -1,3 +1,7 @@
+[正體中文](#zh-tw) | [English](#en)
+
+<a id="zh-tw"></a>
+
 # MultiAgentEpsilon
 
 Vibe Coding 資安測試框架的第一個可執行試點：Python 3.12、FastAPI、PostgreSQL、Gitleaks 與確定性政策判定。使用合成資料驗證「缺陷能被攔截、修正版能通過、工具故障不能假綠」。
@@ -72,7 +76,7 @@ python3 scripts/dev_db.py stop
 | 授權回歸 | 登入負例、同角色、跨租戶、管理者讀寫、欄位限制、登出及完整 fixture 狀態；32 個案例 | 完整 G5／Web/API 黑箱掃描、TLS／CSRF／JWT／SSRF |
 | 政策與證據 | 嚴格結果格式、故障阻擋、subject／policy digest、基準變更檢查、CI 簽章與來源驗證 | 專用可信發布器正式部署、例外生命週期、普通開發者的完整遠端繞過驗收 |
 | CI | 遠端 main／PR 正反例、固定 actions SHA、最小權限、早期拒絕證據與清理；main 規則已讀回 | 專用可信來源尚未部署，普通開發者繞過驗收仍未完成 |
-| 多模型 | [受限 gateway 與三種 adapter](docs/model-gateway.zh-TW.md)、[合成盲測與裁決試點](docs/blind-review.zh-TW.md) | GLM 真實推論、兩個真實家族的多輪穩定性、完整 G6／偏誤驗收 |
+| 多模型 | [受限 gateway 與模型 adapter](docs/model-gateway.zh-TW.md)、[合成盲測與裁決試點](docs/blind-review.zh-TW.md) | GLM 真實推論、兩個真實家族的多輪穩定性、完整 G6／偏誤驗收 |
 
 [結構化輸出驗收](docs/structured-output.zh-TW.md)已完成 Gemini／Claude 對 B09～B12 的一輪真實配對：八個回應有效，分類與弱點行號皆符合標準答案；這不等於多輪穩定性或偏誤改善。
 
@@ -111,4 +115,90 @@ G2 與 subject digest 共用輸入清冊：生成物名稱只在 repository 根�
 
 本輪修正與完整驗收記錄見[安全邊界修正](docs/security-boundaries-20261008.zh-TW.md)。已產生簽章或通過本機測試，仍須完成專用 App 的部署、Ruleset 來源綁定與遠端驗收。
 
-本輪新增依賴漏洞閘門、刪除／過期工作階段案例及模型變體的範圍、證據與部署缺口，見[後續擴充紀錄](docs/security-expansion-20261008.zh-TW.md)。此候選版本待獨立審查合併；main 的既有驗收不能替代本輪驗收。
+本輪新增依賴漏洞閘門、刪除／過期工作階段案例及模型變體的範圍、證據與部署缺口，見[後續擴充紀錄](docs/security-expansion-20261008.zh-TW.md)。PR #16／#17 已獨立核准並合併；正式 main `438d7a4` 的 787 項測試、32／0 正例、32／9 指定缺陷與簽章均已驗收。本輪 LM Studio 與雙語變更則須另經審查與驗收。
+
+LM Studio／Nemotron 的連線限制、操作及待實測項目見 [LM Studio 指南](docs/lmstudio.zh-TW.md)；本輪稽核與回歸見 [稽核修正紀錄](docs/audit-20261009.zh-TW.md)。
+
+<a id="en"></a>
+
+# MultiAgentEpsilon — English
+
+An executable security-testing pilot for Vibe Coding: Python 3.12, FastAPI, PostgreSQL, Gitleaks, and deterministic policy decisions. Synthetic fixtures demonstrate that seeded defects are blocked, fixed code passes, and tool failures cannot become false passes. Supported execution is Linux x86_64 with Docker. This is a test harness containing deliberately vulnerable targets, not a production service or a claim of complete ASVS, G0–G6, stability, or bias acceptance.
+
+## Architecture and repository layout
+
+![System architecture](docs/diagrams/architecture-overview.svg)
+
+The [architecture, flows, and full tree](docs/architecture-overview.zh-TW.md#en) describe implemented paths and explicitly marked pending deployment/live validation. Models provide advisory reviews; deterministic gates and an external oracle decide ALLOW/BLOCK.
+
+| Directory | Purpose |
+|---|---|
+| `.github/` | Protected CI workflow and CODEOWNERS |
+| `deploy/` | Dedicated check-publisher deployment templates |
+| `docs/`, `docs/diagrams/` | Bilingual architecture, scope, operations, evidence; Mermaid and SVG |
+| `fixture_app/` | Synthetic FastAPI target |
+| `scripts/` | Installation, execution, cleanup, and governance entry points |
+| `security/` | Policies, tool pins, rules of engagement, synthetic cases and reference answers |
+| `security_harness/`, `security_harness/llm/` | Trusted evaluation, isolation, scanning, evidence; bounded model adapters and scoring |
+| `tests/` | Contracts, seeded variants, isolation, and regression tests |
+| `requirements.in`, `requirements.lock`, `pyproject.toml` | Declared dependencies, version/hash lock, Python/pytest configuration |
+| `SECURITY.md` | Security-reporting scope and channel availability |
+
+## Run the pilot
+
+```bash
+python3 -I scripts/bootstrap.py
+python3 -I scripts/build_runtime.py
+python3 -I scripts/dev_db.py start
+.venv/bin/python -m pytest --junitxml=artifacts/pytest.xml
+.venv/bin/python -I scripts/smoke_http.py
+.venv/bin/python -I scripts/expect_block.py
+.venv/bin/python -I scripts/run_security.py
+python3 -I scripts/dev_db.py stop
+```
+
+Bootstrap validates the approved 23-package inventory against PyPI identity, pinned versions, all lock hashes, a seven-day cooling period, and wheel availability. It verifies the scanner's release checksum and pinned binary digest, runs G2, and checks exact-version OSV results before installation. Only verified wheels are installed, with hashes required and source builds, extra indexes, and implicit dependency resolution disabled. Dependency updates require review.
+
+The runtime uses a pinned Python image and verified wheels in an offline build. Candidate code runs in a non-root container with no network and a read-only root. A bounded bridge inside the container sends HTTP to a socket in limited tmpfs; the host never connects through a candidate-controlled socket path. The host oracle checks complete responses and database side effects. The candidate lock must match the tested runtime lock. The development database is loopback-only; isolated evaluation creates a separate networkless database with least-privilege application credentials and removes it afterwards. All data is synthetic.
+
+`expect_block.py` requires exactly the nine policy-listed defects: unauthorized read/write/delete by bob and carol, and cross-tenant read/write/delete by admin. A different set with the same count, or a tool error, does not pass. The fixed pipeline returns 0 for this bounded pilot's ALLOW and 1 for BLOCK. ERROR, TIMEOUT, zero required targets, missing gates, stale evidence, and mismatched run/subject/policy bindings cannot pass. Positive actions and full database side effects are also checked.
+
+Evidence schema 3 uses a `worktree-manifest-v1` digest over explicit paths, types, executable classification, sizes, and SHA-256 content. AUTH requires the exact unique set of 32 cases and consistent case/finding totals. Cases cover login failures, ownership, tenants, admin delegation, field changes, logout, expiration, deletion, and input boundaries. Full JSON and users/items/sessions snapshots are checked. These are contracts of the synthetic API, not universal API rules. Seven concrete mutation families have isolated regressions.
+
+Reports are created before configuration parsing at `artifacts/<run-id>/report.json`; failures store stages and exception types, not sensitive exception text. `latest.txt` points only to security runs; other operations have separate indexes. Local reports are unsigned. CI separately signs its uploaded evidence ZIP. Model supervision records workers/AWS groups before execution, publishes completion after cleanup, and supports later janitor recovery after SIGKILL.
+
+## Implemented scope and remaining work
+
+| Area | Implemented | Not yet established |
+|---|---|---|
+| G0/G4 | Synthetic scope, authorization matrix, threat examples | Product owner, full threat model, approved applicability |
+| G1 | PyPI provenance, pinned hashes, cooling, wheel-only installation, declared-lock CycloneDX SBOM, OSV queries | Installed-image inventory, KEV/EPSS, malicious-package behavior, other ecosystems |
+| G2 | Gitleaks; worktree and candidate-HEAD history; bounded gzip/ZIP/tar expansion and metadata scanning | Server-side push protection, unavailable history/caches, credential revocation |
+| AUTH | 32 synthetic authentication/authorization and side-effect cases | Complete product DAST, TLS, CSRF, JWT, SSRF testing |
+| Policy/evidence | Strict contracts, failure blocking, digests, protected changes, CI signatures and source verification | Dedicated publisher deployment, exception lifecycle, complete developer-role remote probes |
+| Models | Mock, Gemini, Bedrock, GLM interfaces; new LM Studio text interface and batch comparison | Real LM Studio/Nemotron acceptance, paused GLM, larger cross-family stability/bias studies |
+
+G2 and subject hashing share one input inventory. Generated directories are excluded only at the repository root; nested names remain source. Python/pytest caches are explicit exclusions; tracked reserved generated paths are rejected. Symlinks, unreadable paths, changing inputs, and limits fail closed. Renamed scan snapshots defeat scanner implicit exclusions and candidate inline allow comments. History must come from the candidate's own non-shallow repository and actual HEAD; no `.git`, no commit, gitfiles, or accidental enclosing repositories are rejected. Candidate Git calls disable hooks, fsmonitor, and transports.
+
+gzip/ZIP/tar expansion is bounded and also scans comments, names, extra fields, and headers. Unsupported, corrupt, encrypted, oversized, or unlisted trailing content blocks. Binaries require a reviewed content hash in the evaluator's allowlist, then readable ASCII/UTF-16LE strings are scanned. A changed binary requires review again. Excluded dependencies, caches, and other refs are not claimed as covered.
+
+## CI and merge boundaries
+
+`pull_request_target` executes the base evaluator, installation, and tests. Candidate checkout is data; only scoped fixture Python reaches a networkless container. Evaluator permissions are read-only for contents, PRs, and Actions; no model/deployment keys are supplied. A fresh signing job holds OIDC/attestation write permissions. The final `trusted-security-pilot` succeeds only after evaluation and signing succeed. Manual runs use distinct names and cannot replace the formal required check. CI validates its evidence with the publisher's contract before upload.
+
+Every path, including fixture and documentation, requires an independent, write-capable trusted reviewer approving the current head. Live GitHub checks reject stale/dismissed/self approvals and contributors to the PR commits. A baseline update is evaluated by the old baseline; only after legitimate merging does it become the next baseline.
+
+Ruleset 24512048 is active without bypass, but the shared Actions App 15368 and a check name do not uniquely identify a trusted workflow. Until the dedicated App is deployed, run `python3 -I scripts/verify_required_check.py --pr <number>` before approval/merge. It validates every same-named check's event, workflow, head repository/branch, whole-run success, and absence of another-base or retargeted PR sharing that head, including closed PRs. See the [publisher guide](docs/trusted-check-publisher.zh-TW.md#en). App deployment and developer-role denial acceptance remain pending.
+
+PRs #16/#17 were independently approved and merged. Main `438d7a4` passed 787 tests, fixed 32/0, seeded 32/9, cleanup, and real signatures in [run 37853277868](https://github.com/chinchiang/MultiAgentEpsilon/actions/runs/37853277868). The new LM Studio and bilingual changes require their own review and validation.
+
+## Reading and model operations
+
+- [Current milestones](docs/milestone-status.zh-TW.md#en), [history](docs/milestone-history.zh-TW.md#en), [scope](docs/pilot-scope.zh-TW.md#en), [ASVS mapping](docs/asvs-coverage.zh-TW.md#en).
+- [Trusted execution](docs/trusted-execution.zh-TW.md#en), [remote protection](docs/remote-merge-protection.zh-TW.md#en), [CI evidence](docs/remote-ci-validation.zh-TW.md#en), [coverage/cleanup](docs/coverage-lifecycle-acceptance.zh-TW.md#en).
+- [Gateway](docs/model-gateway.zh-TW.md#en), [blind reviews](docs/blind-review.zh-TW.md#en), [repeated reviews](docs/repeated-review.zh-TW.md#en), [structured output](docs/structured-output.zh-TW.md#en), [LM Studio](docs/lmstudio.zh-TW.md#en).
+- [Boundary fixes](docs/security-boundaries-20261008.zh-TW.md#en), [dependency/AUTH expansion](docs/security-expansion-20261008.zh-TW.md#en), [current audit](docs/audit-20261009.zh-TW.md#en).
+
+`model_review.py --suite boundaries` runs offline paired authorization/path/SSRF examples; `--rounds` shares a bounded total budget. Historical B09–B12 Gemini/Claude live pairs had valid classifications and locations, but do not establish larger-sample stability or bias reduction. The catalog is now v3; prior v2 results remain historical. Model outputs never decide security gates.
+
+The public repository contains code, synthetic tests, and operational documentation. User attachments, internal research/governance documents, derived forms, and old private history stay local. Demonstration coverage does not establish full [OWASP ASVS](https://owasp.org/www-project-application-security-verification-standard/) compliance.

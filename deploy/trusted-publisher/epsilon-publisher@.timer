@@ -1,10 +1,10 @@
 [Unit]
-Description=Reconcile trusted security check for PR %i
+Description=定期核對 PR %i 的可信安全檢查 / Reconcile trusted security check for PR %i
 
 [Timer]
 OnBootSec=60s
-# Each cycle costs roughly 20 API calls (verified blobs are cached in the state
-# file), so a 120 s cadence stays well inside the installation rate limit.
+# 每輪約 20 次 API 呼叫，已驗證 blob 快取於狀態檔； / Each cycle costs roughly 20 API calls (verified blobs are cached in the state
+# 120 秒週期維持在安裝權杖速率額度內。 / file), so a 120 s cadence stays well inside the installation rate limit.
 OnUnitInactiveSec=120s
 Unit=epsilon-publisher@%i.service
 

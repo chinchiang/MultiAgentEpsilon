@@ -1,4 +1,6 @@
-"""Local reference scoring and unsigned human review notes; no model voting gate."""
+"""本機標準答案評分與未簽章人工註記；不以模型投票決定閘門。
+
+Local reference scoring and unsigned human review notes; no model voting gate."""
 from collections import Counter
 import copy
 import hashlib
@@ -136,8 +138,8 @@ def validate_collection(report, expected_plan=None):
     for provider in providers:
         if len({c.get('model_sha256') for c in calls if c['provider'] == provider}) > 1:
             raise ValueError('model changed across calls')
-        # A floating alias (e.g. *-latest) can be re-pointed between calls; the serving
-        # model the provider reports must stay the same where it is reported at all.
+        # 浮動別名可在呼叫之間改指其他模型； / A floating alias (e.g. *-latest) can be re-pointed between calls; the serving
+        # 供應商有回報時，實際服務模型必須維持相同。 / model the provider reports must stay the same where it is reported at all.
         if len({c['reported_model_sha256'] for c in calls if c['provider'] == provider
                 and c.get('reported_model_sha256') is not None}) > 1:
             raise ValueError('provider-reported model changed across calls')
@@ -263,8 +265,8 @@ def summarize_repeated(report):
             for entry in part[key]:
                 entry.pop('round_index', None)
         part['providers'] = [p['provider'] for p in part['plan']]
-        # Parent validation already bound the shared run budget. A round slice is
-        # an analysis projection, never a separately funded execution.
+        # 父程序已驗證共用執行預算；單輪切片只是 / Parent validation already bound the shared run budget. A round slice is
+        # 分析投影，並非另外取得預算的執行。 / an analysis projection, never a separately funded execution.
         rounds.append({'round_index': number, 'analysis': _summarize_validated(part)})
     metrics = {}
     additive = ('tp', 'tn', 'fp', 'fn', 'abstained', 'unavailable', 'matched_findings',
@@ -342,7 +344,9 @@ def note_matches_report(note, report_path):
 
 
 def read_adjudications(report_path):
-    """Consume only bounded, exact-report notes; asserted identity stays unverified."""
+    """只讀取有限額、精確綁定報告的註記；自報身分仍未驗證。
+
+Consume only bounded, exact-report notes; asserted identity stays unverified."""
     raw = report_path.read_bytes()
     if len(raw) > REPORT_LIMIT:
         raise ValueError('report too large')

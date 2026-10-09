@@ -1,4 +1,6 @@
-"""Truth-backed synthetic fixtures and adversarial blind-review accounting."""
+"""有標準答案的合成資料與對抗性盲審帳目驗證。
+
+Truth-backed synthetic fixtures and adversarial blind-review accounting."""
 import asyncio
 import copy
 import json
@@ -36,7 +38,7 @@ ROOT = Path(__file__).resolve().parents[1]
 def test_sql_reference_has_executable_counterexample(case_id):
     case = bench.load_cases()[case_id]
     namespace = {}
-    exec(case['source'], namespace)  # Only checked-in trusted synthetic fixture source.
+    exec(case['source'], namespace)  # 只使用已納入版本管理的可信合成原碼。 / Only checked-in trusted synthetic fixture source.
     with sqlite3.connect(':memory:') as conn:
         conn.execute('CREATE TABLE items(id INTEGER, name TEXT)')
         conn.executemany('INSERT INTO items VALUES (?,?)', [(1, 'one'), (2, 'two')])
@@ -163,7 +165,7 @@ def test_unassessed_cases_do_not_disappear_from_miss_rate(tmp_path, monkeypatch,
     assert metrics['false_negative_rate_valid'] is None and metrics['false_positive_rate_valid'] is None
     assert metrics['tn'] == 0 and metrics['tp'] == 0
     assert report['status'] == ('COMPLETE' if failure == 'abstain' else 'INCOMPLETE')
-    # SINGLE_REVIEWER alone would make PENDING_HUMAN_REVIEW unconditional; require the specific cause.
+    # SINGLE_REVIEWER 本身就會待審；須驗證特定失敗原因。 / SINGLE_REVIEWER alone would make PENDING_HUMAN_REVIEW unconditional; require the specific cause.
     cause = 'ABSTAIN' if failure == 'abstain' else 'INCOMPLETE_REVIEW'
     assert all(c['status'] == 'PENDING_HUMAN_REVIEW' and cause in c['reasons'] for c in report['analysis']['adjudication'])
     assert 'private raw invalid response' not in path.read_text()
@@ -249,14 +251,14 @@ def test_review_cli_supervision_and_explicit_live_opt_in():
     assert data['status'] == 'COMPLETE' and data['cleanup']['completed'] and data['analysis']
     denied = subprocess.run([sys.executable, '-I', str(script), '--provider', 'gemini'], capture_output=True, timeout=10)
     assert denied.returncode == 2
-    # No credentials or provider settings reach this process, so a regression cannot spend real calls.
+    # 此程序不取得憑證或供應商設定，回歸也不能花費真實呼叫。 / No credentials or provider settings reach this process, so a regression cannot spend real calls.
     offline = {k: v for k, v in os.environ.items()
                if not k.startswith(('GEMINI_', 'GLM_', 'BEDROCK_', 'AWS_', 'HTTP_PROXY', 'HTTPS_PROXY'))
                and k.lower() not in ('http_proxy', 'https_proxy', 'all_proxy')}
     offline['AWS_CONFIG_FILE'] = offline['AWS_SHARED_CREDENTIALS_FILE'] = os.devnull
     excessive = subprocess.run([sys.executable, '-I', str(script), '--provider', 'gemini', '--provider', 'glm',
                                '--provider', 'bedrock', '--live'], capture_output=True, timeout=10, env=offline)
-    assert excessive.returncode == 2  # 18 calls rejected before any provider configuration/network I/O.
+    assert excessive.returncode == 2  # 18 次呼叫在任何供應商設定或網路 I/O 前即拒絕。 / 18 calls rejected before any provider configuration/network I/O.
 
 
 def test_larger_review_budget_is_bound_to_every_request_and_total_cap():

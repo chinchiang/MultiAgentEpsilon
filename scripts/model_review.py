@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
-"""Collect blind synthetic reviews; COMPLETE describes execution, never safety."""
+"""收集合成案例的盲審；COMPLETE 只描述執行完成，不代表安全。
+
+Collect blind synthetic reviews; COMPLETE describes execution, never safety."""
 import argparse
 import json
 import sys
@@ -7,7 +9,8 @@ import uuid
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(ROOT))
+if __name__ == "__main__":
+    sys.path.insert(0, str(ROOT))
 from security_harness.llm.benchmark import PROVIDERS, SUITES, load_cases
 from security_harness.llm.benchmark_runner import initial_report
 from security_harness.llm.lifecycle import persist, supervise
@@ -20,12 +23,12 @@ def main():
     selection = parser.add_mutually_exclusive_group()
     selection.add_argument('--case', choices=tuple(load_cases()), action='append')
     selection.add_argument('--suite', choices=(*SUITES, 'all'),
-                           help='default: injection; boundaries selects B07-B12; all still obeys budgets')
+                           help='預設 injection；boundaries 為 B07–B12，variants 為 B13–B16；all 仍受預算限制 / default: injection; boundaries selects B07-B12; all still obeys budgets')
     parser.add_argument('--rounds', type=int, choices=range(1, 5), default=1,
-                        help='planned repetitions share the same total call/token/time caps')
-    parser.add_argument('--live', action='store_true', help='permit selected live API calls for fixed synthetic cases')
+                        help='所有輪次共用呼叫、詞元及時間總上限 / planned repetitions share the same total call/token/time caps')
+    parser.add_argument('--live', action='store_true', help='允許選定真實 API 處理固定合成案例 / permit selected live API calls for fixed synthetic cases')
     parser.add_argument('--output-tokens', type=int, choices=(512, 1024), default=512,
-                        help='per-review reservation; total must remain <=8192 tokens')
+                        help='每筆審查預留量，合計不得超過 8192 詞元 / per-review reservation; total must remain <=8192 tokens')
     args = parser.parse_args()
     providers = args.provider or ['mock-review-a', 'mock-review-b']
     if any(not p.startswith('mock-') for p in providers) and not args.live:

@@ -1,4 +1,6 @@
-"""Offline provider contracts and regressions for the trusted model boundary."""
+"""離線供應商契約與可信模型邊界回歸。
+
+Offline provider contracts and regressions for the trusted model boundary."""
 import asyncio
 import json
 import os
@@ -197,11 +199,11 @@ def test_prompt_injection_stays_user_data_and_output_stays_inert():
     http, wire, _ = http_fixture(value)
     result, evidence = invoke(GLMAdapter("synthetic-model", "https://local.example.invalid/v1/chat/completions", http=http),
                               Request(REQUEST.system, instruction))
-    # Inert output: returned as opaque text and kept out of the persisted evidence.
+    # 不執行的輸出當成不透明文字，且不寫入持久化證據。 / Inert output: returned as opaque text and kept out of the persisted evidence.
     assert result.text == instruction and instruction not in json.dumps(evidence)
     assert len(wire) == 1
     messages = json.loads(wire[0].content)["messages"]
-    # Injected text never reaches the system role or adds tools.
+    # 注入文字不會進入 system 角色或增加工具。 / Injected text never reaches the system role or adds tools.
     assert messages == [{"role": "system", "content": REQUEST.system}, {"role": "user", "content": instruction}]
     assert not {"tools", "tool_choice", "functions"} & set(json.loads(wire[0].content))
 
@@ -398,7 +400,7 @@ def test_review_uses_native_schema_without_weakening_local_evidence_checks(provi
     from security_harness.llm.output_schema import request_schema
     case = bench.load_cases()['B09']
     request = bench.review_request(case, 'opaque-id')
-    # Syntactically valid output can still contain fabricated evidence.
+    # 語法正確的輸出仍可能偽造證據。 / Syntactically valid output can still contain fabricated evidence.
     review = {'review_id': 'opaque-id', 'verdict': 'VULNERABLE', 'reason': 'Unsafe path.',
               'findings': [{'cwe': 'CWE-22', 'line': 3, 'evidence': 'fabricated', 'rationale': 'Unsafe path.'}]}
     captured = []

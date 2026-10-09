@@ -1,53 +1,28 @@
 flowchart TB
-    Source["候選儲存庫／PR head"]
-    Trust["受信任基準<br/>程式、政策、工具鎖定與 RoE"]
-
-    subgraph Evaluator["受信任評估端：本機或 GitHub runner"]
-        Run["run_security.py<br/>supervisor／限額 worker"]
-        Scan["G1／G2<br/>來源／SBOM／OSV 與機密掃描"]
-        Oracle["AUTH：容器外 oracle<br/>32 個授權案例與副作用查核"]
-        Decision["確定性政策判定<br/>ALLOW／BLOCK，故障即阻擋"]
-        Report["run-bound report.json<br/>摘要綁定與清理結果"]
-        Run --> Scan --> Oracle --> Decision --> Report
+    Source["候選原碼／PR head<br/>Candidate source as data"] --> Run
+    Trust["受信任基準／政策／RoE<br/>Trusted baseline / policy / RoE"] --> Run
+    subgraph Evaluator["可信評估端 / Trusted evaluator"]
+        Run["supervisor／限額 worker<br/>Registered, bounded execution"] --> Scan["G1：來源／SBOM／OSV；G2：機密<br/>Provenance / SCA / secret scanning"]
+        Scan --> Oracle["AUTH：32 案例與完整副作用<br/>External oracle / full-state checks"]
+        Oracle --> Decision["確定性判定／故障即阻擋<br/>Deterministic ALLOW / BLOCK"]
+        Decision --> Report["摘要綁定與清理證據<br/>Bound report and cleanup"]
     end
-
-    Isolation["隔離 FastAPI＋PostgreSQL 容器<br/>無網路、非 root、唯讀根目錄<br/>內部使用 Unix socket／合成資料"]
-
-    Source -->|"候選作為資料"| Run
-    Trust --> Run
-    Oracle <-->|"HTTP bridge／獨立 DB 查核"| Isolation
-
-    subgraph ModelPath["獨立模型審查路徑：目前僅固定合成案例"]
-        direction TB
-        Cases["review-cases.json<br/>盲測請求，不含標準答案"]
-        Gateway["model_review.py<br/>Gateway；呼叫前持久化預留<br/>有界循序呼叫"]
-        Live["Gemini／Claude Sonnet<br/>adapter／v2 真實推論已驗收<br/>v3 配對待憑證"]
-        GLM["GLM adapter<br/>離線回歸；真實連線暫停"]
-        Score["嚴格輸出驗證＋本機評分<br/>比較、分歧與失敗分母"]
-        Advisory["模型報告僅供參考<br/>COMPLETE／INCOMPLETE"]
-        Cases --> Gateway
-        Gateway --> Live --> Score
-        Gateway -.-> GLM
-        Score --> Advisory
+    Oracle <-->|"HTTP bridge／獨立 DB 查核<br/>Independent database checks"| Isolation["隔離 app／DB：無網路、限權與限額<br/>Networkless, bounded containers"]
+    subgraph Models["獨立模型路徑 / Independent advisory path"]
+        Cases["固定合成案例／不含答案<br/>Fixed blind synthetic cases"] --> Gateway["呼叫前預留／有限額循序呼叫<br/>Durable reservations / bounded calls"]
+        Gateway --> Cloud["Gemini／Claude Sonnet<br/>v2 已驗收；v3 待真實驗收<br/>v2 accepted; v3 live pending"]
+        Gateway --> Local["LM Studio／Nemotron 文字介面<br/>Offline tested; live pending<br/>離線完成；真實端點待驗收"]
+        Gateway -.-> GLM["GLM：真實連線暫停<br/>Live connection paused"]
+        Cloud --> Score["嚴格驗證／本機評分／分批比較<br/>Strict validation / local scoring / batch comparison"]
+        Local --> Score
+        Score --> Advisory["僅供參考，不決定閘門<br/>Advisory only; no gate authority"]
     end
-
-    %% 僅對齊兩條獨立路徑，沒有資料交換。
     Source ~~~ Cases
-
-    CI["GitHub Actions<br/>精確 head 獨立核准＋正式必要檢查"]
-    Signed["獨立 runner 簽署 ZIP 摘要<br/>GitHub artifact attestation"]
-    Rules["main Ruleset：已啟用、無 bypass<br/>目前必要來源為共用 Actions App"]
-    Publisher["專用 trusted publisher：程式已備妥<br/>App／主機／Ruleset 綁定尚未部署"]
-    Report -->|"評估工作保存證據"| CI
-    CI --> Signed
-    Signed --> Completion["最終必要關卡<br/>評估＋簽章全成功才放行<br/>候選版已修正，main 待合併"]
-    Completion -->|"來源核對與核准均必要"| Rules
-    Signed -.->|"待受控主機驗證簽章與來源"| Publisher
-    Publisher -.->|"未啟用的 epsilon/trusted-merge"| Rules
-
-    classDef implemented fill:#e8f4ff,stroke:#28629b,color:#153958;
-    classDef isolated fill:#edf8ef,stroke:#3a8051,color:#21472e;
-    classDef pending fill:#fff4dc,stroke:#a67822,stroke-dasharray:5 5,color:#664708;
-    class Run,Scan,Oracle,Decision,Report,Cases,Gateway,Live,Score,Advisory,CI,Signed,Completion,Rules implemented;
-    class Isolation isolated;
+    Report --> CI["正式 CI／最新 head 獨立核准<br/>Formal CI / independent exact-head approval"]
+    CI --> Signed["獨立 runner 簽署 ZIP 摘要<br/>Separate artifact attestation job"]
+    Signed --> Final["評估與簽章全成功才放行<br/>Final check requires both jobs successful"]
+    Final --> Rules["main 規則啟用／無 bypass<br/>Active rules; shared Actions source"]
+    Signed -.-> Publisher["專用發布器程式已備妥，尚未部署<br/>Dedicated publisher prepared, not deployed"]
+    Publisher -.->|"待綁定專用 App<br/>Dedicated source binding pending"| Rules
+    classDef pending fill:#fff4dc,stroke:#a67822,stroke-dasharray:5 5;
     class GLM,Publisher pending;

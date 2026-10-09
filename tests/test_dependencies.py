@@ -1,4 +1,6 @@
-"""Known-vulnerability counterexamples and incomplete/tampered coverage block."""
+"""已知漏洞反例與不完整或遭竄改的涵蓋證據必須阻擋。
+
+Known-vulnerability counterexamples and incomplete/tampered coverage block."""
 from copy import deepcopy
 from datetime import datetime, timedelta, timezone
 import hashlib
@@ -135,3 +137,8 @@ def test_network_request_has_fixed_host_exact_identity_limits_and_no_redirect(mo
     assert deps.query('example', '1.0') == {}
     assert seen == {'url': deps.ENDPOINT, 'body': {'package': {'name': 'example', 'ecosystem': 'PyPI'},
         'version': '1.0'}, 'timeout': 20, 'limit': deps.MAX_RESPONSE + 1}
+@pytest.mark.parametrize('number', ['1e309', '-1e309', 'NaN', 'Infinity'])
+def test_osv_json_rejects_nonfinite_numbers_even_in_metadata(number):
+    from security_harness.dependencies import strict_json, DependencyError
+    with pytest.raises(DependencyError):
+        strict_json('{"vulns": [], "metadata": {"score": ' + number + '}}')

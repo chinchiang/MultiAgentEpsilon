@@ -1,4 +1,6 @@
-"""Regressions for the reported trust, recovery, coverage and accounting attacks."""
+"""針對已回報信任、復原、範圍與帳目攻擊的回歸。
+
+Regressions for the reported trust, recovery, coverage and accounting attacks."""
 import asyncio
 import copy
 import hashlib
@@ -290,8 +292,8 @@ def test_bedrock_array_keyword_omission_keeps_local_finding_limit():
                   {'cwe': cwe, 'line': 3, 'evidence': case['source'].splitlines()[2].strip(),
                    'rationale': 'Synthetic claim.'}
                   for cwe in ('CWE-22', 'CWE-918', 'CWE-89', 'CWE-78')]}
-    # Each finding passes the independent shape/evidence rules. The combined
-    # answer must fail specifically because there are four findings.
+    # 每項 finding 都符合個別格式與引用規則，但合併 / Each finding passes the independent shape/evidence rules. The combined
+    # 答案必須明確因四項超額而失敗。 / answer must fail specifically because there are four findings.
     for finding in review['findings']:
         bench.validate_review({**review, 'findings': [finding]}, case, 'opaque-id')
     with pytest.raises(ModelError):

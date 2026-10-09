@@ -1,4 +1,6 @@
-"""Networkless candidate and DB containers; oracle and evidence stay on the host.
+"""候選與資料庫皆為無網路容器，oracle 與證據留在 host。只傳入合成資料庫憑證及唯讀 socket 目錄；Linux 容器隔離不代表抵抗 host kernel 漏洞。
+
+Networkless candidate and DB containers; oracle and evidence stay on the host.
 
 Only synthetic DB credentials and a read-only DB socket directory cross the boundary.
 This is Linux container isolation, not protection against host-kernel exploits.
@@ -45,7 +47,7 @@ def run_flags(name, run_id):
 def cleanup_run(run_id):
     if not re.fullmatch(r"[a-f0-9-]{32,36}", run_id):
         raise ValueError("invalid isolation run ID")
-    # Cleanup is not a security deadline: a slow daemon must delay it, not leak containers.
+    # 清理不是安全測試期限；daemon 較慢時應等待，不能遺留容器。 / Cleanup is not a security deadline: a slow daemon must delay it, not leak containers.
     ids = docker("ps", "-aq", "--filter", "label=epsilon.isolated=true", "--filter", "label=epsilon.run=" + run_id, timeout=30).stdout.split()
     if ids:
         docker("rm", "--force", *ids, timeout=30)
@@ -66,7 +68,7 @@ def run_isolated(candidate: Path, variant="fixed", run_id=None) -> dict:
     candidate_lock = digest_file(candidate / "requirements.lock")
     if candidate_lock != runtime["lock_sha256"]:
         raise ValueError("candidate lock differs from tested runtime")
-    # Enumerate the actual source subtree, so reserved names cannot hide payloads.
+    # 列舉實際來源子樹，避免保留名稱藏入 payload。 / Enumerate the actual source subtree, so reserved names cannot hide payloads.
     source = candidate / "fixture_app"
     if source.is_symlink():
         raise ValueError("candidate source is a symlink")

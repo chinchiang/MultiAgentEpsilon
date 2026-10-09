@@ -18,7 +18,7 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 def database_url() -> str:
-    # No arbitrary external DSN: this pilot has one disposable local database.
+    # 不接受任意外部 DSN；試點只使用一個暫用本機資料庫。 / No arbitrary external DSN: this pilot has one disposable local database.
     return json.loads((ROOT / ".state/db.json").read_text())["dsn"]
 
 
@@ -79,7 +79,7 @@ class Update(BaseModel):
 def create_app(dsn: str, schema: str, *, variant: str = "fixed") -> FastAPI:
     if variant not in ("fixed", "vulnerable"):
         raise ValueError("unknown fixture variant")
-    # Explicit argument only; production server entry point never accepts this toggle.
+    # 僅接受明確參數；正式啟動入口不接受此切換。 / Explicit argument only; production server entry point never accepts this toggle.
     app = FastAPI(title="Epsilon synthetic fixture", docs_url=None, redoc_url=None, openapi_url=None)
 
     @app.get("/health")
@@ -92,7 +92,7 @@ def create_app(dsn: str, schema: str, *, variant: str = "fixed") -> FastAPI:
     def login(body: Login):
         with connect(dsn, schema) as conn:
             user = conn.execute("SELECT * FROM users WHERE id=%s", (body.username,)).fetchone()
-            # Same KDF cost for absent users; credentials are generated per test run.
+            # 不存在的使用者也採相同 KDF 成本；憑證每次測試重新產生。 / Same KDF cost for absent users; credentials are generated per test run.
             salt = user["salt"] if user else "00" * 16
             actual = password_hash(body.password, salt)
             if not user or not hmac.compare_digest(actual, user["password_hash"]):
@@ -132,7 +132,7 @@ def create_app(dsn: str, schema: str, *, variant: str = "fixed") -> FastAPI:
     def update_item(item_id: int, body: Update, user=Depends(principal)):
         with connect(dsn, schema) as conn:
             if variant == "vulnerable":
-                # Deliberate seeded defect; same oracle must detect this variant.
+                # 刻意植入的指定缺陷，同一 oracle 必須能偵測。 / Deliberate seeded defect; same oracle must detect this variant.
                 row = conn.execute("UPDATE items SET value=%s WHERE id=%s RETURNING *", (body.value, item_id)).fetchone()
             else:
                 row = conn.execute("UPDATE items SET value=%s WHERE id=%s AND tenant=%s AND (owner=%s OR %s='admin') RETURNING *", (body.value, item_id, user["tenant"], user["id"], user["role"])).fetchone()

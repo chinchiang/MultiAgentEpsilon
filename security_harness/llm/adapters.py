@@ -1,4 +1,6 @@
-"""Gemini generateContent, OpenAI-compatible GLM chat, and Bedrock Converse."""
+"""Gemini generateContent、OpenAI 相容 GLM chat 與 Bedrock Converse 介接。
+
+Gemini generateContent, OpenAI-compatible GLM chat, and Bedrock Converse."""
 import re
 import json
 
@@ -50,7 +52,9 @@ def object_field(value, key):
 
 
 def reported_model(value):
-    """Provider-reported serving model, to detect a floating alias drifting mid-run.
+    """記錄供應商回報的實際服務模型，以偵測同次執行中浮動別名的變更；格式錯誤值視為未知，不作為身分。
+
+Provider-reported serving model, to detect a floating alias drifting mid-run.
     Malformed values are dropped (unknown), never trusted as identity."""
     return value if type(value) is str and 0 < len(value) <= 256 and value.isprintable() else None
 
@@ -60,7 +64,7 @@ class GeminiAdapter:
     family = "gemini"
 
     def __init__(self, model, api_key, http=None):
-        # This display-name alias was resolved with the provider's model metadata.
+        # 此顯示名稱別名已透過供應商模型中繼資料解析。 / This display-name alias was resolved with the provider's model metadata.
         self.model = {"Gemini 3.8 Flash": "gemini-3.8-flash"}.get(model, model).removeprefix("models/")
         if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}", self.model) or not api_key:
             raise ModelError("CONFIGURATION")
@@ -71,9 +75,9 @@ class GeminiAdapter:
         config = {"maxOutputTokens": request.max_output_tokens, "candidateCount": 1, "temperature": 0}
         if request.response_format == REVIEW_FORMAT:
             config.update(responseMimeType='application/json', responseJsonSchema=request_schema(request, 'gemini'))
-            # Use LOW for Gemini 3 Flash; MINIMAL was rejected by the live model.
-            # Do not send this model-specific
-            # option to earlier generations, Pro, or arbitrary model aliases.
+            # Gemini 3 Flash 使用 LOW；真實模型拒絕 MINIMAL。 / Use LOW for Gemini 3 Flash; MINIMAL was rejected by the live model.
+            # 此模型專用選項不可傳給 / Do not send this model-specific
+            # 較早世代、Pro 或任意模型別名。 / option to earlier generations, Pro, or arbitrary model aliases.
             if re.fullmatch(r'gemini-3(?:\.\d+)?-flash(?:-[a-z0-9-]+)?', self.model):
                 config['thinkingConfig'] = {'thinkingLevel': 'LOW', 'includeThoughts': False}
         value = await self.http.post(
@@ -109,9 +113,9 @@ class GeminiAdapter:
         inputs, outputs = usage(metadata, 'promptTokenCount', 'candidatesTokenCount')
         _, thoughts = usage(metadata, 'promptTokenCount', 'thoughtsTokenCount')
         if thoughts is not None and outputs is None:
-            # Reported thinking without a visible-output count cannot be checked against the budget.
+            # 只有 thinking 用量而缺可見輸出數時，無法核對預算。 / Reported thinking without a visible-output count cannot be checked against the budget.
             raise ModelError('INVALID_RESPONSE', 'USAGE_SCHEMA')
-        # The output budget covers both visible output and internal thinking.
+        # 輸出預算同時涵蓋可見文字與內部推理。 / The output budget covers both visible output and internal thinking.
         return Reply(text, inputs, outputs + (thoughts or 0) if outputs is not None else None,
                      reported_model(value.get('modelVersion')))
 
@@ -133,33 +137,39 @@ class GLMAdapter:
             "model": self.model, "messages": [{"role": "system", "content": request.system},
                                                {"role": "user", "content": request.user}],
             "max_tokens": request.max_output_tokens, "temperature": 0, "stream": False, "n": 1})
-        if "choices" not in value:
-            raise ModelError("INVALID_RESPONSE", "MISSING_FIELD")
-        choices = value.get("choices")
-        if not isinstance(choices, list) or len(choices) != 1:
-            raise ModelError("INVALID_RESPONSE", "ENVELOPE_SCHEMA")
-        choice = choices[0]
-        message = object_field(choice, "message")
-        if message.get("tool_calls") or message.get("function_call") or choice.get("finish_reason") in {"tool_calls", "function_call"}:
-            raise ModelError("TOOL_REQUEST")
-        if message.get("refusal") or choice.get("finish_reason") == "content_filter":
-            raise ModelError("REFUSED")
-        if choice.get("finish_reason") == "length":
-            raise ModelError("TRUNCATED")
-        if choice.get("finish_reason") != "stop":
-            raise ModelError("INVALID_RESPONSE", "MISSING_FIELD" if choice.get("finish_reason") is None else "STOP_REASON")
-        if (message.get("role") != "assistant" or
-                type(message.get("content")) is not str):
-            raise ModelError("INVALID_RESPONSE", "ENVELOPE_SCHEMA")
-        return Reply(message["content"], *usage(value.get("usage"), "prompt_tokens", "completion_tokens"),
-                     reported_model(value.get("model")))
+        return chat_reply(value)
 
+
+def chat_reply(value):
+    """嚴格解析文字完成回應；Strictly parse a text chat completion."""
+    if "choices" not in value:
+        raise ModelError("INVALID_RESPONSE", "MISSING_FIELD")
+    choices = value.get("choices")
+    if not isinstance(choices, list) or len(choices) != 1:
+        raise ModelError("INVALID_RESPONSE", "ENVELOPE_SCHEMA")
+    choice = choices[0]
+    if not isinstance(choice, dict):
+        raise ModelError("INVALID_RESPONSE", "ENVELOPE_SCHEMA")
+    message = object_field(choice, "message")
+    if message.get("tool_calls") or message.get("function_call") or choice.get("finish_reason") in {"tool_calls", "function_call"}:
+        raise ModelError("TOOL_REQUEST")
+    if message.get("refusal") or choice.get("finish_reason") == "content_filter":
+        raise ModelError("REFUSED")
+    if choice.get("finish_reason") == "length":
+        raise ModelError("TRUNCATED")
+    if choice.get("finish_reason") != "stop":
+        raise ModelError("INVALID_RESPONSE", "MISSING_FIELD" if choice.get("finish_reason") is None else "STOP_REASON")
+    if (message.get("role") != "assistant" or
+            type(message.get("content")) is not str):
+        raise ModelError("INVALID_RESPONSE", "ENVELOPE_SCHEMA")
+    return Reply(message["content"], *usage(value.get("usage"), "prompt_tokens", "completion_tokens"),
+                 reported_model(value.get("model")))
 
 class BedrockAdapter:
     provider = "bedrock"
 
     def __init__(self, model, region, cli=None):
-        # May be a model ID, inference profile ID or ARN; never infer it from SSO role.
+        # 可為模型 ID、推論設定檔 ID 或 ARN；不可由 SSO 角色猜測。 / May be a model ID, inference profile ID or ARN; never infer it from SSO role.
         if (not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:/-]{0,2047}", model) or
                 not re.fullmatch(r"[a-z]{2}(?:-[a-z]+)+-[0-9]", region)):
             raise ModelError("CONFIGURATION")
@@ -170,7 +180,7 @@ class BedrockAdapter:
         payload = {
             "modelId": self.model, "system": [{"text": request.system}],
             "messages": [{"role": "user", "content": [{"text": request.user}]}],
-            # Sampling knobs are model-specific; retain the provider default.
+            # 取樣參數因模型而異，保留供應商預設。 / Sampling knobs are model-specific; retain the provider default.
             "inferenceConfig": {"maxTokens": request.max_output_tokens}}
         if request.response_format == REVIEW_FORMAT:
             payload['outputConfig'] = {'textFormat': {

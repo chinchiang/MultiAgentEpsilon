@@ -1,4 +1,6 @@
-"""Trusted hard ceilings. Requests may reduce these limits, never increase them."""
+"""可信硬性上限；請求只能降低，不能提高。
+
+Trusted hard ceilings. Requests may reduce these limits, never increase them."""
 from dataclasses import dataclass
 
 
@@ -16,7 +18,7 @@ class Limits:
 
 LIMITS = Limits()
 
-# Security worker rlimits; the report records exactly what the worker applies.
+# 安全 worker 的 rlimits 與報告記錄必須相同。 / Security worker rlimits; the report records exactly what the worker applies.
 WORKER_RLIMITS = {
     "address_space_bytes": 8 * 1024**3,
     "per_process_data_bytes": 512 * 1024**2,

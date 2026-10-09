@@ -1,3 +1,7 @@
+[正體中文](#zh-tw) | [English](#en)
+
+<a id="zh-tw"></a>
+
 # 2026-10-08 安全邊界修正與驗收
 
 本輪依 `main` 的 `ba05e1c` 確認結果修正，公開分支只繼承既有公開歷史。私人附件及舊 `work` 歷史不納入 PR。此文件區分程式修正、測試結果與仍需外部資源的部署驗收。
@@ -51,3 +55,53 @@
 5. G3、完整 G5、SBOM／SCA／CVE、產品 ASVS 適用性、較大模型樣本與 W15–W25 保留原路線圖。這些擴充功能不屬於本輪缺陷已修復的聲明。
 
 Starlette 的 httpx 棄用警告仍須在後續相依套件遷移時處理；本輪沒有修改套件鎖定或降低隔離限制。
+
+<a id="en"></a>
+
+# Security-boundary fixes and acceptance: 2026-10-08
+
+This historical round started from main ba05e1c and inherited only public history, excluding private attachments and the old work branch. It separates implementation/testing from externally blocked deployment. Current expansion/status records supersede its old test and case totals.
+
+| Issue | Corrected behavior and evidence |
+|---|---|
+| Retargeted PR reuses old run | Complete timelines reject missing/malformed/base-changed history, including change-away-and-back; edited triggers checks; re-read before publish |
+| Report/check-name source spoofing | Separate job signs ZIP digest; pinned CLI verifies signer workflow SHA/main ref/hosted runner/run/attempt/digest. Six official-sample cases passed; run 37731214649's real branch signature verified but main-source policy correctly rejected branch evidence |
+| Fixture/docs escape trusted review | Every changed path needs trusted write-capable exact-head approval, including renamed fixtures and README |
+| Mixed approvals/change requests/rerun actor | Shared review contract; writer change requests block; run/triggering actors and all PR commit identities excluded; permission/API regressions |
+| Same SHA across forks/branches | Related PR/latest run selection binds repository ID and branch; unrelated scope does not supersede a valid run |
+| Janitor across boots/registration gap | Check boot ID first; children await handshake after persistent registration; registration failure and real kill/cancel tests |
+| Inadequate cleanup proof | Verify non-zombie groups gone and directories removed; preserve recovery inventory on failure; real Docker/process tests |
+| SIGKILL loses reservations | Persist call ID/request digest/reservation before dispatch; killed synthetic requests retain IN_FLIGHT and unknown usage |
+| Tampered budgets/limits | Recompute exact plan/deadline/per-call reservations; successful calls cannot lose reservations; rounds share caps |
+| Runtime pin/executable manifest | Verify locked base image before launching; use Git owner-executable classification, independent of umask |
+| Historical secret metadata gaps | Scan reachable commit messages/authors/committers and tag names/annotations; five canaries detected without raw retention |
+| Pagination/403 classification | Fetch next page after full pages, cap 10,000, reject 10,001; distinguish ordinary forbidden from rate limits and back off even on first lookup |
+| Coarse CODEOWNERS audit | Paginated rules/collaborators; conservative intersection of effective owners, without claiming path-specific owners cover every file |
+| Per-case model hints/RoE | Catalog v2 removes CWE hints, binds model RoE; both providers see identical content; old metrics stay separate |
+| Schema/invisible characters | Provider-supported schema plus strict local quotation/location/text checks; unsupported Bedrock keywords removed without weakening semantic validation |
+| Unknown provider/missing AWS CLI | CONFIGURATION before calls/reservations; never defaults unknown names to Bedrock |
+| Unused helpers/lists/docs | Validated note reader, removed unused imports/model list, consolidated status; adjudication explicitly unblinded |
+| Duplicate seed contract | Trusted oracle and candidate remain separately implemented; schema/rows/auth contract regressions prevent drift without importing candidate seed |
+| GLM missing full offline path | Mock HTTP exercises adapter, worker, scoring, cleanup; no internal live connection |
+| Tool/Action pinning | checkout 7.0.1, setup-python 7.0.0, upload-artifact 7.0.2, attest 4.2.2 pinned to SHAs; AWS CLI 2.37.10 verified by official PGP, verifier CLI 2.102.0 by hashes |
+
+base_ref_changed is conservatively rejected even after retargeting back and rerunning. Use a new head branch/PR; timestamps cannot establish queued workflow source. Shared-Actions same-name checks remain conservatively blocked until dedicated source binding.
+
+## Historical local acceptance
+
+- Final round: 704 passes, no failures/errors/skips; database, networkless containers, real cancellation, and four-otherwise-valid Bedrock findings rejected by the three-finding cap. One existing Starlette warning remained. Earlier 6005ebb and remote run 37731214649 had 703 passes; initial round had 686.
+- Fixed pipeline: 18 AUTH cases, zero findings, ALLOW. Seeded variant: exact policy six findings, BLOCK. G1/G2 clean and cleanup complete. Later expansion supersedes these totals with 32/9.
+- HTTP smoke covered DB health, login, permitted read, cross-owner denial.
+- Official signature samples: valid, altered artifact, wrong signer digest, wrong ref, invalid signature, missing material produced expected outcomes; not dedicated-App deployment proof.
+- v2 eight-call report a7b33efc-9e72-44bf-944e-eb2a1d132690: Gemini three valid/one DEADLINE; Claude lacked CLI/profile after rebuild. INCOMPLETE, eight/8,192 reserved, partial usage, cleanup done. Separate Gemini B09 ca84cbef-0829-4fe3-8f00-74f4bfdeb112 succeeded; never splice batches into a successful pair.
+- Installed AWS CLI/restored nonsecret profile; STS first returned ExpiredToken. After secure user refresh, STS validated intended account/role.
+- Report 66d86091-639e-4b25-b74f-94c2d6c0358f: four valid Gemini, four Claude OUTPUT_CONFIGURATION, INCOMPLETE/cleaned. Removing unsupported Bedrock maxItems while retaining local bounds enabled B10 diagnostic 2fcffea2-53a1-4c02-8697-04009d240950.
+- B09–B12 rerun edf879a8-390d-4bc0-bcfb-0234325871c3: eight valid, each provider 2 TP/2 TN/zero FP/FN, all locations correct, four agreeing pairs, same eight/8,192 cap, cleanup done. See [structured output](structured-output.zh-TW.md#en). No mixed catalogs/failures or bias-reduction claim.
+
+## External work and limitations
+
+Dedicated App/installation/private key/controlled Linux host remain missing; use the [deployment guide](trusted-check-publisher.zh-TW.md#en) before live publication/source binding. Ruleset 24512048 remains active/no bypass with shared App 15368. Ordinary-developer denial of unapproved, failed, forged, or stale evidence needs an isolated acceptance PR, not dangerous main probes.
+
+Actions administration returned 403, preventing fork-approval/global-SHA settings. Private vulnerability reporting was disabled and enabling also returned 403. Owner administrative access must resolve these; they are not sandbox denials. Secret scanning/Push Protection/Dependabot settings are not fully accepted and remain unknown. License choice belongs to the owner; no license was invented. Historical AWS account identifiers were not removed by disabling rules or rewriting history.
+
+G3, full G5, product ASVS applicability, larger model samples, and W15–W25 remain roadmap items. The later expansion implements bounded Python OSV SCA/CycloneDX, superseding this round's earlier SCA gap, without claiming full product coverage. The Starlette/httpx deprecation warning awaits a deliberate dependency migration; locks/isolation were not weakened.

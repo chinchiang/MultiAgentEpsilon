@@ -1,4 +1,6 @@
-"""Trusted oracle: exact synthetic response contracts and complete fixture state."""
+"""可信 oracle：核對完整合成回應契約與測試資料狀態。
+
+Trusted oracle: exact synthetic response contracts and complete fixture state."""
 from copy import deepcopy
 from datetime import datetime, timedelta, timezone
 import hashlib
@@ -35,7 +37,9 @@ def snapshot(dsn, schema, connect):
 
 
 def restore(dsn, schema, connect, state):
-    """Restore only this run's synthetic schema after a failed case, avoiding cascades."""
+    """案例失敗後只還原本次合成 schema，避免連鎖失敗。
+
+Restore only this run's synthetic schema after a failed case, avoiding cascades."""
     with connect(dsn, schema) as conn:
         for table in reversed(TABLES):
             conn.execute(f"DELETE FROM {table}")
@@ -110,7 +114,7 @@ def evaluate(client, dsn, schema, passwords, connect):
     check("admin cross-tenant denied", "get", "/items/3", 404, {"detail": "item not found"}, headers=headers["admin"])
     check("member export denied", "get", "/admin/export", 403, {"detail": "admin required"}, headers=headers["alice"])
     check("admin export tenant-scoped", "get", "/admin/export", 200, [updated, seeded_items[1]], headers=headers["admin"])
-    # Admin delegation is a write privilege too: it must work in-tenant and stop at the tenant boundary.
+    # 管理員委派也是寫入權限：同租戶須成功，跨租戶須阻擋。 / Admin delegation is a write privilege too: it must work in-tenant and stop at the tenant boundary.
     admin_updated = {**seeded_items[1], "value": "admin-updated"}
     expected = snapshot(dsn, schema, connect)
     expected["items"][1] = admin_updated
@@ -177,7 +181,7 @@ def evaluate(client, dsn, schema, passwords, connect):
 
 
 def run_authorization(dsn: str, variant: str = "fixed") -> list[dict]:
-    # Development-only adapter. Trusted CI uses isolation.run_isolated instead.
+    # 僅供開發的 adapter；可信 CI 使用 isolation.run_isolated。 / Development-only adapter. Trusted CI uses isolation.run_isolated instead.
     from fastapi.testclient import TestClient
     from fixture_app.app import create_app, connect, seed, cleanup
     schema, passwords = seed(dsn)

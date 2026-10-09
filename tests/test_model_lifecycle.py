@@ -1,4 +1,6 @@
-"""Real process crashes and durable recovery; no Docker, keys or network needed."""
+"""真實程序崩潰與持久化復原，不需 Docker、金鑰或網路。
+
+Real process crashes and durable recovery; no Docker, keys or network needed."""
 import json
 import os
 import signal
@@ -122,7 +124,7 @@ def test_parent_cancellation_and_sigkill_reap_real_aws_group(tmp_path, signum):
     try:
         wait_for(lambda: (tmp_path / 'aws-pids').exists())
         assert report_at(tmp_path)['status'] == 'INCOMPLETE'
-        assert sweep_stale(tmp_path) == []  # Never touch an active owner.
+        assert sweep_stale(tmp_path) == []  # 不可碰觸仍存活的擁有者。 / Never touch an active owner.
         parent.send_signal(signum)
         parent.wait(timeout=10)
         if signum == signal.SIGKILL:
@@ -261,7 +263,7 @@ def test_cleanup_failure_blocks_and_preserves_recovery_inventory(tmp_path, monke
 def test_one_unrecoverable_run_does_not_strand_the_others(tmp_path, monkeypatch):
     from security_harness.lifecycle import SweepIncomplete
     runs = sorted([stale_fixture(tmp_path), stale_fixture(tmp_path)])
-    (broken, broken_path, broken_work), (healthy, healthy_path, _) = runs  # sweep order is by run ID
+    (broken, broken_path, broken_work), (healthy, healthy_path, _) = runs  # 依 run ID 順序回收。 / sweep order is by run ID
     original = life.stop_registered
     def selective(work):
         if work.name == broken:
@@ -319,8 +321,8 @@ def test_signal_during_cleanup_cannot_publish_complete(tmp_path, monkeypatch):
 
 
 def test_worker_wait_timeout_still_finalizes_evidence(tmp_path, monkeypatch):
-    # A reap timeout used to escape before finish(), leaving AWAITING_CLEANUP evidence
-    # and the signal handlers installed.
+    # 先前 reap 逾時會在 finish 前逸出，留下 AWAITING_CLEANUP / A reap timeout used to escape before finish(), leaving AWAITING_CLEANUP evidence
+    # 以及尚未還原的訊號處理器。 / and the signal handlers installed.
     run_id = str(uuid.uuid4())
     report = initial_report(['mock'], run_id)
     life.persist(tmp_path / 'artifacts' / run_id / 'report.json', report)

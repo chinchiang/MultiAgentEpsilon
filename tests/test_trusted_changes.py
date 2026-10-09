@@ -38,7 +38,7 @@ def test_baseline_approval_binds_independent_reviewer_and_current_head():
 
 @pytest.mark.parametrize("role", ["read", "triage", None, "custom"])
 def test_listed_reviewer_without_write_access_cannot_approve_baseline(role):
-    # GitHub records approvals from read-only users; they must not lift the guard.
+    # GitHub 也記錄唯讀者核准；這些不能解除 guard。 / GitHub records approvals from read-only users; they must not lift the guard.
     pr = {"state": "open", "head": {"sha": "head"}, "base": {"sha": "base"}, "user": {"login": "author"}}
     review = {"id": 1, "state": "APPROVED", "commit_id": "head", "user": {"login": "owner"}}
     assert approved_review(pr, [review], "head", "base", ["owner"], {"owner": role}) is None
@@ -167,8 +167,8 @@ def test_reviewer_who_pushed_an_earlier_pr_commit_cannot_approve(monkeypatch):
 
 @pytest.mark.parametrize("commits", [
     lambda reviewer: [],
-    lambda reviewer: [{"sha": "e" * 40}],                                  # list does not end at the head
-    lambda reviewer: [{"sha": f"{i:040x}"} for i in range(249)] + [{"sha": "h" * 40}],  # API truncates at 250
+    lambda reviewer: [{"sha": "e" * 40}],                                  # 清單不在 head 結束。 / list does not end at the head
+    lambda reviewer: [{"sha": f"{i:040x}"} for i in range(249)] + [{"sha": "h" * 40}],  # API 在 250 筆截斷。 / API truncates at 250
 ])
 def test_incomplete_pr_commit_listing_fails_closed(monkeypatch, commits):
     from security_harness.trusted_publisher import Denied

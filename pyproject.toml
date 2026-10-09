@@ -1,10 +1,10 @@
 [project]
 name = "multi-agent-epsilon"
 version = "0.1.0"
-description = "Evidence-first security harness and isolated authorization fixture"
+description = "以證據為本的安全測試與隔離授權應用 / Evidence-first security harness and isolated authorization fixture"
 requires-python = ">=3.12,<3.13"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-ra --strict-markers --tb=short"
-markers = ["integration: requires the isolated PostgreSQL fixture"]
+markers = ["integration: 需要隔離 PostgreSQL 測試環境 / requires the isolated PostgreSQL fixture"]

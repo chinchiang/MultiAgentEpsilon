@@ -1,12 +1,15 @@
 #!/usr/bin/env python3
-"""Bounded model worker; only its parent may publish COMPLETE after cleanup."""
+"""有限額的模型 worker；只有父程序可於清理後發布 COMPLETE。
+
+Bounded model worker; only its parent may publish COMPLETE after cleanup."""
 import asyncio
 import resource
 import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(ROOT))
+if __name__ == "__main__":
+    sys.path.insert(0, str(ROOT))
 from security_harness.lifecycle import run_directory
 from scripts.model_smoke import run_worker
 

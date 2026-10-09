@@ -1,3 +1,7 @@
+[正體中文](#zh-tw) | [English](#en)
+
+<a id="zh-tw"></a>
+
 # 掃描覆蓋、資源限制與取消驗收
 
 ## 掃描契約
@@ -64,3 +68,45 @@
 2026-10-05 再次查核：主分支仍未受保護，沒有啟用的規則集或可用的獨立審查者。以停用狀態建立供審查的規則草稿仍收到 GitHub API 的 `403 Resource not accessible by integration`。本次未建立或啟用任何遠端規則；這是 GitHub 連線的權限限制，不是工具自動核准審查拒絕。
 
 （歷史紀錄；CatGrocery 已於 2026-10-07 接受邀請，現為具 write 權限的協作者。）使用者指定的獨立審查者 `CatGrocery` 已加入候選分支的 `security/trust-policy.json` 與 `.github/CODEOWNERS`。GitHub 查得其目前只有讀取權限；管理者仍須授予適當的寫入審查權限並完成可信基準的審核與部署。候選分支的設定不會自動改變主分支所使用的可信政策，也不等同已取得核准。本輪沒有寄送邀請或審查通知。
+
+<a id="en"></a>
+
+# Scan coverage, resource limits, and cancellation acceptance
+
+The worktree and subject manifest share an inventory. G2 also scans all Git blobs reachable from the candidate's own HEAD, including deleted content, but does not claim other branches or unavailable remote objects. Evidence records history head, blob count, finding object IDs, and rechecks HEAD before completion.
+
+UTF-8, magic-identified gzip/ZIP/ustar, and bounded archive metadata are supported. Members enter a flat scan snapshot; archive paths are never extracted directly onto the host. Unreviewed binaries, encrypted ZIPs, links/special members, unsafe paths, corruption, and limits produce ERROR/INCOMPLETE. Reviewed binary SHA-256 values permit ASCII/UTF-16LE string scanning and increment `reviewed_binaries`; changing bytes requires new review. This does not cover arbitrary encryption/encoding/formats.
+
+Coverage separately records selected files/bytes, scanned leaves/bytes, expanded bytes, archives, and history blobs. Policy requires COMPLETE, zero unsupported files, and matching gate counts; a positive count alone is insufficient.
+
+| Resource | Hard bound |
+|---|---|
+| Worktree files / single file / total input | 20,000 / 20 MiB / 64 MiB |
+| History blobs / raw history bytes | 20,000 / 128 MiB |
+| Cumulative worktree/history/expanded reads | 64 MiB, counting compressed and expanded input |
+| Archive nesting / members | 3 / 2,000 |
+| Pipeline / AUTH deadline | 600 / 120 seconds |
+| Per-process worker limits | 512 MiB data, 8 GiB virtual address, CPU soft/hard 120/125 s, 64 MiB output file, 256 descriptors, no core dumps |
+| Each candidate/database container | 1 CPU, 512 MiB, 128 PIDs, networkless; read-only candidate root |
+| HTTP | 16 KiB request, 64 KiB body, 128 KiB envelope, 5-second host bridge deadline, 16 MiB candidate tmpfs |
+
+The larger address-space reservation supports Gitleaks' WebAssembly engine; it is not permission to write 8 GiB of data. RLIMIT_DATA separately constrains data memory. Inventory, expansion, and scanner reports have their own caps. Termination/cleanup has a bounded grace period of approximately 36 seconds. Cleanup errors or Docker timeouts block and retain owner markers for recovery.
+
+The supervisor owns `.state/runs/<run-id>` and short temporary paths suitable for PostgreSQL Unix sockets. The worker runs in its own process group. SIGTERM/SIGINT/deadline kill the group, remove containers by unique run label, and remove owned temporary state. SIGKILL cannot execute `finally`; `cleanup_runs.py` later matches PID, start time, boot ID, and UID and reaps only dead owners. CI `always` cleanup and later tasks can run the janitor. Destruction of the runner itself needs platform lifecycle cleanup. A worker's ALLOW remains pending/BLOCK until cleanup completes.
+
+```bash
+.venv/bin/python -I scripts/cleanup_runs.py
+.venv/bin/python -m pytest --junitxml=artifacts/coverage-lifecycle-pytest.xml
+.venv/bin/python -I scripts/run_security.py
+.venv/bin/python -I scripts/expect_block.py
+```
+
+Historical 2026-10-04 acceptance had 125 passes, no failures/errors/skips, and one existing Starlette warning. It included archived and deleted-history secrets, bombs/nesting/traversal, full-state AUTH mutations, actual process-group timeouts, and SIGTERM/SIGINT/SIGKILL with real networkless containers.
+
+## Historical remote observations and current prerequisites
+
+The October 4–5 observations of unprotected main, empty rulesets, only an author reviewer, and Administration API 403 are historical. Main now has active ruleset 24512048; CatGrocery has write access, and the initial migration completed October 6. See [current status](milestone-status.zh-TW.md#en).
+
+`audit_merge_protection.py` is a read-only configuration audit, not a developer-role behavioral proof. Its six unexecuted probes remain NOT_RUN and acceptance stays BLOCK. User admin role does not grant a connector Administration API permission. A dedicated source must validate repository, evaluator/candidate SHA, event, attempt, and evidence; shared App 15368 plus a check name is insufficient. Complete trusted baseline/source binding before enforcement, with actual independent write-capable review.
+
+Use a non-admin identity to verify direct-push denial, unapproved policy-change denial, forged-check rejection, stale-head rejection, rechecking dismissed approvals, and legitimate approval success. Preserve actual responses and identities; CI success or an administrator readback is not a substitute. Historical 403s were GitHub authorization failures, not automatic tool-approval rejections. CatGrocery's earlier read-only observation was superseded by accepted write access on October 7; candidate reviewer configuration never grants remote rights by itself. No invitations or review messages were sent by those checks.

@@ -29,7 +29,7 @@ def test_external_oracle_rejects_defect_and_accepts_fixed():
 def test_candidate_cannot_access_oracle_socket_credentials_or_egress(tmp_path):
     shutil.copytree(ROOT / "fixture_app", tmp_path / "fixture_app", ignore=shutil.ignore_patterns("__pycache__"))
     shutil.copyfile(ROOT / "requirements.lock", tmp_path / "requirements.lock")
-    # These assertions run in the actual candidate container during import.
+    # 這些斷言在真實候選容器匯入時執行。 / These assertions run in the actual candidate container during import.
     (tmp_path / "fixture_app/__init__.py").write_text('''
 import importlib.util
 import os
@@ -89,7 +89,7 @@ def test_candidate_socket_symlink_never_connects_host_endpoint(tmp_path):
     candidate = tmp_path / "candidate"
     shutil.copytree(ROOT / "fixture_app", candidate / "fixture_app", ignore=shutil.ignore_patterns("__pycache__"))
     shutil.copyfile(ROOT / "requirements.lock", candidate / "requirements.lock")
-    # This path is present only on the host, never mounted into the candidate.
+    # 此路徑只存在 host，不掛入候選容器。 / This path is present only on the host, never mounted into the candidate.
     target = tmp_path / "host.sock"
     with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as listener:
         listener.bind(str(target))

@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
-"""Install the reviewed AWS CLI release outside the application environment.
+"""在應用環境之外安裝已審查 AWS CLI。封存 pin 由 AWS 官方分離式 PGP 簽章建立；重用既有安裝時不可換成其他版本。
+
+Install the reviewed AWS CLI release outside the application environment.
 
 The archive pin was established from AWS's official detached PGP signature.
 Reusing an existing installation never replaces it with a different version.

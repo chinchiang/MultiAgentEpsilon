@@ -1,4 +1,6 @@
-"""No host connection to candidate-owned filesystem paths; bounded exec transport."""
+"""host 不連接候選控制的檔案路徑；使用有限額的 exec 傳輸。
+
+No host connection to candidate-owned filesystem paths; bounded exec transport."""
 import base64
 import json as json_codec
 import re

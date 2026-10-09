@@ -1,4 +1,6 @@
-"""Bounded archive expansion into flat files; never extract archive paths to disk."""
+"""有限額地展開封存為平面檔案，不把封存路徑直接解到磁碟。
+
+Bounded archive expansion into flat files; never extract archive paths to disk."""
 import gzip
 import hashlib
 import io
@@ -20,7 +22,9 @@ class UnsupportedContent(ValueError):
 
 
 def load_binary_allowlist(path):
-    """Trusted, digest-keyed review of binary blobs. Keyed by content, not path, so one
+    """以內容摘要核准二進位資料，不以路徑核准；同內容歷史副本可沿用審查，內容變更須重新審查。
+
+Trusted, digest-keyed review of binary blobs. Keyed by content, not path, so one
     reviewed asset also covers its historical copies; a changed binary needs review again."""
     if not path.exists():
         return frozenset()
@@ -44,14 +48,18 @@ def is_text(data):
 
 
 def printable_strings(data):
-    """Embedded plaintext (ASCII and UTF-16LE, as `strings -e s/l` would see it)."""
+    """擷取 ASCII 與 UTF-16LE 內嵌明文，等同 strings 的相應字串視圖。
+
+Embedded plaintext (ASCII and UTF-16LE, as `strings -e s/l` would see it)."""
     runs = [m.group() for m in ASCII_RUN.finditer(data)]
     runs += [m.group().decode("utf-16-le").encode() for m in UTF16LE_RUN.finditer(data)]
     return b"\n".join(runs) + b"\n"
 
 
 def zip_payloads(data, archive):
-    """Payload ranges of the listed members. Every byte before the central directory
+    """列出成員的 payload 範圍；中央目錄之前每一位元組都須屬於成員，避免藏入未列出壓縮內容。
+
+Payload ranges of the listed members. Every byte before the central directory
     must belong to one, so no compressed payload can hide between or before entries."""
     position = 0
     payloads = []
@@ -76,7 +84,9 @@ def zip_payloads(data, archive):
 
 
 def outside(data, payloads):
-    """Container bytes with member payloads (scanned as their own leaves) blanked."""
+    """將已另行掃描的成員 payload 遮空，留下容器本身位元組。
+
+Container bytes with member payloads (scanned as their own leaves) blanked."""
     masked = bytearray(data)
     for start, size in payloads:
         masked[start:start+size] = bytes(size)
@@ -112,7 +122,7 @@ class ContentInventory:
             raise ResourceLimit("archive member limit exceeded")
 
     def add(self, data, origin, *, scope, depth=0, object_id=None):
-        # Magic detection does not trust extensions or the scanner's implicit exclusions.
+        # 依 magic 判定格式，不信任副檔名或掃描器隱含排除。 / Magic detection does not trust extensions or the scanner's implicit exclusions.
         is_gzip = data.startswith(b'\x1f\x8b')
         is_zip = data.startswith((b'PK\x03\x04', b'PK\x05\x06', b'PK\x07\x08'))
         is_tar = len(data) >= 512 and data[257:262] == b'ustar'
@@ -157,17 +167,17 @@ class ContentInventory:
                     with archive.extractfile(member) as stream:
                         self.add(self.read(stream), origin + '!' + member.name,
                                  scope=scope, depth=depth+1, object_id=object_id)
-                # Bytes after the last member (end-of-archive padding included) must be zero.
+                # 最後成員後的位元組（含結尾填補）必須全為零。 / Bytes after the last member (end-of-archive padding included) must be zero.
                 if data[archive.offset:].strip(b'\x00'):
                     raise UnsupportedContent("data after tar end-of-archive")
         if is_gzip or is_zip or is_tar:
-            # Headers, names, comments and extra fields are not member payloads.
+            # 標頭、名稱、註解與 extra 欄位不屬於成員 payload。 / Headers, names, comments and extra fields are not member payloads.
             self.leaf(printable_strings(outside(data, payloads)), origin + '!container-strings', scope, object_id)
         else:
             if not is_text(data):
                 if hashlib.sha256(data).hexdigest() not in self.reviewed_binaries:
                     raise UnsupportedContent("binary content needs an adapter or a reviewed digest in the binary allowlist")
-                # A reviewed asset is still scanned for embedded plaintext secrets.
+                # 已審查資產仍須掃描內嵌明文機密。 / A reviewed asset is still scanned for embedded plaintext secrets.
                 self.reviewed += 1
                 data, origin = printable_strings(data), origin + '!strings'
             self.leaf(data, origin, scope, object_id)

@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
-"""Download only the reviewed CLI binary; never unpack arbitrary archive paths."""
+"""只下載已審查的 CLI 執行檔，不解開任意封存路徑。
+
+Download only the reviewed CLI binary; never unpack arbitrary archive paths."""
 import argparse
 import hashlib
 import io
@@ -37,7 +39,7 @@ def main():
     try:
         with urllib.request.urlopen(pin['url'], timeout=45) as response:
             binary = verified_binary(response.read(40 * 1024**2 + 1), pin)
-        # Existing deployed pins must never be overwritten by this helper.
+        # 此工具不可覆寫既有正式部署 pins。 / Existing deployed pins must never be overwritten by this helper.
         with args.output.open('xb') as stream:
             stream.write(binary)
         args.output.chmod(0o755)

@@ -1,12 +1,15 @@
 #!/usr/bin/env python3
-"""Dependency-free preflight with an early-error audit envelope."""
+"""不依賴第三方套件的安裝前檢查，並保留早期錯誤證據。
+
+Dependency-free preflight with an early-error audit envelope."""
 import argparse
 import json
 import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(ROOT))
+if __name__ == "__main__":
+    sys.path.insert(0, str(ROOT))
 from security_harness.audit import AuditRun
 from security_harness.preflight import verify
 from security_harness.results import digest_file, subject_digest, write_json

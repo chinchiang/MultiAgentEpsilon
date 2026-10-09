@@ -102,10 +102,10 @@ def test_reader_preserves_chinese_titles_without_a_locale_subprocess(monkeypatch
 
 
 @pytest.mark.parametrize("twin,branch,code", [
-    # Same head opened (then closed) against a branch carrying a modified workflow copy.
+    # 相同 head 曾對含修改 workflow 的其他分支開 PR，之後關閉。 / Same head opened (then closed) against a branch carrying a modified workflow copy.
     (pull(number=6, base="evil", state="closed"), "feature", "FOREIGN_BASE_PR"),
     (pull(number=6, base="evil", state="open"), "feature", "FOREIGN_BASE_PR"),
-    # Twin from another head branch: its run reports that branch, not this PR's.
+    # 另一 head 分支的雙胞胎 run 回報其分支，不是此 PR 分支。 / Twin from another head branch: its run reports that branch, not this PR's.
     (pull(number=6, base="evil", ref="twin", state="closed"), "twin", "RUN_HEAD_BRANCH"),
 ])
 def test_same_head_pr_into_another_base_cannot_vouch_for_the_check(twin, branch, code):

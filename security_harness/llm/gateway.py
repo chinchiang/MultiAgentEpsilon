@@ -1,4 +1,6 @@
-"""Provider-independent limits and redacted evidence for advisory model calls."""
+"""跨供應商共用限額與遮蔽證據，模型呼叫僅供參考。
+
+Provider-independent limits and redacted evidence for advisory model calls."""
 import asyncio
 import hashlib
 import hmac
@@ -15,7 +17,9 @@ from .output_schema import REVIEW_FORMAT
 
 
 class ModelError(Exception):
-    """Only fixed error codes may cross the evidence boundary."""
+    """只有固定錯誤碼可寫入證據。
+
+Only fixed error codes may cross the evidence boundary."""
 
     CODES = frozenset({"CONFIGURATION", "TRANSPORT", "HTTP_ERROR", "RATE_LIMIT",
                        "AUTHENTICATION", "REDIRECT", "RESPONSE_LIMIT", "INVALID_RESPONSE",
@@ -24,7 +28,7 @@ class ModelError(Exception):
     DETAILS = frozenset({'JSON_SYNTAX', 'JSON_ENCODING', 'JSON_DUPLICATE_KEY',
         'JSON_NONFINITE', 'ENVELOPE_SCHEMA', 'MISSING_FIELD', 'UNEXPECTED_CONTENT',
         'EMPTY_TEXT', 'USAGE_SCHEMA', 'STOP_REASON', 'REVIEW_SCHEMA', 'EVIDENCE_MISMATCH',
-        'HTTP_CONTENT_TYPE', 'OUTPUT_CONFIGURATION', 'THINKING_CONFIGURATION'})
+        'HTTP_CONTENT_TYPE', 'OUTPUT_CONFIGURATION', 'THINKING_CONFIGURATION', 'MODEL_IDENTITY'})
 
     def __init__(self, code, detail=None):
         self.code = code if code in self.CODES else "PROVIDER_FAILURE"
@@ -86,7 +90,9 @@ class Limits:
 
 
 class Gateway:
-    """One event-loop instance. Reserve before I/O; no retries or paid fallback.
+    """單一事件迴圈實例；I/O 前先預留，不重試或切換付費供應商。Adapter 與資料分類是可信呼叫端設定，不是模型輸入；合成標籤不是 DLP 偵測器，CLI 使用固定測試資料。
+
+One event-loop instance. Reserve before I/O; no retries or paid fallback.
 
     Adapters and data classification are trusted caller configuration, not model
     input. A synthetic label is not a DLP detector. The CLI uses a fixed fixture.
@@ -98,13 +104,15 @@ class Gateway:
         self.reserved_tokens = 0
         self.evidence = []
         self.checkpoint = checkpoint
-        # Per-run key: model identities stay comparable within a report, but an ARN with
-        # an account ID cannot be recovered by brute-forcing an unsalted digest.
+        # 每次執行使用獨立金鑰，報告內可比較模型身分， / Per-run key: model identities stay comparable within a report, but an ARN with
+        # 同時避免從無鹽摘要暴力還原含帳號的 ARN。 / an account ID cannot be recovered by brute-forcing an unsalted digest.
         self._identity_key = secrets.token_bytes(32)
 
     @staticmethod
     def label(value):
-        """Readable model name for reports; ARNs and account-like digits never appear."""
+        """報告中的可讀模型名稱不得包含 ARN 或疑似帳號數字。
+
+Readable model name for reports; ARNs and account-like digits never appear."""
         if not isinstance(value, str) or re.search(r"\d{12}", value):
             return "redacted"
         if value.startswith("arn:"):
@@ -148,7 +156,7 @@ class Gateway:
             self.reserved_tokens += request.max_output_tokens
             evidence.update(status="IN_FLIGHT", reserved=True, reserved_output_tokens=request.max_output_tokens)
             if self.checkpoint is not None:
-                self.checkpoint()  # Durable reservation precedes any adapter I/O.
+                self.checkpoint()  # 任何 adapter I/O 前先持久化預留。 / Durable reservation precedes any adapter I/O.
             async with asyncio.timeout(self.limits.timeout_seconds):
                 reply = await adapter.generate(request)
             if not isinstance(reply, Reply) or type(reply.text) is not str or not reply.text.strip():
@@ -173,7 +181,7 @@ class Gateway:
             evidence["code"] = exc.code
             evidence["diagnostic"] = exc.detail
         except Exception:
-            # Do not serialize exception messages, provider payloads or URLs.
+            # 不序列化例外訊息、供應商 payload 或 URL。 / Do not serialize exception messages, provider payloads or URLs.
             evidence["code"] = "PROVIDER_FAILURE"
             evidence["status"] = "ERROR"
         finally:

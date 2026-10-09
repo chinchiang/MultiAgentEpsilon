@@ -51,7 +51,7 @@ def main_ruleset(**overrides):
 
 def test_hidden_bypass_actors_are_unknown_not_absent():
     hidden = main_ruleset()
-    del hidden['bypass_actors']  # GitHub omits it for callers without ruleset write access
+    del hidden['bypass_actors']  # 沒有規則集寫入權限的呼叫者看不到此欄位。 / GitHub omits it for callers without ruleset write access
     result = inspect_configuration({'protected': True}, [hidden], {'user': {'login': 'author'}}, [], [])
     assert result['configuration']['active_main_ruleset'] and not result['configuration']['no_bypass']
     assert inspect_configuration({'protected': True}, [main_ruleset()], {'user': {'login': 'author'}}, [], [])[

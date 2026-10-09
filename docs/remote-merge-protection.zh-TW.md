@@ -1,3 +1,7 @@
+[正體中文](#zh-tw) | [English](#en)
+
+<a id="zh-tw"></a>
+
 # 遠端合併保護：設定與驗收缺口
 
 **現況（2026-10-07 讀回）：** 規則集 24512048 為 active、無 bypass；CatGrocery 已接受協作邀請，是具 write 權限的協作者，稽核讀回 base 分支 CODEOWNERS 已有獨立審查者，也有可做繞過驗收的非管理者開發者；首次基準遷移已於 2026-10-06 完成（擁有者暫時停用規則集後合併 #6、#7，驗收後恢復；#10 也在停用期間合併，沒有審查紀錄）。專用 App 仍未部署，普通開發者的負向驗收仍未執行。真實 `pull_request_target` 流程的正反例結果見 [里程碑狀態](milestone-status.zh-TW.md)。下方各段保留當時的觀測紀錄。
@@ -48,3 +52,41 @@ App 身分與執行位置尚未提供；已準備受控主機的發布程式與�
 7. 驗收通過後啟用 main 規則並完整讀回。區分「隔離分支的行為驗證」與「main 規則讀回」，不以草稿 PR、本地 BLOCK、CI 成功或管理者角色代替普通開發者遠端驗收。
 
 遠端行為驗收仍未執行。main 規則讀回與先前 PR #5（草稿，已關閉）顯示 blocked，不能代替普通開發者的負向驗收；先在隔離驗收分支確認規則及來源，避免對 main 做可能真的合併成功的探測。
+
+<a id="en"></a>
+
+# Remote merge protection: configuration and acceptance gaps
+
+As read on 2026-10-07, ruleset 24512048 is active with no bypass. CatGrocery accepted collaboration and has write access; base CODEOWNERS includes an independent reviewer. A non-admin developer can perform future negative acceptance. Dedicated App deployment and actual developer-role denial probes remain pending. Initial migration on October 6 temporarily disabled rules to merge #6/#7; #10 also merged during that interval without reviews. These are historical facts, not a recommended procedure. See [current status](milestone-status.zh-TW.md#en).
+
+The owner enabled main protection manually; required trusted-security-pilot still uses shared Actions App 15368. Earlier observations of empty rules/unprotected main, PR #5 without reviews, and CatGrocery public read-only access were superseded. Manual settings do not expand connector permissions. The [publisher guide](trusted-check-publisher.zh-TW.md#en) describes preparation, not deployment evidence.
+
+## Administration and reviewer permissions
+
+Repository data reports the user as admin, but connector/App permissions are separately limited. Reading branch protection returned 403 requiring Administration read; adding CatGrocery with permission=push and creating a disabled ruleset returned 403 requiring Administration write. No invitation/rules/main mutation resulted from those attempts. These were GitHub authorization failures, not automatic tool-approval rejections.
+
+Check the [App installation](https://github.com/settings/installations), repository selection, and requested Administration permissions. If the App never requests Administration, an owner cannot add it merely by being admin; the provider must change its App or a separate authorized administrative connection is needed. Never paste tokens/private keys into chat, issues, or source.
+
+With appropriate access, PUT /repos/chinchiang/MultiAgentEpsilon/collaborators/CatGrocery with permission=push can invite a collaborator. Invitations must be accepted; read back write/maintain/admin membership. Independent reviewers must differ from the author. Developer denial probes require an actual non-admin write identity. CatGrocery's current accepted access means the historical invitation step need not be repeated.
+
+## Binding a trusted required source
+
+This personal repository cannot assume organization required workflows. A name plus shared App 15368 does not identify a workflow. pull_request_target uses the PR base branch's YAML; a same-head PR targeting another branch can execute modified YAML. Publisher/verifier bind head repository and branch and reject related PRs targeting other bases, even closed ones, and base-change timelines. Returning fork contributors can also create similarly named pull_request checks; require approval for all external contributors where supported.
+
+Deploy a dedicated App publishing epsilon/trusted-merge, then bind its real App ID. Never use invented IDs or present 15368 as dedicated binding. Minimum permissions are Actions/Contents/Pull requests/Attestations read, Checks write, and required Metadata read. Candidate workflows must never receive the private key or installation token.
+
+Validation must cover repository/installation, allowed workflow path/ID, preapproved evaluator commit, open non-draft PR, current base/head, latest attempt, conclusions, source/policy/evaluator digests, complete cases/cleanup, and current independent exact-head approval. Candidate settings cannot authorize themselves. New pushes, dismissed/change-requested reviews, reruns, and base changes require revalidation. Query failure, stale/incomplete evidence, wrong App/workflow/SHA, or forged artifacts fail closed.
+
+The controlled-host program and polling templates exist, but App identity/host and live revocation acceptance are missing. Add the dedicated required check only after real deployment/acceptance. github-main-ruleset.json is a minimum template, not full source authentication.
+
+## Deployment and negative acceptance sequence
+
+1. For each current candidate, obtain actual independent exact-head review; CatGrocery's write access was confirmed October 7.
+2. Initial baseline migration completed October 6. Candidate-added reviewers never inherit old-baseline authority automatically.
+3. Deploy and verify correct-head publication and revocation when conditions cease to hold.
+4. Apply intended rules to an isolated acceptance branch: independent CODEOWNER approval, stale-review dismissal, other-person last-push approval, resolved conversations, strict required checks, no deletion/force push/bypass.
+5. With a non-admin identity and non-draft PR, verify denial without approval, with failed checks, after SHA changes, and with forged same-name checks from another App/workflow. Verify direct/force push denial and legitimate merge success only on the acceptance branch.
+6. Preserve actor roles, rule IDs, base/head, approvals/check identities, HTTP responses, and before/after SHAs. Unexpected success is a failed test, not evidence to delete. Do not probe main with potentially successful unsafe merges.
+7. After acceptance, read back main rules. Isolated behavioral acceptance and main configuration readback are distinct; draft PR BLOCK, local refusal, successful CI, or owner/admin access is not a substitute.
+
+Remote behavioral acceptance remains NOT_RUN. Earlier closed draft PR #5 being blocked does not prove ordinary-developer enforcement.

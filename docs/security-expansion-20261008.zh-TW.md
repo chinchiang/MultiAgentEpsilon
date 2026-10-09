@@ -1,6 +1,10 @@
+[正體中文](#zh-tw) | [English](#en)
+
+<a id="zh-tw"></a>
+
 # 2026-10-08 後續擴充與驗收
 
-本輪候選版本延續已合併的 main `a5d1ba1`，尚待獨立審查合併。正式 main 的 704 項回歸及簽章驗收屬於先前提交，不自動適用於本輪。
+本文件保留 2026-10-08 擴充過程。後續 PR #16／#17 已獨立核准並合併，正式 main `438d7a4` 的 787 項測試、正反例與真實簽章已驗收（[run 37853277868](https://github.com/chinchiang/MultiAgentEpsilon/actions/runs/37853277868)）。下方私人儲存庫失敗屬歷史批次。
 
 ## 依賴漏洞閘門
 
@@ -60,10 +64,46 @@ AWS STS 經既有非機密設定選擇器確認回覆 ExpiredToken；已要求�
 
 ## 簽章失敗不能留下可合併的綠燈
 
-候選 CI [37781203657](https://github.com/chinchiang/MultiAgentEpsilon/actions/runs/37781203657) 的評估工作完成 760 項回歸及正反例，但簽章工作因 GitHub 回覆「個人私人儲存庫不支援 artifact attestation」而失敗。這是失敗批次，不能列為完整 CI 成功或正式簽章驗收。使用者選擇恢復公開；目前連線修改可見度回覆 403，需擁有者在 GitHub 設定完成，程式不自行更改其他權限或移除簽章要求。
+候選 CI [37781203657](https://github.com/chinchiang/MultiAgentEpsilon/actions/runs/37781203657) 的評估工作完成 760 項回歸及正反例，但簽章工作因 GitHub 回覆「個人私人儲存庫不支援 artifact attestation」而失敗。這是失敗批次，不能列為完整 CI 成功或正式簽章驗收。當時連線修改可見度回覆 403；其後擁有者已恢復公開，完整重跑及簽章成功，未移除簽章要求。
 
 本輪進一步將原評估工作的顯示名稱改為 `trusted-security-evaluation`，新增無權杖、無 checkout、無寫入權限的最終工作 `trusted-security-pilot`，依賴評估與簽章兩個工作。最終工作使用 `always()`，只有兩項結果都是 success 才通過；failure／cancelled／skipped 都失敗。手動執行使用 `manual-security-completion`，不能冒充必要檢查。
 
 發布器要求評估、簽章、最終關卡三個工作及指定步驟全部成功。過渡期來源驗證器也重新讀取整個 workflow 的最新狀態及 attempt，防止既有 main 的評估綠燈掩蓋簽章失敗。16 種上游結果組合以實際 shell 回歸，另有整體 workflow 失敗、簽章失敗、最終工作缺失／跳過及缺少必要步驟等反例。
 
-此修改待獨立核准及合併。現行 main 尚未包含最終關卡；不能只看舊式評估工作綠燈就合併，須核對整體 workflow 與來源。main 真實歷史簽章驗收仍有效，但不是本輪失敗的替代證據。
+此修改已經獨立核准並合併，現行 main 包含最終關卡。合併仍須核對整體工作流程與來源；失敗批次保留，成功證據來自之後的完整重跑。
+
+<a id="en"></a>
+
+# Security expansion: 2026-10-08
+
+This records the expansion later merged into main 438d7a4: 787 tests, fixed 32/0 and seeded 32/9 AUTH results, cleanup, and real signature verification in run 37853277868. Earlier candidate/private-repository failures remain historical, not the final result.
+
+## G1: locked-package SBOM and OSV
+
+CycloneDX 1.6 describes declared pinned Python lock contents and approved hashes, not installed runtime/image contents. OSV queries exact package versions at fixed HTTPS endpoints, up to 128 packages/four workers/20-second requests/1 MiB responses, with no redirects/retries/arbitrary URLs. Every advisory blocks regardless of missing severity. Partial pagination, duplicate/wrong packages, withdrawn or duplicate advisories, oversized/unavailable responses produce incomplete/error evidence.
+
+G1 retains package/version/hash, query/advisory/CVE metadata, coverage, and partial-error evidence. Fresh SBOM/queries/provenance/findings must agree; old G1 evidence cannot pass. OSV is unsigned, not KEV/EPSS/behavioral analysis or other-ecosystem coverage. Package provenance verification remains part of G1.
+
+## AUTH and review variants
+
+AUTH expanded from 18 to 32 cases: session expiration/logout, anonymous/forged sessions, owner/tenant deletion, allowed owner/admin paths, repeat deletion, and SQL-like input. HTTP JSON and full database snapshots are checked. The bridge supports DELETE only as needed; app privileges grant items DELETE/users SELECT without schema-creation authority. Seeded variant must produce exactly nine IDs; seven additional real-container mutations must produce intended findings, never merely tool failures. This is not full-product DAST/CSRF/JWT-reset/ASVS coverage.
+
+Catalog v3 preserves B01–B12 and adds B13–B16: sibling-path-prefix and hostname-only SSRF checks, paired with fixed full-boundary checks. Real temporary-file behavior and MockTransport verify these without internal traffic. Existing v2 model results are not v3 evidence. GLM live remains paused; bias reduction remains unestablished.
+
+```bash
+.venv/bin/python -I scripts/model_review.py --suite variants
+.venv/bin/python -I scripts/model_review.py --live --provider gemini --provider bedrock --case B13 --case B14 --rounds 2 --output-tokens 1024
+.venv/bin/python -I scripts/model_review.py --live --provider gemini --provider bedrock --case B15 --case B16 --rounds 2 --output-tokens 1024
+```
+
+Two cases/two providers/two rounds use eight calls and 8,192 reserved output tokens, under 16 calls/130 seconds. No increased budgets or silent retries.
+
+## GitHub and historical acceptance
+
+Native read-only GitHub proxy access needs no repository PAT; authorized mutations stay bounded. Audit BLOCK is not ordinary-developer behavioral proof. Main rules are active and both independent reviewers have write access, but dedicated App/installation/host remain missing. Deploy only independently approved main, not a successful candidate branch.
+
+The locked 23-package set returned zero advisories. A deliberately uninstalled urllib3 1.25.11 negative fixture returned 20 advisories/20 aliases; it was queried, not installed. Offline variant collection used 16 calls/8,192 reserved tokens: each mock had four TP/four TN, zero FP/FN, eight comparable agreeing pairs, cleanup complete. These prove mechanics, not model quality.
+
+AWS STS returned ExpiredToken for v3 live acceptance, which remained pending. Historical candidate run 37781203657 had 760 passing tests but failed artifact signing because GitHub did not support that personal private repository's attestations; evaluation alone was not a complete pass. The owner later restored public visibility; full main run 37853277868 succeeded with verified signatures and 787 tests. Signatures were not removed to bypass platform eligibility.
+
+The final trusted-security-pilot job has no permissions/checkout and runs always, succeeding only if evaluation and signing both succeed. Manual runs use distinct names. Publisher validates all three jobs/steps, full workflow source, attempt, and signed artifact. All 16 upstream status combinations were tested in shell regressions. This final gate is merged, not merely a candidate proposal. Remaining work includes dedicated-App deployment/binding, actual developer-role negative acceptance, v3 live model samples, product applicability, broader languages/installed SBOMs, and operational governance.

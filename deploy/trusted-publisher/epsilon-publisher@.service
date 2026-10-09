@@ -1,5 +1,5 @@
 [Unit]
-Description=Dedicated trusted security check publisher for PR %i
+Description=PR %i 專用可信安全檢查發布器 / Dedicated trusted security check publisher for PR %i
 After=network-online.target
 Wants=network-online.target
 
@@ -9,8 +9,8 @@ User=epsilon-publisher
 Group=epsilon-publisher
 WorkingDirectory=/opt/epsilon-publisher/app
 EnvironmentFile=-/etc/epsilon-publisher/network.env
-# The App key stays root-owned (0600) on disk; systemd hands the service a private
-# read-only copy, so the service account can neither read nor replace the original.
+# App 原始私鑰維持 root 擁有及 0600；systemd 提供服務私有的 / The App key stays root-owned (0600) on disk; systemd hands the service a private
+# 唯讀副本，服務帳號不能讀取或替換原始檔。 / read-only copy, so the service account can neither read nor replace the original.
 LoadCredential=github-app.pem:/etc/epsilon-publisher/github-app.pem
 ExecStart=/usr/bin/python3 -I /opt/epsilon-publisher/app/scripts/publish_trusted_check.py --settings /etc/epsilon-publisher/publisher.json --gate-policy /etc/epsilon-publisher/gate-policy.json --private-key ${CREDENTIALS_DIRECTORY}/github-app.pem --lock-file /var/lib/epsilon-publisher/publisher.lock --state-file /var/lib/epsilon-publisher/pr-%i-state.json --pr %i --output /var/lib/epsilon-publisher/pr-%i.json
 TimeoutStartSec=300

@@ -1,10 +1,13 @@
 #!/usr/bin/env python3
-"""Loopback fixed variant only. Schema must have been created by the smoke runner."""
+"""僅以 loopback 啟動修正版；資料庫 schema 須先由 smoke runner 建立。
+
+Loopback fixed variant only. Schema must have been created by the smoke runner."""
 import argparse
 import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+if __name__ == "__main__":
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import uvicorn
 from fixture_app.app import create_app, database_url
 

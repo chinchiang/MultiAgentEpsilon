@@ -1,12 +1,14 @@
-"""Bounded subprocess I/O, also used before third-party dependencies are installed."""
+"""有限額的子程序 I/O，安裝第三方套件前也可使用。
+
+Bounded subprocess I/O, also used before third-party dependencies are installed."""
 import os
 import selectors
 import subprocess
 import time
 
 
-# Every Docker call targets one daemon: an image built or a database started elsewhere
-# (DOCKER_HOST, contexts, rootless) would not be the one the isolated run uses.
+# 所有 Docker 呼叫都使用同一 daemon；在其他環境建置的映像或資料庫 / Every Docker call targets one daemon: an image built or a database started elsewhere
+# 不會是隔離執行所使用的實例，包含 DOCKER_HOST、context 與 rootless 差異。 / (DOCKER_HOST, contexts, rootless) would not be the one the isolated run uses.
 DOCKER_SOCKET = 'unix:///var/run/docker.sock'
 
 
@@ -20,7 +22,9 @@ def docker_environment():
 
 
 def bounded_output(command, payload, *, timeout=5, limit=131072, env=None):
-    """Bound time and stdout even if candidate processes forge the bridge output."""
+    """即使候選偽造 bridge 輸出，仍限制時間與標準輸出大小。
+
+Bound time and stdout even if candidate processes forge the bridge output."""
     if len(payload) > 16384:
         raise ValueError('request exceeds bridge limit')
     deadline = time.monotonic() + timeout

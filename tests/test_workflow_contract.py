@@ -1,4 +1,6 @@
-"""Text-level contract for the trusted workflow; no YAML parser is in the approved lock."""
+"""可信工作流程的文字契約檢查；核准 lock 沒有 YAML parser。
+
+Text-level contract for the trusted workflow; no YAML parser is in the approved lock."""
 import re
 import itertools
 import subprocess
@@ -15,8 +17,8 @@ def job_name_expression():
 
 
 def test_manual_runs_never_report_under_the_required_check_name():
-    # GitHub reports a job's check run under its evaluated name. A maintainer-
-    # selected manual ref must not satisfy the required trusted-security-pilot check.
+    # GitHub 用 job 計算後名稱發布 check；維護者手動 / GitHub reports a job's check run under its evaluated name. A maintainer-
+    # 選擇的 ref 不可滿足必要 trusted-security-pilot。 / selected manual ref must not satisfy the required trusted-security-pilot check.
     assert job_name_expression() == ("${{ github.event_name == 'workflow_dispatch' && "
                                      "'manual-security-evaluation' || 'trusted-security-evaluation' }}")
     assert "${{ github.event_name == 'workflow_dispatch' && 'manual-security' || 'trusted-security' }}" in WORKFLOW
@@ -24,7 +26,7 @@ def test_manual_runs_never_report_under_the_required_check_name():
 
 def test_candidate_workflow_triggers_are_not_reintroduced():
     triggers = WORKFLOW.split("\npermissions:")[0]
-    # pull_request runs candidate-controlled YAML; only the base-branch workflow may evaluate PRs.
+    # pull_request 使用候選控制的 YAML；只有 base workflow 可評估 PR。 / pull_request runs candidate-controlled YAML; only the base-branch workflow may evaluate PRs.
     assert re.search(r"^  pull_request:", triggers, re.MULTILINE) is None
     assert re.search(r"^  pull_request_target:\n    branches: \[main\]", triggers, re.MULTILINE)
     assert "ref: ${{ github.event.pull_request.base.sha || github.sha }}" in WORKFLOW

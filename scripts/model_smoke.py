@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
-"""Run the fixed synthetic gateway fixture. Live calls are explicit opt-in."""
+"""執行固定合成 gateway 測試；真實呼叫必須明確啟用。
+
+Run the fixed synthetic gateway fixture. Live calls are explicit opt-in."""
 import argparse
 import asyncio
 import hashlib
@@ -15,9 +17,11 @@ from pathlib import Path
 from urllib.parse import urlsplit
 
 ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(ROOT))
+if __name__ == "__main__":
+    sys.path.insert(0, str(ROOT))
 
 from security_harness.llm.adapters import BedrockAdapter, GeminiAdapter, GLMAdapter
+from security_harness.llm.lmstudio import LMStudioAdapter
 from security_harness.llm.gateway import Gateway, Limits, MockAdapter, ModelError, Request
 from security_harness.llm.transport import AwsCLI
 from security_harness.llm.lifecycle import persist, read_report, supervise
@@ -33,7 +37,9 @@ PLACEHOLDER_HOSTS = {"local.example.invalid"}
 
 
 def setting(name, required=True):
-    """Unset values and the documented .env.example placeholders are configuration
+    """未設定值與 .env.example 佔位值屬設定錯誤，應在預留呼叫前拒絕，而非歸類為傳輸失敗。
+
+Unset values and the documented .env.example placeholders are configuration
     errors, not transport failures after a reserved call."""
     value = os.environ[name] if required else (os.environ.get(name) or None)
     if value is not None and (not value.strip() or value.startswith("replace-with-")
@@ -47,6 +53,9 @@ def configured_adapter(provider, work=None, http=None):
         return MockAdapter()
     if provider == "gemini":
         return GeminiAdapter(setting("GEMINI_MODEL_ID"), setting("GEMINI_API_KEY"), http=http)
+    if provider == "lmstudio":
+        return LMStudioAdapter(setting("LMSTUDIO_MODEL_ID"), setting("LMSTUDIO_BASE_URL"),
+                               setting("LMSTUDIO_API_KEY", False), http=http)
     if provider == "glm":
         return GLMAdapter(setting("GLM_MODEL_ID"), setting("GLM_CHAT_URL"), setting("GLM_API_KEY", False), http=http)
     if provider != "bedrock":
@@ -59,10 +68,11 @@ def configured_adapter(provider, work=None, http=None):
 
 
 def implementation_digest():
-    paths = [Path(__file__).resolve(), ROOT / 'scripts/model_worker.py', ROOT / 'scripts/model_process.py',
-             ROOT / 'security_harness/lifecycle.py', ROOT / 'security_harness/results.py',
-             ROOT / 'security_harness/scope.py', ROOT / 'security/model-roe.json',
-             *sorted((ROOT / "security_harness/llm").glob("*.py"))]
+    # 套件初始化與共用核心亦會影響匯入，全部納入實作摘要。
+    # Include package initializers and shared core code in the implementation binding.
+    paths = sorted({ROOT / 'scripts/__init__.py', ROOT / 'security_harness/__init__.py',
+                    ROOT / 'requirements.lock', ROOT / 'security/model-roe.json',
+                    *ROOT.glob('scripts/model_*.py'), *ROOT.glob('security_harness/**/*.py')})
     manifest = [(p.relative_to(ROOT).as_posix(), hashlib.sha256(p.read_bytes()).hexdigest()) for p in paths]
     return hashlib.sha256(json.dumps(manifest, separators=(",", ":")).encode()).hexdigest()
 
@@ -73,7 +83,7 @@ def initial_report(providers, run_id):
             "data_class": "synthetic", "fixture": "fixed-ack-v1", "providers": providers,
             "started_at": datetime.now(timezone.utc).isoformat(),
             "implementation_sha256": implementation_digest(), "status": "INCOMPLETE", "code": None,
-            "limits": asdict(limits), "total_timeout_seconds": 30 * len(providers) + 10,
+            "limits": asdict(limits), "total_timeout_seconds": min(130, 30 * len(providers) + 10),
             "max_output_tokens_per_call": FIXTURE.max_output_tokens,
             "checks": [{"provider": p, "live": p != "mock", "status": "NOT_RUN", "code": None} for p in providers],
             "calls": [], "reserved_calls": 0, "reserved_output_tokens": 0,
@@ -137,8 +147,8 @@ def require_model_roe(parser, providers, planned_calls):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--provider", choices=("mock", "gemini", "bedrock", "glm"), action="append")
-    parser.add_argument("--live", action="store_true", help="permit selected live providers for the fixed synthetic fixture")
+    parser.add_argument("--provider", choices=("mock", "gemini", "bedrock", "glm", "lmstudio"), action="append")
+    parser.add_argument("--live", action="store_true", help="允許選定供應商執行固定合成測試 / permit selected live providers for the fixed synthetic fixture")
     parser.add_argument("--output", type=Path)
     args = parser.parse_args()
     providers = args.provider or ["mock"]

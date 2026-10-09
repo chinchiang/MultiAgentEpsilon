@@ -1,6 +1,10 @@
+[正體中文](#zh-tw) | [English](#en)
+
+<a id="zh-tw"></a>
+
 # 合成資料模型 gateway
 
-gateway 提供共用 `Request`／`Reply`、離線 mock、Gemini `generateContent`、GLM 的 OpenAI-compatible chat，以及 Bedrock `Converse` adapter。不新增 Python 依賴；HTTP 使用既有 httpx，Bedrock 使用已安裝的 AWS CLI v2 與受管理的 AWS credential chain。
+gateway 提供共用 `Request`／`Reply`、離線 mock、Gemini `generateContent`、GLM 的 OpenAI-compatible chat，Bedrock `Converse`，以及 LM Studio 文字 adapter。不新增 Python 依賴；HTTP 使用既有 httpx，Bedrock 使用已安裝的 AWS CLI v2 與受管理的 AWS credential chain。
 
 ## 執行
 
@@ -18,7 +22,7 @@ gateway 提供共用 `Request`／`Reply`、離線 mock、Gemini `generateContent
 
 Bedrock 透過 AWS CLI 子程序呼叫時，只傳入 `AWS_*`（不含 endpoint 覆寫）與基本程序、代理及 CA 環境變數；`GH_TOKEN` 或其他供應商金鑰等無關權杖不會進入 CLI 或其 `credential_process`。Gemini 若回報推理詞元卻缺少可見輸出計數，視為用量格式錯誤，不能略過輸出預算檢查。
 
-每個供應商只收到同一個固定 ACK fixture，不接受 repository 路徑、附件或任意 prompt 參數。每個供應商最多 1 次呼叫、要求最多 256 output tokens、單次期限 30 秒；不重試、不自動切換付費供應商。每個 HTTP 操作另有 10 秒 I/O timeout。supervisor 的工作期限為供應商數 × 30＋10 秒，最多 130 秒，期限後進行程序清理。退出碼 0 必須同時滿足全部固定回應驗證及清理完成；任一失敗、缺設定或取消為 1。
+每個供應商只收到同一個固定 ACK fixture，不接受 repository 路徑、附件或任意 prompt 參數。每個供應商最多 1 次呼叫、要求最多 256 output tokens、單次期限 30 秒；不重試、不自動切換付費供應商。一般 HTTP 操作另有 10 秒 I/O timeout，LM Studio 使用涵蓋模型清單與推論的 30 秒呼叫期限。supervisor 的工作期限為 min(130, 供應商數 × 30＋10) 秒，期限後進行程序清理。退出碼 0 必須同時滿足全部固定回應驗證及清理完成；任一失敗、缺設定或取消為 1。
 
 從報告 schema 2 起，正式證據位於 `artifacts/<run-id>/report.json`，開始執行前即建立 INCOMPLETE，逐供應商原子更新進度。`--output` 保留為額外匯出，必須使用新路徑；若 supervisor 被 SIGKILL，匯出檔可能停留在初始 INCOMPLETE，應依其 `canonical_report` 回查正式報告。janitor 不依任意匯出路徑寫檔。
 
@@ -86,6 +90,55 @@ janitor 只處理已死亡的 owner；先停止 worker，再重新盤點 AWS 子
 
 盲測的 Gemini／Bedrock 現在使用原生 JSON schema；Gemini 3 Flash 審查使用 LOW 思考程度，思考詞元納入回報輸出用量。固定 ACK 仍為純文字。本機嚴格驗證、截斷阻擋與既有預算不變，詳見[設定、限制與真實驗收](structured-output.zh-TW.md)。
 
-目前可執行的介接器只有 mock、Gemini、Bedrock 與 GLM；設定入口為 `.env.example` 與對應環境變數，不讀取模型清單 JSON。GLM 真實連線依使用者指示暫停，離線協定測試持續保留。每次送出呼叫前會將預留次數與權杖上限同步寫入磁碟；程序遭 SIGKILL 時可保留 IN_FLIGHT 紀錄，但無法據此推算遠端實際費用或保證遠端推論已取消。
+目前可執行的介接器為 mock、Gemini、Bedrock、GLM 與 LM Studio；設定入口為 `.env.example` 與對應環境變數，不讀取模型清單 JSON。GLM 真實連線依使用者指示暫停，離線協定測試持續保留。每次送出呼叫前會將預留次數與權杖上限同步寫入磁碟；程序遭 SIGKILL 時可保留 IN_FLIGHT 紀錄，但無法據此推算遠端實際費用或保證遠端推論已取消。
 
 環境重建後可執行 `python -I scripts/install_aws_cli.py`，安裝官方 PGP 簽章已驗證並固定封存雜湊的 AWS CLI 2.37.10。模型指令使用 `AWS_CLI_PATH="$PWD/.tools/aws-bin/aws"`；SSO profile 與非機密設定另存於忽略的 `.state/bedrock/config`，以 `AWS_CONFIG_FILE` 指定。臨時憑證到期仍須經安全環境更新，不會從聊天或測試報告載入。
+
+## LM Studio 地端文字模型
+
+新增 `--provider lmstudio`，設定 `LMSTUDIO_BASE_URL`、`LMSTUDIO_MODEL_ID` 及選用的 `LMSTUDIO_API_KEY`。只對字面 loopback 位址開放 HTTP，其餘維持 HTTPS／443；先查核 `/v1/models` 的精確 ID，再傳送文字與 JSON schema。完整設定、網路界線及待完成真實驗收見 [LM Studio 文件](lmstudio.zh-TW.md)。固定 ACK 的整輪期限為 `min(130, 30 × 供應商數 + 10)` 秒；新增供應商不會提高 130 秒上限。
+
+<a id="en"></a>
+
+# Bounded multi-model gateway pilot
+
+The shared gateway supports offline mocks, Gemini generateContent, Bedrock Converse via AWS CLI, GLM OpenAI-compatible chat, and LM Studio OpenAI-compatible text chat. Existing httpx and verified AWS CLI are used; no similarly named SDK is installed. Model opinions remain advisory and do not alter deterministic gates/container authority.
+
+```bash
+.venv/bin/python -I scripts/model_smoke.py
+.venv/bin/python -m pytest tests/test_model_gateway.py tests/test_model_hardening.py tests/test_lmstudio.py
+.venv/bin/python -I scripts/model_smoke.py --live --provider gemini
+.venv/bin/python -I scripts/model_smoke.py --live --provider bedrock
+.venv/bin/python -I scripts/model_smoke.py --live --provider lmstudio
+```
+
+Actual cloud/local providers require --live, valid settings, and separate security/model-roe.json authorization. Unknown/duplicate/malformed providers and more than the approved 16 planned live calls reject before I/O; security/roe.json's deterministic scope still forbids automatic LLM calls. GLM live remains paused. AWS subprocess environments use only the AWS allowlist (excluding endpoint overrides), basic paths/proxy/CA settings, not other providers' secrets.
+
+ACK probes use fixed synthetic text only: one request/provider, 256 output tokens, 30-second call deadline; normal HTTP I/O defaults to ten seconds (LM Studio discovery/chat uses the encompassing call deadline). Supervisor deadline is min(130, 30 × providers + 10) seconds. No arbitrary prompt/repository input, retries, provider switch, or cap increases. Schema-2 canonical reports use atomic replacement and per-run paths; exports require a new path and janitor never writes arbitrary export destinations.
+
+| Provider | Nonsecret configuration and credentials |
+|---|---|
+| Gemini | GEMINI_MODEL_ID, secure GEMINI_API_KEY; fixed Google endpoint |
+| Bedrock | BEDROCK_MODEL_ID, BEDROCK_REGION, valid AWS identity; optional AWS_CLI_PATH; SSO role/profile names do not establish a model inference ID |
+| GLM | GLM_MODEL_ID, GLM_CHAT_URL exact HTTPS:443 /v1/chat/completions, optional secure key; internal route/TLS must be accepted separately |
+| LM Studio | LMSTUDIO_BASE_URL exact /v1, LMSTUDIO_MODEL_ID from /v1/models, optional secure key; loopback-only HTTP exception, otherwise HTTPS:443 |
+
+Use secure environment settings, never committed keys. Managed outbound credentials and existing proxy/CA settings take precedence over unnecessary interactive login. Do not disable TLS for internal services. See [LM Studio setup](lmstudio.zh-TW.md#en).
+
+Input is limited to 16 KiB, HTTP response to 128 KiB, text to 64 KiB. No redirects, compressed/non-JSON responses, duplicate keys, nonfinite numbers, invalid endings, tools, code execution, or refusals accepted as answers. System/user roles remain separate. Gemini candidate plus thinking usage counts toward bounds; missing visible-output usage is invalid/unknown, never fabricated. Strict output formatting is further described in [structured output](structured-output.zh-TW.md#en).
+
+Bedrock request JSON goes through sealed anonymous Linux memfd, not named plaintext files, shell commands, prompt arguments, or retries/endpoint overrides. Registered AWS children await stdin handshake; stdout is bounded and stderr text is not retained. Cancellation kills the owned group. Sealing/proc support is required with no plaintext fallback. Parent descriptors close on failure; CLI parsing/sealing are regression-tested.
+
+Evidence retains call/request/response digests, bounded status/usage/time, redacted readable model labels, and unknown/null usage/cost where absent. ARNs/account-bearing labels are redacted. ACK raw prompts/replies, endpoint URLs, and keys are excluded. Valid blind-review response_text is retained for scoring rederivation; invalid bodies are not. Synthetic labeling is not a DLP system and role separation does not prove prompt-injection immunity. Tokens are not exact money; canceled remote work may still bill.
+
+## Lifecycle and historical observations
+
+Initial October 4 offline acceptance had 56 tests. Gemini ACK succeeded (35 input/9 output tokens). GLM proxy CONNECT returned 403 before the application, so no inference/auth/model claim was possible. Bedrock then lacked usable profile/model settings; later results supersede this.
+
+October 5 added registered supervisor/worker/AWS processes with PID/start ticks/boot ID/UID persisted before handshake, AWAITING_CLEANUP until parent completion, and 29 lifecycle regressions. Worker bounds: 2 GiB address space, 512 MiB data, CPU soft/hard 30/35 seconds, 1 MiB file, 128 descriptors, no core dumps. SIGTERM/SIGINT/deadline clean resources; SIGKILL is recovered by janitor.
+
+Janitor stops worker then rescans AWS groups, takes flock, verifies process identity, retries cleanup failures, and marks orphaned runs CANCELLED without upgrading old success. Corrupt reports become minimal failures without raw errors. Losing the whole workspace requires platform recovery; remote billing and unregistered direct-adapter processes are outside these guarantees.
+
+AWS CLI 2.37.9 did not accept piped /dev/stdin JSON as expected; seekable sealed memfd corrected the actual CLI path. Some Claude models rejected temperature, so Bedrock retains model-default sampling while Gemini/GLM/LM Studio use zero. This difference is recorded, not hidden. If explicitly supplied temporary credentials are shadowed by an invalid inherited AWS_PROFILE, remove the profile only for a validated command after STS confirms the intended account/role through that same chain; managed identity remains preferable. Historical Bedrock ACK reported 63 input/19 output with cleanup. Metadata-query denial neither proves nor disproves inference permission.
+
+Blind reviews, repeated observations, human identity, and model-family comparisons have separate acceptance requirements. New LM Studio code has offline/loopback-fixture coverage; real Nemotron weights/server/schema behavior are still pending. GLM live remains paused; no arbitrary model registry or automatic model download was added.
