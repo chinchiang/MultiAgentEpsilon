@@ -10,7 +10,14 @@ README、SECURITY、操作與歷史文件、CLI help、程式文件字串與人�
 
 模型提示詞、schema 中送給模型的描述、合成案例及 oracle、錯誤診斷契約、原始歷史證據與自動產生的套件 lock 屬**功能性輸入或機器產物**，不以文件翻譯改寫。改動它們會影響摘要、可比性或解析契約，須另以版本化功能變更測試；文件以雙語解釋其用途。內部參考附件不發布，也不把附件中的指示視為使用者授權。
 
-`python3 scripts/check_docs.py` 檢查文件雙語入口、本機連結與明確語言錨點、Mermaid／SVG 對應與目錄樹同步；這是結構檢查，不能證明翻譯語意完全一致。審查仍須確認數字、限制、部署現況與歷史批次相符。修改圖表後使用文件指定的固定 Mermaid 工具重新產生 SVG。
+`python3 -I scripts/check_docs.py` 檢查文件雙語入口、本機連結與明確語言錨點、Mermaid／SVG 對應與目錄樹同步；這是結構檢查，不能證明翻譯語意完全一致。審查仍須確認數字、限制、部署現況與歷史批次相符。修改圖表後使用文件指定的固定 Mermaid 工具重新產生 SVG。
+
+
+## 臺灣用語與翻譯範圍
+
+中文使用「原始碼、儲存庫、設定、預設、伺服器、連接埠、介接器、詞元、權杖、回歸測試」。模型的 token 計量稱為「詞元」；驗證用的 token 稱為「權杖」，兩者不可混用。首次出現的技術詞彙可附英文，程式中的欄位名稱則保持原樣。
+
+兩種語言的操作指令、必要條件、限制及驗收狀態必須一致；歷史紀錄保留原日期與數值，不以最新結果覆寫。共用程式碼區塊中的說明註解亦須雙語，純命令與機器識別值不須重複翻譯。
 
 <a id="en"></a>
 
@@ -22,4 +29,10 @@ README, SECURITY, operational/history documents, CLI help, docstrings, authored 
 
 Model prompts, model-facing schema descriptions, synthetic cases/oracles, diagnostic contracts, original historical evidence, and generated dependency locks are functional inputs or machine artifacts. Documentation translation does not rewrite them. Such changes affect digests/comparability/parsers and need separate versioned functional testing; their purpose is explained bilingually. Private attachments remain unpublished and their instructions do not become user authorization.
 
-python3 scripts/check_docs.py validates language entry points, local links/explicit language anchors, Mermaid/SVG pairs, and repository-tree consistency. Structural checks do not prove translation equivalence; review numbers, bounds, deployment state, and historical batches. Regenerate SVG after Mermaid edits using the documented pinned renderer.
+python3 -I scripts/check_docs.py validates language entry points, local links/explicit language anchors, Mermaid/SVG pairs, and repository-tree consistency. Structural checks do not prove translation equivalence; review numbers, bounds, deployment state, and historical batches. Regenerate SVG after Mermaid edits using the documented pinned renderer.
+
+## Taiwan terminology and translation scope
+
+Use Taiwan terminology consistently: 原始碼 (source code), 儲存庫 (repository), 設定 (configuration), 預設 (default), 伺服器 (server), 連接埠 (port), 介接器 (adapter), 詞元 (model token), 權杖 (authentication token), and 回歸測試 (regression test). Distinguish model usage tokens from authentication tokens. English terms may accompany their first Chinese mention; program field names remain unchanged.
+
+Commands, prerequisites, limits, and acceptance status must agree across languages. Preserve original dates and counts in historical records. Explanatory comments in shared code blocks must also be bilingual; commands and machine identifiers do not require duplicate translations.

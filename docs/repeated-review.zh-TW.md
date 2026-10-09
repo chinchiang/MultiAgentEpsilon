@@ -7,12 +7,12 @@
 `--rounds` 可預先指定一至四輪，預設一輪。所有輪次共用同一份計畫、同一個監督程序及同一個閘道額度，沒有逐輪加額、失敗退款或自動重試。單批仍最多十六次請求、預留 8,192 個輸出詞元；整批期限仍為 `min(130, 20 × 請求數 + 10)` 秒。計算額度時先乘上供應商數、案例數與輪數，超限便在連線前拒絕。
 
 ```bash
-# 兩個模擬審查者、兩案、兩輪：八次離線請求，共預留 4,096 個輸出詞元。
+# 兩個模擬審查者、兩案、兩輪：八次離線請求，共預留 4,096 個輸出詞元。 / Two mock reviewers, two cases, two rounds: eight offline requests reserving 4,096 output tokens.
 .venv/bin/python -I scripts/model_review.py \
   --case B07 --case B08 --rounds 2
 
-# 真實配對：需要兩家都具有可用的身分、模型及連線。
-# 同樣八次請求，但每次 1,024 個輸出詞元，總預留額度 8,192。
+# 真實配對：需要兩家都具有可用的身分、模型及連線。 / Live pairs require working credentials, models, and connectivity for both providers.
+# 同樣八次請求，但每次 1,024 個輸出詞元，總預留額度 8,192。 / Eight requests at 1,024 output tokens each reserve 8,192 tokens in total.
 .venv/bin/python -I scripts/model_review.py --live \
   --provider gemini --provider bedrock --case B07 --case B08 \
   --rounds 2 --output-tokens 1024
@@ -35,7 +35,7 @@
 | `MISSING_FIELD`、`ENVELOPE_SCHEMA` | 必要的供應商封裝欄位缺漏或結構不符 |
 | `UNEXPECTED_CONTENT`、`EMPTY_TEXT` | 不支援的內容區塊或沒有可用文字 |
 | `USAGE_SCHEMA`、`STOP_REASON` | 用量型別或完成原因不符合契約 |
-| `REVIEW_SCHEMA`、`EVIDENCE_MISMATCH` | 盲測回答格式不符，或引用與指定原碼行不一致 |
+| `REVIEW_SCHEMA`、`EVIDENCE_MISMATCH` | 盲測回答格式不符，或引用與指定原始碼行不一致 |
 | `HTTP_CONTENT_TYPE` | HTTP 內容類型或編碼不符既有傳輸契約 |
 
 拒答、截斷、工具要求、逾時等繼續使用 `REFUSED`、`TRUNCATED`、`TOOL_REQUEST`、`DEADLINE`。只有供應商明確回報截斷時才使用截斷分類。無法確認原因時保留一般失敗，不猜測或補造診斷。這些分類不放寬任何接受條件，也不會重新讀取已丟棄的歷史失敗原文。

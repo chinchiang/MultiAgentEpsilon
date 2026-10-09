@@ -18,7 +18,7 @@ LMSTUDIO_MODEL_ID=nvidia/nemotron-3-nano-omni
 LMSTUDIO_API_KEY=
 ```
 
-ID 範例須以實際 `/v1/models` 為準。未設定驗證的同主機服務可留空金鑰；受控遠端入口應配置適當的存取控制與 TLS。使用名稱分類的 `family=nemotron` 不是權重或供應商身分的密碼學證明。
+ID 範例須以實際 `/v1/models` 為準。未設定驗證的同主機服務可留空金鑰；受控遠端入口應設定適當的存取控制與 TLS。使用名稱分類的 `family=nemotron` 不是權重或供應商身分的密碼學證明。
 
 ## 雲端如何連到地端
 
@@ -29,7 +29,7 @@ HTTP 只允許字面 `127.0.0.1` 或 `[::1]`、明確的 1024–65535 連接埠�
 ## 執行與預算
 
 ```bash
-# 固定合成 ACK，不傳送專案原碼。 / Fixed synthetic ACK, no project source.
+# 固定合成 ACK，不傳送專案原始碼。 / Fixed synthetic ACK, no project source.
 .venv/bin/python -I scripts/model_smoke.py --live --provider lmstudio
 
 # 先做兩案單模型；再做三模型同批比較。 / Two local cases, then a three-model batch.

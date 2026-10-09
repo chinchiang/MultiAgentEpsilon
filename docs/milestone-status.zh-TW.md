@@ -4,14 +4,14 @@
 
 # 第一個里程碑：實作狀態與驗收方式
 
-本文件記錄**現況與可辨識的歷史驗收**（2026-10-09）。正式 main `438d7a4` 已合併 PR #16／#17；787 項測試、32／0 正例與 32／9 負例、完整清理及真實簽章通過（[run 37853277868](https://github.com/chinchiang/MultiAgentEpsilon/actions/runs/37853277868)）。本輪 LM Studio 與雙語變更另行驗收。各批次的原始紀錄與當時的數字移至[里程碑歷史紀錄](milestone-history.zh-TW.md)。
+本文件記錄**現況與可辨識的歷史驗收**（2026-10-09）。PR #18 已獲獨立核准並合併至 `main`（`218fd7a`）。合併後的 [CI 執行 37866429806](https://github.com/chinchiang/MultiAgentEpsilon/actions/runs/37866429806) 通過 883 項測試，修正版 32 個案例／0 項缺陷為 ALLOW，指定缺陷版 32 個案例／9 項缺陷為 BLOCK；清理、證據摘要與真實簽章均已核對。專用 GitHub App 部署與真實 LM Studio 驗收仍待完成。各批次的原始紀錄與當時數字保留於[里程碑歷史紀錄](milestone-history.zh-TW.md)。
 
 ## 遠端治理
 
-- main 由規則集 24512048 保護：沒有 bypass、須經 PR 與 code owner 核准、推送新 commit 後舊核准失效、最後推送須另獲核准、未歸屬變更需額外核准，必要檢查為 GitHub Actions App 15368 的 `trusted-security-pilot`。最新狀態以 `python3 scripts/audit_merge_protection.py` 讀回為準。
+- main 由規則集 24512048 保護：沒有 bypass、須經 PR 與 code owner 核准、推送新 commit 後舊核准失效、最後推送須另獲核准、未歸屬變更需額外核准，必要檢查為 GitHub Actions App 15368 的 `trusted-security-pilot`。最新狀態以 `python3 -I scripts/audit_merge_protection.py` 讀回為準。
 - 目前可信清單為 chinchiang、CatGrocery 與 d98922036ntu；CatGrocery 已接受協作邀請並具 write 權限（2026-10-07 讀回）。PR #14 已合併這項清單變更，三處設定一致；d98922036ntu 的 write 權限已於 2026-10-08 讀回確認。之後的 PR 依規則合併，不需再停用規則集；涉及受保護路徑的 PR，guard 另需具寫入權限、非作者、且未曾提交 PR 中任何 commit 的基準審查者核准。作者為 chinchiang 的 PR 在這項變更合併後可由 CatGrocery 或 d98922036ntu 獨立核准。
 - 首次基準遷移已於 2026-10-06 完成：擁有者暫時停用規則集，以 merge commit 合併 #6（`da567d8`）與 #7（`0ac31cb`）。文件 PR #10 也在規則集停用期間合併，沒有審查紀錄；之後規則集已恢復 active。
-- 必要檢查仍可由其他 workflow 以同名產生。`pull_request_target` 執行的是 PR **base 分支**上的 workflow，run 中繼資料不記錄 base；因此審查者在核准或合併前執行 `python3 scripts/verify_required_check.py --pr <編號>`，它要求檢查來自 `pull_request_target`、run 的 head 分支與此 PR 相同，且同一 SHA／head repository／分支沒有其他 base 或曾改 base 的 PR（含已關閉者）。專用 App 的 `epsilon/trusted-merge` 尚未建立、部署或綁定。
+- 必要檢查仍可由其他 workflow 以同名產生。`pull_request_target` 執行的是 PR **base 分支**上的 workflow，run 中繼資料不記錄 base；因此審查者在核准或合併前執行 `python3 -I scripts/verify_required_check.py --pr <編號>`，它要求檢查來自 `pull_request_target`、run 的 head 分支與此 PR 相同，且同一 SHA／head repository／分支沒有其他 base 或曾改 base 的 PR（含已關閉者）。專用 App 的 `epsilon/trusted-merge` 尚未建立、部署或綁定。
 
 ### 遷移後的真實流程驗收（2026-10-06）
 
@@ -55,7 +55,7 @@ PR #12 已由 CatGrocery 對最新 head `58d9bc0` 獨立核准，正式 [run 375
 
 1. **決定是否清除 git 歷史中的 AWS 帳號識別資訊。** 目前文件已移除，但 commit `2158448` 起的歷史仍含該帳號 ID 與權限集名稱；帳號 ID 不是 API 金鑰；完全移除需另行核准的歷史改寫與協作安排，本輪不暫停規則集或強推，且公開期間可能已被快取。清除後可加入針對帳號 ID 的 Gitleaks 規則（歷史仍含該值時，加入規則會使每次掃描 BLOCK）。
 2. **開啟 repository 的 Secret scanning、Push Protection、Dependabot alerts 與 Private vulnerability reporting**（`SECURITY.md` 指向此回報管道）。
-3. **完成專用 App 消費與部署驗收。** PR #16／#17 已經獨立核准並合併；main `438d7a4` 的 787 項測試及真實遠端簽章已驗證。待辦是受控主機上的 App 消費、必要檢查來源綁定及普通開發者拒絕探測，不能與已完成的簽章生成混為一談。
+3. **完成專用 App 消費與部署驗收。** PR #18 已經獨立核准並合併；main `218fd7a` 的 883 項測試及真實遠端簽章已驗證。待辦是受控主機上的 App 消費、必要檢查來源綁定及普通開發者拒絕探測，不能與已完成的簽章生成混為一談。
 4. 把 fork PR 的 workflow 核准政策改為所有外部貢獻者都需核准；開啟 Actions 的 SHA pinning 強制。
 5. 建立並部署專用 App、把 `epsilon/trusted-merge` 加入規則集，並以普通開發者身分完成繞過驗收。
 6. 選定授權條款（目前沒有 LICENSE，公開程式碼等同保留所有權利）。
@@ -71,7 +71,7 @@ PR #12 已由 CatGrocery 對最新 head `58d9bc0` 獨立核准，正式 [run 375
 - `pytest.xml`：政策、套件 metadata、真實 Gitleaks、歷史機密、RoE、基準變更及 PostgreSQL 正反例。
 - `http-smoke.json`：真實 loopback HTTP 健康、登入、合法讀取及同角色非法讀取。
 - `<run-id>/report.json`：每次新 run 的 G1、G2、AUTH 結果及 ALLOW／BLOCK；本輪候選缺陷版預期恰好 9 個政策指定的 AUTH findings，修正版預期 0。
-- `latest.txt`：最新 run 的索引。檢查 report 的 subject／policy digest 與當次原碼，不能將舊報告當成本次結果。
+- `latest.txt`：最新 run 的索引。檢查 report 的 subject／policy digest 與當次原始碼，不能將舊報告當成本次結果。
 
 `expect_block.py` 要求整個 run 的 `execution` 為 COMPLETED、沒有任何 errors、清理完成、variant 為 vulnerable、三項 gate 都確實完成、G1／G2 無 findings，且本輪候選 32 個授權案例中失敗的恰好是政策 `seeded_defect_case_ids` 列出的 9 個；工具 ERROR、清理失敗、來源在執行中變動、沒有案例或換成其他案例失敗都會使驗收失敗。
 
@@ -107,7 +107,7 @@ W 編號與 G0–G6 閘門編號都來自本地保留的原始規劃。依公開
 
 # Milestone status and acceptance
 
-Current reviewed main is 438d7a4 (2026-10-09), including PR #16/#17. Run [37853277868](https://github.com/chinchiang/MultiAgentEpsilon/actions/runs/37853277868) passed 787 tests, fixed32/0 and seeded32/9 AUTH, cleanup, and real signature verification. New LM Studio/bilingual work requires its own acceptance. Original dated totals remain in [history](milestone-history.zh-TW.md#en).
+Current reviewed main is `218fd7a` (2026-10-09), including independently approved PR #18. [Run 37866429806](https://github.com/chinchiang/MultiAgentEpsilon/actions/runs/37866429806) passed 883 tests, fixed 32/0 and seeded 32/9 AUTH, cleanup, evidence digests, and real signature verification. Dedicated GitHub App deployment and real LM Studio acceptance remain pending. Original dated totals remain in [history](milestone-history.zh-TW.md#en).
 
 ## Remote governance
 
@@ -137,19 +137,19 @@ Publisher rechecks mutable same-head PRs/timelines immediately before green, ope
 
 Owner decisions/actions: whether to separately authorize rewriting historical AWS account identifiers (not API secrets; may already be cached); enable/verify Secret scanning, Push Protection, Dependabot and private reporting with capable administrative access; choose a source license; provision dedicated App/installation/key/controlled Linux host and perform developer-role source/merge denial acceptance. Never paste credentials, disable rules, force-push history, or treat connector403 as an automatic-review denial. Current private-reporting enable attempt still returns403.
 
-Deployment must use approved merged main and explicit regenerated evaluator/policy pins, not a candidate. Existing main 438d7a4 is the reviewed deployment baseline until a later independently accepted merge. Real LM Studio endpoint/model/schema acceptance and renewed AWS credentials for new v3 Gemini/Claude samples remain separate; GLM live stays paused.
+Deployment must use approved merged main and explicit regenerated evaluator/policy pins, not a candidate. Reviewed main `218fd7a` is the accepted source for preparing a new deployment bundle; this does not update existing deployment pins or deploy the service. Real LM Studio endpoint/model/schema acceptance and renewed AWS credentials for new v3 Gemini/Claude samples remain separate; GLM live stays paused.
 
 ## Local acceptance and evidence
 
 ```bash
-python3 scripts/bootstrap.py
-python3 scripts/build_runtime.py
-python3 scripts/dev_db.py start
+python3 -I scripts/bootstrap.py
+python3 -I scripts/build_runtime.py
+python3 -I scripts/dev_db.py start
 .venv/bin/python -m pytest --junitxml=artifacts/pytest.xml
-.venv/bin/python scripts/smoke_http.py
-.venv/bin/python scripts/expect_block.py
-.venv/bin/python scripts/run_security.py
-python3 scripts/dev_db.py stop
+.venv/bin/python -I scripts/smoke_http.py
+.venv/bin/python -I scripts/expect_block.py
+.venv/bin/python -I scripts/run_security.py
+python3 -I scripts/dev_db.py stop
 ```
 
 pytest.xml records collected parametrized items, not test-function count. http-smoke.json verifies real loopback health/login/allowed and cross-owner reads. Each run report binds current subject/policy; latest.txt is only an index. expect_block requires COMPLETED/no errors/cleanup/vulnerable variant/all gates complete/G1-G2 clean/exact nine seeded IDs among32 AUTH cases. Tool errors, source drift, empty/different cases, or cleanup failure are failed negative acceptance.
@@ -163,7 +163,7 @@ pytest.xml records collected parametrized items, not test-function count. http-s
 | W05/W09 |32 AUTH cases/seven real mutations | Full G5 |
 | W06/W20 | G1 provenance/lock SBOM/OSV and G2 | Behavior/installed images/other ecosystems/G3 |
 | W08 | Active rules, remote positive/negative CI, run/base binding, all-commit exclusions | Dedicated source and actual non-admin anti-bypass probes |
-| W10–W14 | Gateway/adapters/blind/repeated framework; small Gemini/Claude live samples; LM Studio candidate | Local real inference, larger stability/bias experiments; GLM paused |
+| W10–W14 | Gateway/adapters/blind/repeated framework; small Gemini/Claude live samples; LM Studio text adapter | Local real inference, larger stability/bias experiments; GLM paused |
 | W15–W19 | Roadmap | Product applicability, long-term signed evidence/release/operations/data-budget governance |
 | W21 | Bounded local/model RoE and actual caps | Arbitrary assets/network scans/DNS/redirect/tool delegation authorization |
 | W22–W25 | Roadmap | Primary-source checks, maturity scoring, supplier acceptance, product vulnerability handling |
