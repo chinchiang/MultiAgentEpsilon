@@ -11,17 +11,17 @@
 ## 使用方式
 
 ```bash
-# 離線預設 injection 組：兩個有意見分歧的模擬審查者，6 個案例，共 12 次呼叫。
+# 離線預設 injection 組：兩個有意見分歧的模擬審查者，6 個案例，共 12 次呼叫。 / Offline injection suite: two disagreeing mock reviewers, six cases, twelve calls.
 .venv/bin/python -I scripts/model_review.py
 
-# 新增 boundaries 組：越權、路徑穿越及 SSRF 的弱點／修正版，共 12 次離線呼叫。
+# 新增 boundaries 組：越權、路徑穿越及 SSRF 的弱點／修正版，共 12 次離線呼叫。 / Offline boundaries suite: vulnerable/fixed authorization, path traversal and SSRF pairs; twelve calls.
 .venv/bin/python -I scripts/model_review.py --suite boundaries
 
-# 真實 API：先設定環境 model ID／認證；限定使用受版本管理的合成案例。
+# 真實 API：先設定環境 model ID／認證；限定使用受版本管理的合成案例。 / Live APIs: configure model IDs and credentials first; use only version-controlled synthetic cases.
 .venv/bin/python -I scripts/model_review.py --live --provider gemini --output-tokens 1024
 
-# 同一批各家取得相同案例／輸出預算。8192-token 總額度內，可選子集分批驗證。
-# 已有真實驗收的配對是 Gemini／Bedrock；GLM 尚未取得真實推論，僅為介面範例。
+# 同一批各家取得相同案例／輸出預算。8192-token 總額度內，可選子集分批驗證。 / Providers receive the same cases/output budgets per batch; select subsets within the 8,192-token total.
+# 已有真實驗收的配對是 Gemini／Bedrock；GLM 尚未取得真實推論，僅為介面範例。 / Gemini/Bedrock have live paired evidence; GLM is an interface example without live inference acceptance.
 .venv/bin/python -I scripts/model_review.py --live --provider gemini --provider bedrock \
   --case B01 --case B02 --case B03 --case B04 --output-tokens 1024
 
@@ -38,13 +38,13 @@ runner 預設 512 output tokens／次，可明確選擇 1024；每批最多 16 �
 
 新增 `boundaries` 組（B07–B12）包含物件層級越權、路徑穿越與 SSRF 的三組弱點／修正版，行為驗證與限制見 [ASVS 覆蓋對照](asvs-coverage.zh-TW.md)。另有 `variants` 組 B13–B16，涵蓋相鄰路徑前綴與僅核對主機名稱的 SSRF 缺陷變體；前兩組各 6 案，variants 為 4 案；`--case` 與 `--suite` 互斥。`--suite all` 不提高額度，預設兩個審查者會因 32 次呼叫超額而拒絕執行；單一模擬審查者可在 512-token 預算下執行全部 16 案。新增組中的 B07／B08 已有下方有限配對驗收及之後的兩輪雙模型驗收；B09–B12 之後也完成一輪真實配對（見[結構化輸出驗收](structured-output.zh-TW.md)）。
 
-每個案例每輪有新的 opaque UUID；相同案例在不同供應商的 system／user 訊息完全相同。程式以白名單欄位建立 payload，只有 opaque ID、語言、情境與原碼，沒有 catalog ID、標準答案、預期分類、檔案名稱或其他模型意見。呼叫順序隨機並保存於 plan，每次建立獨立請求。local evaluator 在收集結束後才載入 oracle 進行評分。
+每個案例每輪有新的 opaque UUID；相同案例在不同供應商的 system／user 訊息完全相同。程式以白名單欄位建立 payload，只有 opaque ID、語言、情境與原始碼，沒有 catalog ID、標準答案、預期分類、檔案名稱或其他模型意見。呼叫順序隨機並保存於 plan，每次建立獨立請求。local evaluator 在收集結束後才載入 oracle 進行評分。
 
 此處的 blind 是「送出的 prompt 不含答案或其他模型意見」。公開的小型案例可能已被供應商見過，無法證明訓練資料隔離、統計獨立或降低偏誤。mock reviewer 是本地簡單規則，不視為模型家族。Gemini／GLM 等 family label 也不是獨立性認證；未解析的 Bedrock profile 不計為已知家族。
 
 ## 回應、指標與證據
 
-模型必須回傳嚴格 JSON：opaque review ID、VULNERABLE／CLEAN／ABSTAIN、findings、reason。finding 必須有 CWE-89／CWE-78／CWE-639／CWE-22／CWE-918、有效的原碼行號、完全符合該行的 evidence 與長度受限的 rationale。拒絕重複 key、錯誤 ID、額外工具欄位、假造引用、矛盾 verdict／findings、超長理由，以及會讓人工判讀與實際內容不一致的字元：Unicode 控制字元（含 C1）、格式字元（如 bidi 覆寫、零寬字元）、行／段分隔符、私用區與未指派碼位；人工裁決的 reviewer 與 reason 欄位適用同一規則。模型輸出不會被執行。
+模型必須回傳嚴格 JSON：opaque review ID、VULNERABLE／CLEAN／ABSTAIN、findings、reason。finding 必須有 CWE-89／CWE-78／CWE-639／CWE-22／CWE-918、有效的原始碼行號、完全符合該行的 evidence 與長度受限的 rationale。拒絕重複 key、錯誤 ID、額外工具欄位、假造引用、矛盾 verdict／findings、超長理由，以及會讓人工判讀與實際內容不一致的字元：Unicode 控制字元（含 C1）、格式字元（如 bidi 覆寫、零寬字元）、行／段分隔符、私用區與未指派碼位；人工裁決的 reviewer 與 reason 欄位適用同一規則。模型輸出不會被執行。
 
 每個成功的 review 都保存供應商回傳的原始文字，評分時必須由該文字重新解析得到相同 review，且原始文字的雜湊等於該次呼叫的 `response_sha256`；因此不同供應商對同一案例的回答無法互換。人工裁決前會重新計算分析，報告中儲存的分析若與重新計算結果不同即拒絕。
 

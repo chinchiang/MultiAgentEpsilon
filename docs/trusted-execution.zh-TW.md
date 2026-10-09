@@ -45,10 +45,10 @@
 
 `docs/github-main-ruleset.json` 提供最低合併保護候選設定：禁止刪除／強推、獨立 CODEOWNERS 核准、變更後重審、嚴格 required check `trusted-security-pilot`、無 bypass。原訂於基準遷移後才套用；實際上規則集 24512048 在遷移前就已啟用，當時舊 workflow 只會產生 `security-pilot`、CODEOWNERS 也只有作者本人，任何 PR 都無法依規則合併。**首次遷移已於 2026-10-06 完成：** 擁有者暫時停用規則集，合併 #6 與 #7，完成真實流程驗收後恢復規則集（結果見 [里程碑狀態](milestone-status.zh-TW.md)）。當時沒有獨立審查者，因此省略了下列第 1、2 步，由擁有者直接合併。日後若需再次進行基準遷移，依下列程序：
 
-1. 確認獨立審查者具 write 權限（CatGrocery 已於 2026-10-07 讀回為 write）；以 `python3 scripts/audit_merge_protection.py` 讀回確認。
+1. 確認獨立審查者具 write 權限（CatGrocery 已於 2026-10-07 讀回為 write）；以 `python3 -I scripts/audit_merge_protection.py` 讀回確認。
 2. 審查者審閱可信閘門 PR 的差異、遠端手動 run（`manual-security-evaluation`）的結果，以及 artifact 中 `audit/publishable-evidence.json` 為 PUBLISHABLE，並以審查者帳號核准目前 head。
 3. 使用現行 guard 的獨立核准流程，完整重跑正式 CI、核對簽章及必要檢查來源後正常合併。不要把歷史停用規則的遷移方式當成日常操作；若平台設定確實無法支援遷移，先另行設計並審查受控遷移程序。
-4. 合併後，main 的 CODEOWNERS 包含兩位審查者，`pull_request_target` workflow 生效：之後的 PR 會在 head 上產生 `trusted-security-pilot`。專用 App 綁定前，每次核准或合併前以 `python3 scripts/verify_required_check.py --pr <編號>` 確認該檢查來自可信 workflow 的 `pull_request_target` run。
+4. 合併後，main 的 CODEOWNERS 包含兩位審查者，`pull_request_target` workflow 生效：之後的 PR 會在 head 上產生 `trusted-security-pilot`。專用 App 綁定前，每次核准或合併前以 `python3 -I scripts/verify_required_check.py --pr <編號>` 確認該檢查來自可信 workflow 的 `pull_request_target` run。
 5. 疊在其上的發布程式與多模型 PR 改以 main 為 base 後，依一般流程審查；它們會由已合併的新 evaluator 評估。
 
 **GitHub Actions app ID + check 名稱仍不唯一綁定 evaluator workflow。** `pull_request_target` 執行的是 PR **base 分支**上的 workflow 檔案，而 run 中繼資料不記錄 base；同一路徑在其他分支的修改版本有相同 workflow ID。因此 `verify_required_check.py` 與發布程式另外要求：run 的 head 分支與 head repository 必須等於此 PR，且任何狀態（含已關閉）的 PR 只要共用同一 head 卻以其他分支為 base，就 BLOCK。PR 無法刪除，所以「開到其他分支、取得綠燈後關閉」的雙胞胎 PR 仍會被看見。較強的做法是以 GitHub artifact attestation（OIDC 簽署的 `security.yml@refs/heads/main` 身分）綁定證據，此項已實作並通過 main 真實簽章驗收。 若要把檢查視為不可偽造的自動閘門，需額外採平台支援的 required workflow，或獨立 GitHub App：App 必須查核 repository、workflow 身分／可信 evaluator SHA、事件、候選 SHA、run attempt、完整報告與結論後，才對候選 SHA 發佈必要檢查。其他 workflow 的 GITHUB_TOKEN 不應能以該 App 身分發佈檢查。此獨立來源機制目前未部署，不能聲稱一般開發者無法偽造同名檢查。
@@ -58,13 +58,13 @@
 ## 本地驗收
 
 ```bash
-python3 scripts/bootstrap.py
-python3 scripts/build_runtime.py
-python3 scripts/dev_db.py start
+python3 -I scripts/bootstrap.py
+python3 -I scripts/build_runtime.py
+python3 -I scripts/dev_db.py start
 .venv/bin/python -m pytest --junitxml=artifacts/pytest.xml
-.venv/bin/python scripts/expect_block.py
-.venv/bin/python scripts/run_security.py
-python3 scripts/dev_db.py stop
+.venv/bin/python -I scripts/expect_block.py
+.venv/bin/python -I scripts/run_security.py
+python3 -I scripts/dev_db.py stop
 ```
 
 隔離回歸會執行缺陷版、修正版，以及在候選匯入時嘗試寫入唯讀來源／入口、讀取 evaluator／Docker socket／token、建立 IP 出向連線的探測。必要結果為：完整 32 案例、缺陷版恰好政策 `seeded_defect_case_ids` 的 9 個 findings／BLOCK、修正版 0 findings／ALLOW。另有錯誤密碼登入、404 洩漏、匯出夾帶跨租戶資料、其他資料列被非法修改，以及 admin 寫入條件越過租戶邊界，加上過期工作階段與跨租戶刪除共七種變體，必須產生指定 AUTH findings；socket 改指向 host 測試端點必須失敗且端點不得收到連線。
@@ -130,13 +130,13 @@ Acceptance needs actual non-admin direct-push denial, unapproved policy rejectio
 ## Local acceptance
 
 ```bash
-python3 scripts/bootstrap.py
-python3 scripts/build_runtime.py
-python3 scripts/dev_db.py start
+python3 -I scripts/bootstrap.py
+python3 -I scripts/build_runtime.py
+python3 -I scripts/dev_db.py start
 .venv/bin/python -m pytest --junitxml=artifacts/pytest.xml
-.venv/bin/python scripts/expect_block.py
-.venv/bin/python scripts/run_security.py
-python3 scripts/dev_db.py stop
+.venv/bin/python -I scripts/expect_block.py
+.venv/bin/python -I scripts/run_security.py
+python3 -I scripts/dev_db.py stop
 ```
 
 Isolation regressions attempt writes to read-only source/entrypoint, reads of evaluator/Docker socket/tokens, and IP egress. Required results: exact 32 cases; fixed zero findings/ALLOW; seeded exact nine policy IDs/BLOCK. Seven additional real-container variants cover wrong-password login, 404 disclosure, cross-tenant export, hidden unrelated-row mutation, admin cross-tenant writes, expired sessions, and cross-tenant deletion. Redirecting the HTTP socket to a host endpoint must fail without contacting that endpoint.
