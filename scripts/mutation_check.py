@@ -159,7 +159,14 @@ def run(root, output):
                 write_json(output, report)
                 raise ValueError('baseline failed')
             baseline_ids = {(c.get('classname'), c.get('name')) for c in ET.parse(snapshot / 'baseline.xml').getroot().iter('testcase')}
-            report['baselines'].append({'target': name, 'tests': count, 'selection': list(tests), 'passed': True})
+            # 排除 AST 重新格式化本身導致失敗的假攔截。 / Rule out kills caused only by AST normalization.
+            path.write_text(ast.unparse(ast.parse(original)) + '\n')
+            normalized_code, _ = run_tests(snapshot, tests, snapshot / 'normalized.log', 30)
+            if classify(normalized_code, snapshot / 'normalized.xml', count, baseline_ids) != 'SURVIVED':
+                raise ValueError('normalized baseline failed')
+            path.write_text(original)
+            report['baselines'].append({'target': name, 'tests': count, 'selection': list(tests),
+                                        'passed': True, 'normalized_passed': True})
             for identity, source in mutants:
                 if time.monotonic() >= deadline:
                     raise TimeoutError('campaign deadline')

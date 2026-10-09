@@ -30,7 +30,7 @@ python3 -I scripts/install_test_tools.py
 
 突變子程序只選取純函式測試，模型命令列的子程序整合測試由完整 pytest 保留執行，不在禁止外部程序的突變子程序中重跑。
 
-每個目標先執行未修改的基準；基準失敗即停止。突變測試的 JUnit 必須完整、案例數與基準相同且沒有錯誤／跳過。退出碼 1 且有測試失敗才記為 `KILLED`；正常全過為 `SURVIVED`，逾時為 `TIMEOUT`，收集失敗、缺少證據等為 `ERROR`。逾時與工具故障均不算攔截，任何存活、逾時或錯誤都使命令及 CI 失敗；空清單或超過 256 個突變也失敗，不截斷成假綠。
+每個目標先執行未修改的基準，以及只經 AST 重新格式化、沒有突變的對照；兩者必須通過且案例識別一致，否則停止，避免把格式差異當成成功攔截。突變測試的 JUnit 必須完整、案例數與基準相同且沒有錯誤／跳過。退出碼 1 且有測試失敗才記為 `KILLED`；正常全過為 `SURVIVED`，逾時為 `TIMEOUT`，收集失敗、缺少證據等為 `ERROR`。逾時與工具故障均不算攔截，任何存活、逾時或錯誤都使命令及 CI 失敗；空清單或超過 256 個突變也失敗，不截斷成假綠。
 
 每個子程序最多 30 秒、CPU 25 秒、位址空間 2 GiB、輸出檔案 2 MiB、128 個檔案描述元，禁用核心傾印；整批上限 20 分鐘。子程序使用隔離 Python、清空繼承憑證並禁止 socket 連線／DNS 與啟動外部程序。取消及逾時回收程序群組，暫存快照隨工作結束刪除。這是可信原始碼與固定運算子的測試護欄，**不是惡意候選程式的安全沙箱**。
 
@@ -58,7 +58,7 @@ Targets are results.py's validate_cases/seeded_defects/decide, trusted_publisher
 
 The mutation worker selects pure-function tests; the model CLI subprocess integration test remains in full pytest but is deselected inside the process-denying mutation worker.
 
-Each target first passes an unmodified baseline. JUnit must exist, preserve baseline case counts, and contain no errors/skips. Exit 1 with failing tests is KILLED; a clean pass is SURVIVED. Timeouts are TIMEOUT; collection failures/missing evidence are ERROR. Neither infrastructure failures nor timeouts count as kills. Any survivor/timeout/error fails the command and CI. Empty or more-than-256 inventories fail rather than being silently truncated.
+Each target first passes both its original baseline and an AST-normalized, nonmutated control with identical test identities. Failure of either stops the campaign, preventing formatting-only false kills. JUnit must exist, preserve baseline case counts, and contain no errors/skips. Exit 1 with failing tests is KILLED; a clean pass is SURVIVED. Timeouts are TIMEOUT; collection failures/missing evidence are ERROR. Neither infrastructure failures nor timeouts count as kills. Any survivor/timeout/error fails the command and CI. Empty or more-than-256 inventories fail rather than being silently truncated.
 
 Each child has a 30-second wall deadline, 25-second CPU limit, 2 GiB address-space limit, 2 MiB file limit, 128 descriptors, and no core dumps. Campaign deadline is 20 minutes. Isolated Python receives no inherited credentials; socket connections/DNS and external subprocess launches are denied. Cancellation/timeouts terminate the process group, and temporary snapshots are removed. These are guards for trusted code and fixed operators, **not a hostile-candidate sandbox**.
 
