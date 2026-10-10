@@ -87,7 +87,10 @@ def test_unreadable_directory_blocks_inventory_digest_and_scan(tmp_path, monkeyp
         monkeypatch.setattr(os, "scandir", scandir)
     try:
         for operation in (input_files, subject_digest, run):
-            with pytest.raises(PermissionError, match='^synthetic\\ inaccessible\\ directory$'):
+            # root 與一般使用者的拒絕訊息不同，兩者都須指向此目錄。 / Root (synthetic) and non-root (kernel)
+            # denials differ; both must name this directory.
+            with pytest.raises(PermissionError,
+                               match=r"^(?:synthetic inaccessible directory|\[Errno 13\] Permission denied: '.*/hidden')$"):
                 operation(tmp_path)
     finally:
         hidden.chmod(0o700)
