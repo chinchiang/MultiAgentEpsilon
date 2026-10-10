@@ -15,13 +15,21 @@ from security_harness.preflight import verify
 from security_harness.results import digest_file, subject_digest, write_json
 
 
-def main():
+def argument_parser():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--output", type=Path, help="另存完整證據的路徑 / extra copy of the evidence")
+    return parser
+
+
+def main(argv=None):
+    argv = sys.argv[1:] if argv is None else argv
+    if argv in (["--help"], ["-h"]):
+        # 純說明請求不建立 BLOCK 證據。 / A pure help request creates no BLOCK evidence.
+        argument_parser().parse_args(argv)
     audit = AuditRun(ROOT, "preflight")
     output = None
     try:
-        parser = argparse.ArgumentParser()
-        parser.add_argument("--output", type=Path)
-        output = parser.parse_args().output
+        output = argument_parser().parse_args(argv).output
         audit.stage("configuration")
         policy_file = ROOT / "security/policy.json"
         policy = json.loads(policy_file.read_text())

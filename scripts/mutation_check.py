@@ -39,6 +39,7 @@ def mutations(source, functions):
     for function in tree.body:
         if not isinstance(function, ast.FunctionDef) or function.name not in functions:
             continue
+        positions = {id(n): i for i, n in enumerate(ast.walk(tree))}
         for node in ast.walk(function):
             options = []
             if isinstance(node, ast.Compare):
@@ -49,9 +50,10 @@ def mutations(source, functions):
                 options = [('negation', 0, None)]
             for kind, index, replacement in options:
                 changed = copy.deepcopy(tree)
-                match = next(n for n in ast.walk(changed) if type(n) is type(node)
-                             and getattr(n, 'lineno', None) == node.lineno
-                             and getattr(n, 'col_offset', None) == node.col_offset)
+                # 以走訪順序定位，巢狀同型別同起點節點（如 a and b or c）不會混淆。 / Locate by walk order, so nested
+                # same-type nodes starting at one column (e.g. a and b or c) cannot be confused.
+                match = list(ast.walk(changed))[positions[id(node)]]
+                assert type(match) is type(node)
                 if kind == 'compare':
                     match.ops[index] = replacement()
                 elif kind == 'boolean':
@@ -61,7 +63,7 @@ def mutations(source, functions):
                     match.operand = ast.UnaryOp(op=ast.Not(), operand=match.operand)
                 ast.fix_missing_locations(changed)
                 encoded = ast.unparse(changed) + '\n'
-                identity = f'{function.name}:{node.lineno}:{node.col_offset}:{kind}:{index}'
+                identity = f'{function.name}:{node.lineno}:{node.col_offset}:{positions[id(node)]}:{kind}:{index}'
                 output.append((identity, encoded))
     return output
 
@@ -210,7 +212,8 @@ def main():
             report.update(status='ERROR', error_type=type(error).__name__)
             write_json(args.output, report)
         print('突變測試未完成 / Mutation campaign incomplete:', type(error).__name__)
-        return 2
+        # 3 表示基礎設施錯誤，與 argparse 的 2 區分。 / 3 means infrastructure error, distinct from argparse's 2.
+        return 3
     print(json.dumps({'status': report['status'], 'counts': report['counts'], 'mutation_score': report['mutation_score']}))
     return 0 if report['counts']['SURVIVED'] == report['counts']['TIMEOUT'] == report['counts']['ERROR'] == 0 else 1
 

@@ -19,7 +19,7 @@ if __name__ == "__main__":
     sys.path.insert(0, str(ROOT))
 from security_harness import candidate_git
 from security_harness.results import subject_digest, validate_policy, executable_bits
-from security_harness.trusted_publisher import Denied, need, strict_json, validate_settings
+from security_harness.trusted_publisher import GITHUB_ACTIONS_APP_ID, Denied, need, strict_json, validate_settings
 
 
 def archive_digest(data):
@@ -60,7 +60,7 @@ def prepare(root, output, evaluator_sha, app_id=None, installation_id=None):
     need(not status.stdout, "EVALUATOR_NOT_CLEAN")
     for value in (app_id, installation_id):
         need(value is None or type(value) is int and value > 0, "APP_IDENTIFIERS")
-    need(app_id != 15368, "SHARED_ACTIONS_APP")
+    need(app_id != GITHUB_ACTIONS_APP_ID, "SHARED_ACTIONS_APP")
     raw_policy = (root / "security/policy.json").read_bytes()
     policy = strict_json(raw_policy)
     validate_policy(policy)

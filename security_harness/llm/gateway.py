@@ -131,7 +131,7 @@ Readable model name for reports; ARNs and account-like digits never appear."""
                     "status": "ERROR", "code": None,
                     "request_sha256": None, "response_sha256": None, "diagnostic": None,
                     "input_tokens": None, "output_tokens": None, "advisory_only": True}
-        evidence.update(reserved=False, reserved_output_tokens=0, elapsed_ms=None)
+        evidence.update(reserved=False, reserved_output_tokens=0, elapsed_ms=None, output_budget_verified=False)
         self.evidence.append(evidence)
         started = time.monotonic()
         try:
@@ -168,6 +168,8 @@ Readable model name for reports; ARNs and account-like digits never appear."""
                     raise ModelError("INVALID_RESPONSE", "USAGE_SCHEMA")
             if reply.output_tokens is not None and reply.output_tokens > request.max_output_tokens:
                 raise ModelError("RESPONSE_LIMIT")
+            # 供應商未回報用量時，只有位元組上限約束輸出。 / Without reported usage only the byte cap bounds output.
+            evidence["output_budget_verified"] = reply.output_tokens is not None
             evidence.update(status="SUCCESS", response_sha256=digest(reply.text),
                             input_tokens=reply.input_tokens, output_tokens=reply.output_tokens,
                             reported_model_sha256=self.identity(reply.model_version) if type(reply.model_version) is str else None)
@@ -175,8 +177,9 @@ Readable model name for reports; ARNs and account-like digits never appear."""
         except asyncio.CancelledError:
             evidence.update(status="CANCELLED", code="CANCELLED")
             raise
-        except TimeoutError:
-            evidence.update(status="TIMEOUT", code="DEADLINE")
+        except TimeoutError as exc:
+            # 單次 I/O 逾時與整體期限是不同的調整方向。 / An I/O timeout and the call deadline need different tuning.
+            evidence.update(status="TIMEOUT", code="IO_TIMEOUT" if type(exc).__name__ == "IOTimeout" else "DEADLINE")
         except ModelError as exc:
             evidence["code"] = exc.code
             evidence["diagnostic"] = exc.detail

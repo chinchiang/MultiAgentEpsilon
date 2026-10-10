@@ -45,6 +45,10 @@ An approval counts only from a listed, write-capable reviewer who is not the
 
 def live_approval(number, head, base):
     policy = json.loads((ROOT / "security/trust-policy.json").read_text())
+    # 此 guard 只實作獨立審查；政策若要求其他模式必須拒絕。 / This guard only implements independent review;
+    # refuse a policy that asks for anything else.
+    if policy.get("schema_version") != 1 or policy.get("require_independent_author") is not True:
+        raise ValueError("unsupported trust policy")
     repo = policy["repository"]
     if not re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", repo):
         raise ValueError("invalid trusted repository")
@@ -84,9 +88,9 @@ def live_approval(number, head, base):
 
 
 def main():
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--base", required=True)
-    parser.add_argument("--candidate", type=Path, required=True)
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--base", required=True, help="可信 base 的完整 commit SHA / full trusted base commit SHA")
+    parser.add_argument("--candidate", type=Path, required=True, help="候選 checkout，只作資料 / candidate checkout, data only")
     parser.add_argument("--output", type=Path, help="可信工作流程內的稽核檔案 / audit file in the trusted workflow workspace")
     parser.add_argument("--pr", type=int, help="透過 GitHub 核對獨立且精確對應 head 的基準核准 / resolve independent, exact-head baseline approval through GitHub")
     args = parser.parse_args()
@@ -105,9 +109,9 @@ def main():
             approval_error = type(exc).__name__
     blocked = approval_error is not None or (bool(changed) and approval is None)
     evidence = {"schema_version": 2, "base_sha": args.base, "candidate_sha": head,
-                "protected_changes": changed, "decision": "BLOCK" if changed else "ALLOW"}
-    evidence.update(decision="BLOCK" if blocked else "ALLOW", baseline_approval=approval,
-                    approval_error=approval_error, policy="trusted base remains authoritative for this run")
+                "protected_changes": changed, "decision": "BLOCK" if blocked else "ALLOW",
+                "baseline_approval": approval, "approval_error": approval_error,
+                "policy": "trusted base remains authoritative for this run"}
     if args.output:
         args.output.parent.mkdir(parents=True, exist_ok=True)
         args.output.write_text(json.dumps(evidence, indent=2) + "\n")

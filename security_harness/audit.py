@@ -1,10 +1,11 @@
 """設定解析或外部工具呼叫前即保留最小證據。
 
 Minimal evidence exists before configuration parsing or external tool calls."""
+import json
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
-from .results import EVIDENCE_VERSION, SUBJECT_FORMAT, result, write_json
+from .results import EVIDENCE_VERSION, SUBJECT_FORMAT, result, write_json, write_text_atomic
 
 
 class AuditRun:
@@ -17,6 +18,16 @@ class AuditRun:
                      "execution": "RUNNING", "decision": "BLOCK", "reasons": ["run incomplete"],
                      "stage": "initialization", "errors": []}
         self.save()
+
+    @classmethod
+    def resume(cls, root: Path, run_id: str):
+        """接續 supervisor 已建立的執行，不重新產生 run ID。 / Continue a run the supervisor created, keeping its run ID."""
+        audit = cls.__new__(cls)
+        audit.output = Path(root) / "artifacts" / run_id
+        audit.data = json.loads((audit.output / "report.json").read_text())
+        if audit.data.get("run_id") != run_id:
+            raise ValueError("resumed run identity mismatch")
+        return audit
 
     def save(self):
         write_json(self.output / "report.json", self.data)
@@ -35,16 +46,19 @@ class AuditRun:
         # 不序列化例外文字、子程序輸出、DSN 或 URL。 / Never serialize exception text, subprocess output, DSNs or URLs.
         self.data["errors"].append({"stage": self.data["stage"], "error_type": type(exc).__name__})
         self.data.update(execution="ERROR", decision="BLOCK", reasons=["run failed; see redacted errors"])
+        self.save()
 
     def finish(self, required=(), *, update_pointer=True):
         seen = {r["gate"] for r in self.data["records"]}
         for gate, kind in required:
             if gate not in seen:
                 self.add(gate, "NOT_RUN", kind, 0, 0, "run interrupted before gate completion")
+                # 缺少必要 gate 時不可保留先前的 ALLOW。 / A missing required gate can never keep an earlier ALLOW.
+                self.data.update(decision="BLOCK", reasons=[*self.data.get("reasons", []), f"{gate}: not run"])
         if self.data["execution"] == "RUNNING":
             self.data["execution"] = "COMPLETED"
         self.save()
         if update_pointer:
             pointer = "latest.txt" if self.data["operation"] == "security" else self.data["operation"] + "-latest.txt"
-            (self.output.parent / pointer).write_text(self.data["run_id"] + "\n")
+            write_text_atomic(self.output.parent / pointer, self.data["run_id"] + "\n")
         return 0 if self.data["decision"] == "ALLOW" else 1

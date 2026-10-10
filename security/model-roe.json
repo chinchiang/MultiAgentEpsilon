@@ -10,5 +10,9 @@
     "lmstudio"
   ],
   "max_calls_per_run": 16,
-  "security_gate_effect": "NONE"
+  "security_gate_effect": "NONE",
+  "allowed_remote_hosts": {
+    "glm": [],
+    "lmstudio": []
+  }
 }

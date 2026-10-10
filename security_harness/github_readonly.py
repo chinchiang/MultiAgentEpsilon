@@ -4,6 +4,11 @@ Read-only GitHub API access with injected proxy identity or an existing token.
 
 No token discovery, login, redirects or mutation. Reuse the publisher's bounded
 response, deadline, JSON and pagination contracts without obtaining an App token.
+
+Only api.github.com is reachable, so artifact downloads (which redirect to blob
+storage) are intentionally unsupported. Without a token, GitHub's anonymous rate
+limit applies. 只能連 api.github.com，因此刻意不支援會重新導向至儲存體的 artifact 下載；
+未提供權杖時適用 GitHub 匿名速率限制。
 """
 import os
 from .trusted_publisher import GitHub, need

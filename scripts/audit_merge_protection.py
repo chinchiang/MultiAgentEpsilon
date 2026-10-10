@@ -12,9 +12,7 @@ ROOT = Path(__file__).resolve().parents[1]
 if __name__ == "__main__":
     sys.path.insert(0, str(ROOT))
 from security_harness.results import write_json
-
-
-ACTIONS_APP_ID = 15368
+from security_harness.trusted_publisher import GITHUB_ACTIONS_APP_ID as ACTIONS_APP_ID
 
 
 def codeowners_reviewers(text):
@@ -86,9 +84,11 @@ def inspect_configuration(branch, rulesets, pr, collaborators, reviewers, codeow
 
 
 def main():
-    parser = argparse.ArgumentParser()
-    parser.add_argument('--pr', type=int, default=5)
-    parser.add_argument('--output', type=Path, default=ROOT/'artifacts/merge-protection-audit.json')
+    parser = argparse.ArgumentParser(description=__doc__)
+    # 不預設舊 PR；稽核對象必須明確指定。 / No stale default PR; the audited pull request must be explicit.
+    parser.add_argument('--pr', type=int, required=True, help='要稽核的 PR 編號 / pull request to audit')
+    parser.add_argument('--output', type=Path, default=ROOT/'artifacts/merge-protection-audit.json',
+                        help='稽核證據路徑 / audit evidence path')
     parser.add_argument('--publisher-app-id', type=int, help='完成註冊後的專用 App ID / dedicated App ID, once registered')
     args = parser.parse_args()
     evidence = {'decision': 'BLOCK', 'acceptance_complete': False, 'errors': []}

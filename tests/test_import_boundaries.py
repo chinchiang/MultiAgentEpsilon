@@ -59,21 +59,64 @@ def test_isolated_cli_ignores_candidate_cwd_and_pythonpath(tmp_path, script):
     assert 'usage:' in result.stdout
 
 
-@pytest.mark.parametrize('changed', ['scripts/__init__.py', 'security_harness/__init__.py',
-    'security_harness/inputs.py', 'security_harness/limits.py', 'security_harness/candidate_git.py',
-    'scripts/model_review.py', 'scripts/model_compare.py', 'requirements.lock'])
-def test_model_digest_binds_package_and_transitive_core_changes(tmp_path, monkeypatch, changed):
+DIGEST_BOUND = ['scripts/__init__.py', 'security_harness/__init__.py', 'security_harness/inputs.py',
+                'security_harness/limits.py', 'security_harness/candidate_git.py', 'security_harness/llm/config.py',
+                'scripts/model_review.py', 'scripts/model_compare.py', 'requirements.lock', 'security/model-roe.json']
+
+
+def digest_tree(tmp_path, monkeypatch):
     import shutil
-    from scripts import model_smoke
-    paths = {ROOT / 'scripts/__init__.py', ROOT / 'security_harness/__init__.py',
-             ROOT / 'requirements.lock', ROOT / 'security/model-roe.json',
-             *ROOT.glob('scripts/model_*.py'), *ROOT.glob('security_harness/**/*.py')}
-    for path in paths:
-        target = tmp_path / path.relative_to(ROOT)
-        target.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copyfile(path, target)
-    monkeypatch.setattr(model_smoke, 'ROOT', tmp_path)
-    before = model_smoke.implementation_digest()
+    from security_harness.llm import config
+    # 複製整個來源樹，而非重用摘要本身的挑選公式。 / Copy whole trees instead of reusing the digest's own selection formula.
+    for folder in ('scripts', 'security_harness', 'security', 'docs'):
+        shutil.copytree(ROOT / folder, tmp_path / folder, ignore=shutil.ignore_patterns('__pycache__'))
+    shutil.copyfile(ROOT / 'requirements.lock', tmp_path / 'requirements.lock')
+    monkeypatch.setattr(config, 'ROOT', tmp_path)
+    return config
+
+
+@pytest.mark.parametrize('changed', DIGEST_BOUND)
+def test_model_digest_binds_package_and_transitive_core_changes(tmp_path, monkeypatch, changed):
+    config = digest_tree(tmp_path, monkeypatch)
+    before = config.implementation_digest()
     target = tmp_path / changed
     target.write_bytes(target.read_bytes() + b'\n# synthetic revision marker\n')
-    assert model_smoke.implementation_digest() != before
+    assert config.implementation_digest() != before
+
+
+@pytest.mark.parametrize('unrelated', ['scripts/dev_db.py', 'security/policy.json', 'docs/lmstudio.zh-TW.md'])
+def test_model_digest_ignores_unrelated_files(tmp_path, monkeypatch, unrelated):
+    config = digest_tree(tmp_path, monkeypatch)
+    before = config.implementation_digest()
+    target = tmp_path / unrelated
+    target.write_bytes(target.read_bytes() + b'\n')
+    assert config.implementation_digest() == before
+
+
+WORKERS = {'isolation_worker.py', 'model_process.py', 'model_worker.py', 'mutation_worker.py', 'security_worker.py',
+           '__init__.py'}
+
+
+@pytest.mark.parametrize('script', sorted(p.name for p in (ROOT / 'scripts').glob('*.py') if p.name not in WORKERS))
+def test_every_entry_point_help_is_side_effect_free(tmp_path, script):
+    # --help 只能列印說明：不得執行管線、清理、安裝或網路動作。 / --help only prints usage: no pipeline, cleanup,
+    # installation or network action may start.
+    latest = ROOT / 'artifacts/latest.txt'
+    before = latest.read_text() if latest.exists() else None
+    env = {k: v for k, v in os.environ.items() if k in ('PATH', 'LANG', 'SYSTEMROOT')}
+    result = subprocess.run([sys.executable, '-I', str(ROOT / 'scripts' / script), '--help'],
+                            cwd=tmp_path, env=env, capture_output=True, text=True, timeout=20)
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.startswith('usage:')
+    assert (latest.read_text() if latest.exists() else None) == before
+
+
+def test_worker_entry_points_are_explicitly_listed():
+    assert WORKERS - {'__init__.py'} == {p.name for p in (ROOT / 'scripts').glob('*_worker.py')} | {'model_process.py'}
+
+
+def test_ci_provenance_outside_actions_fails_with_a_message(tmp_path):
+    env = {k: v for k, v in os.environ.items() if k in ('PATH', 'LANG')}
+    result = subprocess.run([sys.executable, '-I', str(ROOT / 'scripts/write_ci_provenance.py')],
+                            cwd=tmp_path, env=env, capture_output=True, text=True, timeout=20)
+    assert result.returncode == 2 and 'GITHUB_REPOSITORY' in result.stderr and 'Traceback' not in result.stderr

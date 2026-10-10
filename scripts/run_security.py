@@ -14,7 +14,8 @@ if __name__ == "__main__":
 from security_harness import candidate_git
 from security_harness.audit import AuditRun
 from security_harness.limits import WORKER_RLIMITS
-from security_harness.results import decide, digest_file, subject_digest, validate_cases, validate_policy, write_json
+from security_harness.results import (decide, digest_file, required_gate_kinds, subject_digest, validate_cases,
+                                      validate_policy, write_json)
 from security_harness.preflight import verify
 from security_harness.dependencies import scan as dependency_scan
 from security_harness.secrets import scan
@@ -115,7 +116,7 @@ def main(audit=None, defer_final=False):
         audit.data['pending_decision'] = audit.data['decision']
         audit.data['pending_execution'] = audit.data['execution']
         audit.data.update(decision='BLOCK', execution='AWAITING_CLEANUP')
-    code = audit.finish((("G1", "scan"), ("G2", "scan"), ("AUTH", "test")))
+    code = audit.finish(required_gate_kinds(ROOT))
     print(f"{audit.data['decision']}: {audit.output / 'report.json'}")
     return pending_code if defer_final else code
 
@@ -136,7 +137,7 @@ def supervised_main():
              str(args.candidate.resolve()), args.variant], roe["max_total_seconds"])
     except (Exception, KeyboardInterrupt, SystemExit) as exc:
         audit.fail(exc)
-        code = audit.finish((("G1", "scan"), ("G2", "scan"), ("AUTH", "test")))
+        code = audit.finish(required_gate_kinds(ROOT))
     print(f"{audit.data['decision']}: {audit.output / 'report.json'}")
     return code
 

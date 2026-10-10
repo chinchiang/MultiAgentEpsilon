@@ -6,24 +6,19 @@ import argparse
 import asyncio
 import hashlib
 import json
-import os
 import signal
-import shutil
 import sys
 import uuid
 from datetime import datetime, timezone
 from dataclasses import asdict
 from pathlib import Path
-from urllib.parse import urlsplit
 
 ROOT = Path(__file__).resolve().parents[1]
 if __name__ == "__main__":
     sys.path.insert(0, str(ROOT))
 
-from security_harness.llm.adapters import BedrockAdapter, GeminiAdapter, GLMAdapter
-from security_harness.llm.lmstudio import LMStudioAdapter
-from security_harness.llm.gateway import Gateway, Limits, MockAdapter, ModelError, Request
-from security_harness.llm.transport import AwsCLI
+from security_harness.llm import config
+from security_harness.llm.gateway import Gateway, Limits, ModelError, Request
 from security_harness.llm.lifecycle import persist, read_report, supervise
 from security_harness.lifecycle import run_directory
 from security_harness.scope import load_model_roe
@@ -33,48 +28,15 @@ FIXTURE = Request(
     user="Reply with exactly EPSILON_SYNTHETIC_OK and no other text.", max_output_tokens=256)
 
 
-PLACEHOLDER_HOSTS = {"local.example.invalid"}
-
-
-def setting(name, required=True):
-    """未設定值與 .env.example 佔位值屬設定錯誤，應在預留呼叫前拒絕，而非歸類為傳輸失敗。
-
-Unset values and the documented .env.example placeholders are configuration
-    errors, not transport failures after a reserved call."""
-    value = os.environ[name] if required else (os.environ.get(name) or None)
-    if value is not None and (not value.strip() or value.startswith("replace-with-")
-                              or urlsplit(value).hostname in PLACEHOLDER_HOSTS):
-        raise ModelError("CONFIGURATION")
-    return value
+# 設定與摘要位於函式庫；此處保留名稱供 CLI 與既有匯入使用。 / Configuration and digest live in the library;
+# names are re-exported for the CLI and existing imports.
+PLACEHOLDER_HOSTS = config.PLACEHOLDER_HOSTS
+setting = config.setting
+implementation_digest = config.implementation_digest
 
 
 def configured_adapter(provider, work=None, http=None):
-    if provider == "mock":
-        return MockAdapter()
-    if provider == "gemini":
-        return GeminiAdapter(setting("GEMINI_MODEL_ID"), setting("GEMINI_API_KEY"), http=http)
-    if provider == "lmstudio":
-        return LMStudioAdapter(setting("LMSTUDIO_MODEL_ID"), setting("LMSTUDIO_BASE_URL"),
-                               setting("LMSTUDIO_API_KEY", False), http=http)
-    if provider == "glm":
-        return GLMAdapter(setting("GLM_MODEL_ID"), setting("GLM_CHAT_URL"), setting("GLM_API_KEY", False), http=http)
-    if provider != "bedrock":
-        raise ModelError("CONFIGURATION")
-    executable = os.getenv("AWS_CLI_PATH", "aws")
-    if shutil.which(executable) is None:
-        raise ModelError("CONFIGURATION")
-    return BedrockAdapter(setting("BEDROCK_MODEL_ID"), setting("BEDROCK_REGION"),
-                          AwsCLI(executable, run_directory=work))
-
-
-def implementation_digest():
-    # 套件初始化與共用核心亦會影響匯入，全部納入實作摘要。
-    # Include package initializers and shared core code in the implementation binding.
-    paths = sorted({ROOT / 'scripts/__init__.py', ROOT / 'security_harness/__init__.py',
-                    ROOT / 'requirements.lock', ROOT / 'security/model-roe.json',
-                    *ROOT.glob('scripts/model_*.py'), *ROOT.glob('security_harness/**/*.py')})
-    manifest = [(p.relative_to(ROOT).as_posix(), hashlib.sha256(p.read_bytes()).hexdigest()) for p in paths]
-    return hashlib.sha256(json.dumps(manifest, separators=(",", ":")).encode()).hexdigest()
+    return config.configured_adapter(provider, work, http)
 
 
 def initial_report(providers, run_id):
@@ -111,7 +73,7 @@ async def run_worker(root, run_id):
             check['status'] = 'RUNNING'
             persist(output, report)
             try:
-                adapter = configured_adapter(provider, run_directory(root, run_id))
+                adapter = config.configured_adapter(provider, run_directory(root, run_id))
             except (KeyError, ModelError):
                 check.update(status='ERROR', code='CONFIGURATION')
                 persist(output, report)

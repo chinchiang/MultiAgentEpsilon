@@ -2,6 +2,7 @@
 """以已驗證 wheels 離線建置可信 runtime，不採用候選 Dockerfile。
 
 Build the trusted runtime offline from verified wheels; never use a candidate Dockerfile."""
+import argparse
 import hashlib
 import json
 import shutil
@@ -78,7 +79,8 @@ ENTRYPOINT ["python", "-I", "/opt/epsilon/server.py"]
     print('Trusted offline runtime built:', image_id)
 
 
-def main():
+def main(argv=None):
+    argparse.ArgumentParser(description=__doc__).parse_args(argv)
     audit = AuditRun(ROOT, 'runtime-build')
     try:
         build(audit)

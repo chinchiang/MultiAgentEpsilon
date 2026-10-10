@@ -79,3 +79,22 @@ def test_planned_live_calls_must_fit_the_reviewed_per_run_cap(cap, planned, allo
     else:
         with pytest.raises(ValueError):
             validate_model_roe(roe, ["gemini"], planned)
+
+
+@pytest.mark.parametrize("version", [True, 1.0, "1", None])
+def test_rules_of_engagement_schema_version_is_an_exact_integer(version):
+    from security_harness.scope import validate_model_roe, validate_roe
+    roe = json.loads((Path(__file__).resolve().parents[1] / "security/roe.json").read_text())
+    with pytest.raises(ValueError):
+        validate_roe({**roe, "schema_version": version})
+    with pytest.raises(ValueError):
+        validate_model_roe({**MODEL_ROE, "schema_version": version}, ["mock"])
+
+
+@pytest.mark.parametrize("raw", ['[]', '{"schema_version": true, "entries": []}', '"text"'])
+def test_binary_allowlist_shape_is_checked_before_use(tmp_path, raw):
+    from security_harness.scan_content import load_binary_allowlist
+    path = tmp_path / "binary-allowlist.json"
+    path.write_text(raw)
+    with pytest.raises(ValueError):
+        load_binary_allowlist(path)

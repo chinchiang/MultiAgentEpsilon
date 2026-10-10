@@ -23,17 +23,14 @@ from pathlib import Path
 
 if __name__ == "__main__":
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from security_harness.trusted_publisher import validate_run_base, related_pull_path, head_scope
+from security_harness.trusted_publisher import (GITHUB_ACTIONS_APP_ID, Denied, head_scope, related_pull_path,
+                                               validate_run_base)
 
 REQUIRED_CHECK = "trusted-security-pilot"
-ACTIONS_APP_ID = 15368
+ACTIONS_APP_ID = GITHUB_ACTIONS_APP_ID
 WORKFLOW_PATH = ".github/workflows/security.yml"
 BASE_BRANCH = "main"
 SHA = re.compile(r"[0-9a-f]{40}")
-
-
-class Denied(ValueError):
-    pass
 
 
 def need(condition, code):
@@ -98,9 +95,10 @@ def reader():
 
 
 def main():
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--repo", default="chinchiang/MultiAgentEpsilon")
-    parser.add_argument("--pr", type=int, required=True)
+    parser = argparse.ArgumentParser(description=__doc__)
+    trusted = json.loads((Path(__file__).resolve().parents[1] / "security/trust-policy.json").read_text())["repository"]
+    parser.add_argument("--repo", default=trusted, help="預設為信任政策中的儲存庫 / defaults to the trust-policy repository")
+    parser.add_argument("--pr", type=int, required=True, help="要核對的 PR 編號 / pull request number to verify")
     args = parser.parse_args()
     if not re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", args.repo) or args.pr <= 0:
         raise SystemExit("invalid repository or PR number")

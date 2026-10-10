@@ -17,13 +17,26 @@ from security_harness.llm.lifecycle import persist, supervise
 from scripts.model_smoke import require_model_roe
 
 
+def deadline_warning(live_calls, total_seconds, per_call_seconds=30):
+    """付費呼叫前提醒：最壞情況的逐次期限總和超過整輪上限時，慢回應會留下 INCOMPLETE。
+
+Before paid calls: if per-call deadlines can exceed the run cap, slow replies leave INCOMPLETE."""
+    worst = live_calls * per_call_seconds
+    if worst <= total_seconds:
+        return None
+    return (f'最壞情況 {worst} 秒超過整輪上限 {total_seconds} 秒；回應較慢時結果會是 INCOMPLETE / '
+            f'worst case {worst}s exceeds the {total_seconds}s run cap; slow replies will leave the run INCOMPLETE')
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--provider', choices=PROVIDERS, action='append')
+    parser.add_argument('--provider', choices=PROVIDERS, action='append',
+                        help='可重複指定；預設兩個 mock 審查者 / repeatable; defaults to two mock reviewers')
     selection = parser.add_mutually_exclusive_group()
-    selection.add_argument('--case', choices=tuple(load_cases()), action='append')
+    selection.add_argument('--case', choices=tuple(load_cases()), action='append',
+                           help='可重複指定的案例 ID / repeatable case ID')
     selection.add_argument('--suite', choices=(*SUITES, 'all'),
-                           help='預設 injection；boundaries 為 B07–B12，variants 為 B13–B16；all 仍受預算限制 / default: injection; boundaries selects B07-B12; all still obeys budgets')
+                           help='預設 injection；boundaries 為 B07–B12，variants 為 B13–B16；all 仍受預算限制 / default: injection; boundaries selects B07-B12, variants B13-B16; all still obeys budgets')
     parser.add_argument('--rounds', type=int, choices=range(1, 5), default=1,
                         help='所有輪次共用呼叫、詞元及時間總上限 / planned repetitions share the same total call/token/time caps')
     parser.add_argument('--live', action='store_true', help='允許選定真實 API 處理固定合成案例 / permit selected live API calls for fixed synthetic cases')
@@ -41,6 +54,11 @@ def main():
         report = initial_report(providers, cases, str(uuid.uuid4()), args.output_tokens, args.rounds)
     except ValueError:
         parser.error('use unique providers/cases, at most 16 reviews and at most 8192 reserved output tokens')
+    if args.live:
+        warning = deadline_warning(sum(not p.startswith('mock-') for p in providers) * len(cases) * args.rounds,
+                                   report['total_timeout_seconds'])
+        if warning:
+            print(warning, file=sys.stderr)
     path = ROOT / 'artifacts' / report['run_id'] / 'report.json'
     persist(path, report)
     data = supervise(ROOT, report, [sys.executable, '-I', str(ROOT / 'scripts/model_worker.py'),

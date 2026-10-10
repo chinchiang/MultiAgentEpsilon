@@ -16,6 +16,10 @@ from .gateway import ModelError
 RESPONSE_BYTES = 131072
 
 
+
+class IOTimeout(TimeoutError):
+    """單次 HTTP 讀寫逾時，與整體呼叫期限分開記錄。 / A single HTTP I/O timeout, recorded apart from the call deadline."""
+
 def strict_json(raw):
     def pairs(items):
         result = {}
@@ -139,7 +143,7 @@ The destination comes only from trusted adapter config, never a prompt.
                         body.extend(chunk)
                     return strict_json(body)
         except httpx.TimeoutException:
-            raise TimeoutError from None
+            raise IOTimeout from None
         except httpx.HTTPError:
             raise ModelError("TRANSPORT") from None
 

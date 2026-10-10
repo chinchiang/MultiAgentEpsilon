@@ -20,6 +20,7 @@ from psycopg import sql
 from .authorization import evaluate
 from .fixture_database import connect, seed
 from .inputs import input_files
+from .lifecycle import valid_run_id
 from .container_http import BoundedClient, docker_environment
 from .processes import docker_command
 from .results import digest_file, read_regular
@@ -79,7 +80,7 @@ Verify the isolation Docker actually applied before evaluation; any mismatch ref
 
 
 def cleanup_run(run_id):
-    if not re.fullmatch(r"[a-f0-9-]{32,36}", run_id):
+    if not valid_run_id(run_id):
         raise ValueError("invalid isolation run ID")
     # 清理不是安全測試期限；daemon 較慢時應等待，不能遺留容器。 / Cleanup is not a security deadline: a slow daemon must delay it, not leak containers.
     ids = docker("ps", "-aq", "--filter", "label=epsilon.isolated=true", "--filter", "label=epsilon.run=" + run_id, timeout=30).stdout.split()
@@ -107,7 +108,7 @@ def run_isolated(candidate: Path, variant="fixed", run_id=None) -> dict:
     if source.is_symlink():
         raise ValueError("candidate source is a symlink")
     run_id = run_id or secrets.token_hex(16)
-    if not re.fullmatch(r"[a-f0-9-]{32,36}", run_id):
+    if not valid_run_id(run_id):
         raise ValueError("invalid isolation run ID")
     paths = [p for p in input_files(candidate) if p.is_relative_to(source)]
     if not paths or any(p.suffix != ".py" for p in paths) or sum(p.stat().st_size for p in paths) > 1024 * 1024:
@@ -186,7 +187,8 @@ def run_isolated(candidate: Path, variant="fixed", run_id=None) -> dict:
                     health = client.get("/health")
                     if health.status_code == 200 and health.json().get("fixture_id") == schema and health.json().get("ready"):
                         break
-                except (RuntimeError, ValueError, TimeoutError):
+                except (RuntimeError, ValueError, TimeoutError, AttributeError, BrokenPipeError):
+                    # 非物件 JSON 或提早關閉的管線也只是尚未就緒。 / Non-object JSON or an early-closed pipe means not ready yet.
                     pass
                 time.sleep(0.1)
             else:

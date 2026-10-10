@@ -102,3 +102,10 @@ def test_edited_events_are_never_skipped_at_job_level():
     # 略過的同名檢查會被規則集視為通過。 / A skipped same-name check would satisfy the ruleset.
     assert 'edited' in WORKFLOW.split('\npermissions:')[0]
     assert not re.search(r"^    if: .*(event\.action|edited)", WORKFLOW, re.MULTILINE)
+
+
+def test_publisher_step_names_match_the_workflow():
+    from security_harness import trusted_publisher as publisher
+    workflow = WORKFLOW
+    for name in (*publisher.REQUIRED_STEPS, *publisher.MUTATION_STEPS, publisher.COMPLETION_STEP):
+        assert f'- name: {name}\n' in workflow, name

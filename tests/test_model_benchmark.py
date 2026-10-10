@@ -144,6 +144,7 @@ def test_noncanonical_model_envelopes_rejected(raw):
 @pytest.mark.parametrize('failure', ['abstain', 'schema', 'timeout', 'refusal', 'configuration'])
 def test_unassessed_cases_do_not_disappear_from_miss_rate(tmp_path, monkeypatch, failure):
     import scripts.model_smoke as smoke
+    from security_harness.llm import config as model_config
     class Adapter(bench.MockReviewer):
         provider = 'gemini'
         family = 'gemini'
@@ -158,7 +159,7 @@ def test_unassessed_cases_do_not_disappear_from_miss_rate(tmp_path, monkeypatch,
     def factory(*args):
         if failure == 'configuration': raise ModelError('CONFIGURATION')
         return Adapter()
-    monkeypatch.setattr(smoke, 'configured_adapter', factory)
+    monkeypatch.setattr(model_config, 'configured_adapter', factory)
     report, path = collected(tmp_path, ['gemini'], ['B01', 'B02'])
     metrics = report['analysis']['provider_metrics']['gemini']
     assert metrics['coverage'] == 0 and metrics['positive_miss_rate_all'] == 1
@@ -208,12 +209,13 @@ def test_agreeing_wrong_models_still_require_human_review_and_localization_is_sc
 
 def test_cancelled_collection_keeps_all_planned_cases_in_analysis(tmp_path, monkeypatch):
     import scripts.model_smoke as smoke
+    from security_harness.llm import config as model_config
     class Hang(bench.MockReviewer):
         provider, family = 'gemini', 'gemini'
         def __init__(self): pass
         async def generate(self, _):
             await asyncio.Event().wait()
-    monkeypatch.setattr(smoke, 'configured_adapter', lambda *args: Hang())
+    monkeypatch.setattr(model_config, 'configured_adapter', lambda *args: Hang())
     report = runner.initial_report(['gemini'], ['B01', 'B02'], str(uuid.uuid4()))
     life.persist(tmp_path / 'artifacts' / report['run_id'] / 'report.json', report)
     prepare_run(tmp_path, report['run_id'], operation='model-smoke')

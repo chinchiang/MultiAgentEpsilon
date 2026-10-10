@@ -13,7 +13,7 @@ import time
 from contextlib import contextmanager
 from pathlib import Path
 
-from ..lifecycle import (identity, owner_alive, prepare_run, run_directory,
+from ..lifecycle import (group_alive, identity, owner_alive, prepare_run, run_directory,
                          temporary_directory, terminate_group)
 from ..results import write_json
 from .gateway import ModelError
@@ -94,16 +94,7 @@ def stop_registered(work):
         terminate_group(pid)
         deadline = time.monotonic() + 3
         while True:
-            alive = False
-            for stat in Path('/proc').glob('[0-9]*/stat'):
-                try:
-                    fields = stat.read_text().rsplit(')', 1)[1].split()
-                    if int(fields[2]) == pid and fields[0] != 'Z':
-                        alive = True
-                        break
-                except (FileNotFoundError, ProcessLookupError):
-                    continue
-            if not alive:
+            if not group_alive(pid):
                 break
             if time.monotonic() >= deadline:
                 raise TimeoutError('model process cleanup incomplete')

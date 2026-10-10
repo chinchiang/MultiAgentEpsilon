@@ -17,7 +17,7 @@ from ..lifecycle import run_directory
 
 def initial_report(providers, case_ids, run_id, output_tokens=OUTPUT_TOKENS, rounds=1):
     from .benchmark_score import file_digest
-    from scripts.model_smoke import implementation_digest, ROOT
+    from .config import implementation_digest, ROOT
     cases, plan = load_cases(), make_plan(providers, case_ids, rounds)
     if type(output_tokens) is not int or output_tokens not in (512, 1024):
         raise ValueError('invalid review output budget')
@@ -43,7 +43,7 @@ def initial_report(providers, case_ids, run_id, output_tokens=OUTPUT_TOKENS, rou
 
 
 async def run_worker(root, run_id):
-    from scripts.model_smoke import configured_adapter
+    from . import config
     report = read_report(root, run_id)
     cases = load_cases()
     path = root / 'artifacts' / run_id / 'report.json'
@@ -82,7 +82,7 @@ async def run_worker(root, run_id):
             save()
             provider, case = check['provider'], cases[check['case_id']]
             try:
-                adapter = MockReviewer(provider) if provider.startswith('mock-') else configured_adapter(provider, run_directory(root, run_id), JsonHTTP(timeout_seconds=30))
+                adapter = MockReviewer(provider) if provider.startswith('mock-') else config.configured_adapter(provider, run_directory(root, run_id), JsonHTTP(timeout_seconds=30))
             except (KeyError, ModelError):
                 check.update(status='ERROR', code='CONFIGURATION')
                 save()

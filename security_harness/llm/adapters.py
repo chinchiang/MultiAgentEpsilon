@@ -120,6 +120,13 @@ class GeminiAdapter:
                      reported_model(value.get('modelVersion')))
 
 
+def chat_payload(model, request):
+    """OpenAI 相容文字完成請求；GLM 與 LM Studio 共用。 / OpenAI-compatible text completion shared by GLM and LM Studio."""
+    return {"model": model, "messages": [{"role": "system", "content": request.system},
+                                         {"role": "user", "content": request.user}],
+            "max_tokens": request.max_output_tokens, "temperature": 0, "stream": False, "n": 1}
+
+
 class GLMAdapter:
     provider = "glm"
     family = "glm"
@@ -133,10 +140,8 @@ class GLMAdapter:
 
     async def generate(self, request):
         headers = {"Authorization": f"Bearer {self._api_key}"} if self._api_key else {}
-        value = await self.http.post(self._url, headers, {
-            "model": self.model, "messages": [{"role": "system", "content": request.system},
-                                               {"role": "user", "content": request.user}],
-            "max_tokens": request.max_output_tokens, "temperature": 0, "stream": False, "n": 1})
+        # GLM 維持提示詞式輸出，不宣稱原生 schema 約束。 / GLM keeps prompt-based output; no native schema claim.
+        value = await self.http.post(self._url, headers, chat_payload(self.model, request))
         return chat_reply(value)
 
 

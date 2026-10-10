@@ -2,6 +2,7 @@
 """啟動真實 HTTP 伺服器、驗證登入與隔離，再移除本次擁有的狀態。
 
 Start a real HTTP server, verify login and isolation, then remove owned state."""
+import argparse
 import subprocess
 import sys
 import time
@@ -15,7 +16,8 @@ from fixture_app.app import database_url, seed, cleanup
 from security_harness.results import write_json
 
 
-def main():
+def main(argv=None):
+    argparse.ArgumentParser(description=__doc__).parse_args(argv)
     dsn = database_url()
     schema, passwords = seed(dsn)
     process = subprocess.Popen([sys.executable, str(ROOT / "scripts/serve_fixture.py"), "--schema", schema],

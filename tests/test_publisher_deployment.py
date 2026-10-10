@@ -139,3 +139,12 @@ def test_timer_spreads_instances_and_unit_documents_python_requirement():
     assert 'RandomizedDelaySec=' in timer
     assert 'ExecStart=/usr/bin/python3 -I ' in service and 'Python 3.12' in service
     assert service.count('--lock-file /var/lib/epsilon-publisher/publisher.lock') == 1
+
+
+def test_repository_leaves_headroom_under_publisher_source_and_call_limits():
+    from security_harness import trusted_publisher as publisher
+    import subprocess
+    tracked = subprocess.run(["git", "-C", str(ROOT), "ls-files"], capture_output=True, text=True, check=True).stdout.split()
+    # 冷快取約需每檔一次 blob 請求加上約 30 次其他呼叫。 / A cold cache needs about one blob call per file plus ~30 others.
+    assert len(tracked) * 2 <= publisher.MAX_SOURCE_FILES
+    assert publisher.MAX_SOURCE_FILES + 50 <= publisher.API_CALL_BUDGET

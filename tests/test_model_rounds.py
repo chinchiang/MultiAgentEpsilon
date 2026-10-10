@@ -191,3 +191,10 @@ def test_changed_case_catalog_spends_no_calls(tmp_path, monkeypatch):
 @pytest.mark.parametrize('code', ['TIMEOUT', 'SUPERVISOR_FAILED', 'WORKER_FAILED', 'PROVIDER_INCOMPLETE'])
 def test_supervisor_stop_reasons_are_known_categories(code):
     assert score.error_categories([{'status': 'ERROR', 'code': code}]) == {code: 1}
+
+
+def test_live_plan_warns_when_worst_case_exceeds_the_run_cap():
+    from scripts.model_review import deadline_warning
+    assert deadline_warning(3, 90) is None
+    message = deadline_warning(8, 130)
+    assert '240' in message and '130' in message and 'INCOMPLETE' in message

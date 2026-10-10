@@ -20,7 +20,7 @@ def records():
     output[-1]["coverage_count"] = len(output[-1]["cases"])
     output[1]['evidence'] = {'coverage': {'status': 'COMPLETE', 'selected_files': 3,
         'selected_bytes': 30, 'scanned_leaves': 3, 'scanned_bytes': 30, 'expanded_bytes': 30,
-        'archives': 0, 'history_blobs': 0, 'unsupported_files': 0, 'history_head': 'a' * 40}}
+        'archives': 0, 'history_blobs': 0, 'unsupported_files': 0, 'history_head': 'a' * 40}, 'findings': []}
     for row in output:
         row["created_at"] = NOW.isoformat()
     return output
@@ -112,3 +112,11 @@ def test_seeded_defect_manifest_must_be_a_strict_subset_of_required_cases(seeded
     else:
         contract["seeded_defect_case_ids"] = seeded
     assert judge(records(), policy) == "BLOCK"
+
+
+@pytest.mark.parametrize('listed,count', [([], 1), ([{'rule': 'r'}], 0), (None, 0), ('x', 0)])
+def test_secret_scan_summary_must_match_its_finding_list(listed, count):
+    rows = records()
+    rows[1]['evidence']['findings'] = listed
+    rows[1]['findings'] = count
+    assert judge(rows) == 'BLOCK'

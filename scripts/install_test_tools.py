@@ -17,9 +17,7 @@ from security_harness.dependencies import scan
 from security_harness.results import digest_file, write_json
 
 
-def main():
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.parse_args()
+def install():
     lock = ROOT / 'requirements-test.lock'
     policy = json.loads((ROOT / 'security/policy.json').read_text())
     policy['allowed_packages'] = ['hypothesis', 'sortedcontainers']
@@ -40,6 +38,18 @@ def main():
     write_json(ROOT / 'artifacts/test-tools.json', {'lock_sha256': digest_file(lock),
                'provenance': provenance, 'dependency_evidence': evidence, 'installation': 'COMPLETE'})
     print('測試工具來源、冷卻期、雜湊與漏洞檢查通過 / Test tools verified and installed')
+
+
+def main(argv=None):
+    argparse.ArgumentParser(description=__doc__).parse_args(argv)
+    try:
+        install()
+    except Exception as exc:
+        # 只記錄類型，不輸出可能含路徑或網址的例外文字。 / Record the type only, never exception text with paths or URLs.
+        write_json(ROOT / 'artifacts/test-tools.json', {'installation': 'ERROR', 'error_type': type(exc).__name__})
+        print(f'測試工具安裝失敗 / Test tool installation failed: {type(exc).__name__}')
+        return 1
+    return 0
 
 
 if __name__ == '__main__':

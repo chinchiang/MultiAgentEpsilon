@@ -66,7 +66,7 @@ def bundle():
                result("G2", "COMPLETED", "scan", 1, 0, subject, "f"*64, "synthetic", run_id=run_id,
                       evidence={"coverage": {"status": "COMPLETE", "selected_files": 1, "selected_bytes": 1,
                       "scanned_leaves": 1, "scanned_bytes": 1, "expanded_bytes": 0, "archives": 0,
-                      "history_blobs": 1, "unsupported_files": 0, "history_head": "b"*40}}),
+                      "history_blobs": 1, "unsupported_files": 0, "history_head": "b"*40}, "findings": []}),
                result("AUTH", "COMPLETED", "test", len(policy["gate_contracts"]["AUTH"]["case_ids"]), 0, subject, "f"*64, "synthetic", run_id=run_id,
                       cases=[{"case": n, "passed": True} for n in policy["gate_contracts"]["AUTH"]["case_ids"]])]
     records[0]["packages"], records[0]["sca"] = clean_evidence(23, now)
@@ -484,9 +484,16 @@ def test_config_validation_is_available_before_installing_root_owned_paths(tmp_p
 def base_binding(twin=None, branch="feature", listed=True):
     pr = {"number": 5, "base": {"ref": "main", "repo": {"id": 10}},
           "head": {"sha": "b"*40, "ref": "feature", "repo": {"id": 10}}}
-    run = {"head_branch": branch, "head_repository": {"id": 10}}
+    run = {"head_sha": "b"*40, "head_branch": branch, "head_repository": {"id": 10}}
     prs = ([pr] if listed else []) + ([twin] if twin else [])
     return run, pr, prs
+
+
+def test_run_for_another_head_sha_is_refused():
+    run, pr, prs = base_binding()
+    run["head_sha"] = "c"*40
+    with pytest.raises(publisher.Denied, match="RUN_SHA"):
+        publisher.validate_run_base(run, pr, prs, "main")
 
 
 @pytest.mark.parametrize("twin,branch,code", [
@@ -530,9 +537,3 @@ def test_mutation_job_cannot_be_omitted_or_fail(bundle, state):
         job['conclusion'] = state
     with pytest.raises(publisher.Denied, match='JOB_SOURCE'):
         publisher.validate_bundle(**bundle)
-
-
-def test_publisher_step_names_match_the_workflow():
-    workflow = (ROOT / '.github/workflows/security.yml').read_text()
-    for name in (*publisher.REQUIRED_STEPS, *publisher.MUTATION_STEPS, publisher.COMPLETION_STEP):
-        assert f'- name: {name}\n' in workflow, name

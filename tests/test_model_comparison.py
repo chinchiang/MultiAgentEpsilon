@@ -34,10 +34,11 @@ def test_incompatible_or_replayed_batches_are_rejected(tmp_path, attack):
 
 def test_configuration_failure_without_model_identity_cannot_be_pooled(tmp_path, monkeypatch):
     from scripts import model_smoke
+    from security_harness.llm import config as model_config
     from security_harness.llm.gateway import ModelError
     def unavailable(*args):
         raise ModelError('CONFIGURATION')
-    monkeypatch.setattr(model_smoke, 'configured_adapter', unavailable)
+    monkeypatch.setattr(model_config, 'configured_adapter', unavailable)
     report, path = collected(tmp_path, providers=['lmstudio'], case_ids=['B13', 'B14'])
     assert report['cleanup']['completed'] and report['status'] == 'INCOMPLETE'
     assert report['analysis']['provider_metrics']['lmstudio']['positive_miss_rate_all'] == 1

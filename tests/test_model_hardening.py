@@ -11,7 +11,7 @@ import pytest
 from security_harness.llm import benchmark as bench
 from security_harness.llm import benchmark_score as score
 from security_harness.llm.adapters import BedrockAdapter, GeminiAdapter
-from security_harness.llm.gateway import Gateway, MockAdapter, Reply
+from security_harness.llm.gateway import Gateway, MockAdapter, ModelError, Reply
 from tests.test_model_benchmark import collected
 from tests.test_model_gateway import GEMINI, cli_fixture, http_fixture, invoke
 
@@ -159,6 +159,8 @@ def test_example_placeholders_are_configuration_errors(monkeypatch, provider, ov
 
 def test_empty_optional_glm_key_means_no_key(monkeypatch):
     from scripts.model_smoke import configured_adapter
+    from security_harness.llm import config
+    monkeypatch.setattr(config, "remote_hosts", lambda provider: {"glm.internal.test"})
     monkeypatch.setenv("GLM_MODEL_ID", "synthetic-glm")
     monkeypatch.setenv("GLM_CHAT_URL", "https://glm.internal.test/v1/chat/completions")
     monkeypatch.setenv("GLM_API_KEY", "")
@@ -175,3 +177,52 @@ def test_empty_optional_glm_key_means_no_key(monkeypatch):
 def test_model_label_is_readable_without_account_identity(model, label):
     from security_harness.llm.gateway import Gateway
     assert Gateway.label(model) == label
+
+
+@pytest.mark.parametrize("provider,variable,url", [
+    ("glm", "GLM_CHAT_URL", "https://attacker.example/v1/chat/completions"),
+    ("glm", "GLM_CHAT_URL", "https://169.254.169.254/v1/chat/completions"),
+    ("lmstudio", "LMSTUDIO_BASE_URL", "https://unlisted.example/v1"),
+    ("lmstudio", "LMSTUDIO_BASE_URL", "http://192.168.1.5:1234/v1"),
+])
+def test_keyed_providers_only_reach_reviewed_destinations(monkeypatch, provider, variable, url):
+    # 未列入模型 RoE 的主機不能收到 API 金鑰。 / A host outside the model RoE never receives an API key.
+    from scripts.model_smoke import configured_adapter
+    monkeypatch.setenv("GLM_MODEL_ID", "synthetic-glm")
+    monkeypatch.setenv("LMSTUDIO_MODEL_ID", "synthetic-local")
+    monkeypatch.setenv(variable, url)
+    with pytest.raises(ModelError) as caught:
+        configured_adapter(provider)
+    assert caught.value.code == "CONFIGURATION"
+
+
+def test_reviewed_remote_host_and_literal_loopback_are_accepted(monkeypatch):
+    from security_harness.llm import config
+    monkeypatch.setattr(config, "remote_hosts", lambda provider: {"lmstudio.lab.example"})
+    monkeypatch.setenv("LMSTUDIO_MODEL_ID", "synthetic-local")
+    for url in ("https://lmstudio.lab.example/v1", "http://127.0.0.1:1234/v1"):
+        monkeypatch.setenv("LMSTUDIO_BASE_URL", url)
+        assert config.configured_adapter("lmstudio") is not None
+
+
+@pytest.mark.parametrize("value", ["https://[unbalanced/v1", "http://[::1/v1"])
+def test_malformed_url_setting_is_a_configuration_error(monkeypatch, value):
+    from security_harness.llm import config
+    monkeypatch.setenv("LMSTUDIO_BASE_URL", value)
+    with pytest.raises(ModelError) as caught:
+        config.setting("LMSTUDIO_BASE_URL")
+    assert caught.value.code == "CONFIGURATION"
+
+
+@pytest.mark.parametrize("hosts", [None, [], {"glm": []}, {"glm": [], "lmstudio": ["*.example"]},
+                                   {"glm": ["Upper.Example"], "lmstudio": []}, {"glm": [], "lmstudio": ["a.b", "a.b"]},
+                                   {"glm": [], "lmstudio": [], "gemini": []}, {"glm": [], "lmstudio": ["10.0.0.0/8"]}])
+def test_model_roe_rejects_malformed_destination_allowlists(hosts):
+    import json as _json
+    from pathlib import Path as _Path
+    from security_harness.scope import validate_model_roe
+    roe = _json.loads((_Path(__file__).resolve().parents[1] / "security/model-roe.json").read_text())
+    validate_model_roe(roe, ["mock"])
+    roe["allowed_remote_hosts"] = hosts
+    with pytest.raises(ValueError):
+        validate_model_roe(roe, ["mock"])

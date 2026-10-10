@@ -207,13 +207,12 @@ def test_missing_aws_cli_blocks_before_call_reservation(monkeypatch):
 @pytest.mark.parametrize('field', ['invocation', 'digest', 'predicate', 'missing', 'nonzero'])
 def test_attestation_verifier_rejects_forged_or_wrong_run_proofs(tmp_path, monkeypatch, bundle, field):
     from security_harness import processes
-    from scripts import publish_trusted_check
     binary = tmp_path / 'gh'
     binary.write_bytes(b'approved-test-verifier'); binary.chmod(0o755)
     settings, run = bundle['settings'], bundle['run']
     settings.update(attestation_verifier=str(binary),
                     attestation_verifier_sha256=hashlib.sha256(binary.read_bytes()).hexdigest())
-    monkeypatch.setattr(publish_trusted_check, 'open_config', lambda path, owner: os.open(path, os.O_RDONLY))
+    monkeypatch.setattr(publisher, 'open_config', lambda path, owner: os.open(path, os.O_RDONLY))
     original_stat = os.fstat
     def trusted_stat(fd):
         info = original_stat(fd)
@@ -420,6 +419,7 @@ def test_full_guard_fetches_and_excludes_the_rerun_actor(bundle, monkeypatch):
 def test_glm_blind_review_worker_scoring_and_cleanup_use_mock_transport_only(tmp_path, monkeypatch):
     import httpx
     from scripts import model_smoke
+    from security_harness.llm import config as model_config
     from security_harness.llm.adapters import GLMAdapter
     from security_harness.llm.transport import JsonHTTP
     from security_harness.llm.gateway import Request
@@ -432,13 +432,57 @@ def test_glm_blind_review_worker_scoring_and_cleanup_use_mock_transport_only(tmp
         response = await bench.MockReviewer('mock-review-a').generate(model_request)
         value = {'choices': [{'message': {'role': 'assistant', 'content': response.text}, 'finish_reason': 'stop'}]}
         return httpx.Response(200, stream=Bytes(json.dumps(value).encode()), headers={'content-type': 'application/json'})
-    original = model_smoke.configured_adapter
+    original = model_config.configured_adapter
     def configured(provider, *args, **kwargs):
         if provider == 'glm':
             return GLMAdapter('synthetic-glm', 'https://local.example.invalid/v1/chat/completions',
                               http=JsonHTTP(httpx.MockTransport(handler)))
         return original(provider, *args, **kwargs)
-    monkeypatch.setattr(model_smoke, 'configured_adapter', configured)
+    monkeypatch.setattr(model_config, 'configured_adapter', configured)
     report, _ = collected(tmp_path, ['glm', 'mock-review-a'], ['B09', 'B11'])
     assert report['status'] == 'COMPLETE' and report['cleanup']['completed']
     assert report['analysis']['provider_metrics']['glm']['classified'] == 2
+
+
+def test_reused_aws_cli_must_match_the_recorded_verified_install(tmp_path):
+    import json as _json
+    from scripts.install_aws_cli import executable_digest, installed_matches
+    pin = {'version': '2.0.0', 'archive_sha256': 'a' * 64}
+    binary = tmp_path / 'aws'
+    binary.write_bytes(b'verified executable')
+    marker = tmp_path / 'aws-cli.installed.json'
+    assert not installed_matches(binary, marker, pin)  # 沒有安裝紀錄不可重用。 / No record: never reuse.
+    marker.write_text(_json.dumps({**pin, 'executable_sha256': executable_digest(binary)}))
+    assert installed_matches(binary, marker, pin)
+    binary.write_bytes(b'replaced executable')
+    assert not installed_matches(binary, marker, pin)
+    binary.write_bytes(b'verified executable')
+    assert not installed_matches(binary, marker, {**pin, 'archive_sha256': 'b' * 64})
+    marker.write_text('not json')
+    assert not installed_matches(binary, marker, pin)
+
+
+@pytest.mark.parametrize('attack', ['directory_symlink', 'note_symlink', 'oversized_note'])
+def test_adjudication_notes_stay_inside_the_report_directory(tmp_path, attack):
+    from tests.test_model_benchmark import collected
+    from security_harness.llm import benchmark_score as score
+    report, path = collected(tmp_path)
+    outside = tmp_path / 'outside'
+    outside.mkdir()
+    notes = path.parent / 'adjudications'
+    if attack == 'directory_symlink':
+        notes.symlink_to(outside, target_is_directory=True)
+        with pytest.raises(ValueError, match='adjudication directory'):
+            score.add_adjudication(path, report['case_ids'][0], 'NEEDS_MORE_EVIDENCE', 'Synthetic', 'Review pending.')
+        assert not list(outside.iterdir())
+        with pytest.raises(ValueError, match='adjudication directory'):
+            score.read_adjudications(path)
+        return
+    notes.mkdir()
+    if attack == 'note_symlink':
+        (outside / 'x.json').write_text('{}')
+        (notes / 'x.json').symlink_to(outside / 'x.json')
+    else:
+        (notes / 'x.json').write_text('{"pad": "' + 'a' * 20000 + '"}')
+    with pytest.raises(OSError if attack == 'note_symlink' else ValueError):
+        score.read_adjudications(path)

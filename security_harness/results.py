@@ -190,6 +190,10 @@ def decide(records: list[dict], policy: dict, subject: str, policy_digest: str,
                         coverage['selected_files'] != record['coverage_count'] or coverage['unsupported_files'] != 0 or
                         type(coverage.get('reviewed_binaries', 0)) is not int or coverage.get('reviewed_binaries', 0) < 0):
                     raise ValueError('incomplete scan coverage')
+                # 摘要發現數必須等於證據中的發現清單。 / The summary count must equal the evidence finding list.
+                listed = record['evidence']['findings']
+                if not isinstance(listed, list) or record['findings'] != len(listed):
+                    raise ValueError('scan finding summary mismatch')
                 if (policy['gate_contracts'][gate].get('history_required') and
                         not re.fullmatch('[0-9a-f]{40}|[0-9a-f]{64}', str(coverage.get('history_head')))):
                     raise ValueError('history coverage missing')
@@ -220,11 +224,42 @@ def decide(records: list[dict], policy: dict, subject: str, policy_digest: str,
             "scope": "local milestone only; no release attestation or full ASVS claim"}
 
 
+# 政策無法讀取時（例如中斷）的保守備援，與 security/policy.json 相同。 / Conservative fallback when the policy
+# cannot be read (e.g. on interruption); matches security/policy.json.
+DEFAULT_GATES = (("G1", "scan"), ("G2", "scan"), ("AUTH", "test"))
+
+
+def required_gate_kinds(root: Path) -> tuple:
+    """由可信政策推導必要 gate 與種類；讀取失敗時使用保守備援，以便仍能補上 NOT_RUN。
+
+Required gates and kinds from the trusted policy; on failure, fall back so NOT_RUN
+    records are still added."""
+    try:
+        policy = json.loads((Path(root) / "security/policy.json").read_text())
+        validate_policy(policy)
+        return tuple((gate, policy["gate_contracts"][gate]["kind"]) for gate in policy["required_gates"])
+    except Exception:
+        return DEFAULT_GATES
+
+
+def write_text_atomic(path: Path, text: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, temporary = tempfile.mkstemp(prefix=".pointer-", dir=path.parent)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as stream:
+            stream.write(text)
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(temporary, path)
+    finally:
+        Path(temporary).unlink(missing_ok=True)
+
+
 def write_json(path: Path, data: dict) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     fd, temporary = tempfile.mkstemp(prefix=".report-", dir=path.parent)
     try:
-        with os.fdopen(fd, "w") as stream:
+        with os.fdopen(fd, "w", encoding="utf-8") as stream:
             stream.write(json.dumps(data, ensure_ascii=False, indent=2) + "\n")
             stream.flush()
             os.fsync(stream.fileno())

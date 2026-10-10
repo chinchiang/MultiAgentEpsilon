@@ -535,3 +535,23 @@ def test_bad_request_diagnostics_do_not_parse_oversize_or_duplicate_error_bodies
         result, evidence = invoke(GeminiAdapter('synthetic', 'synthetic-key', http))
         assert result is None and evidence['code'] == 'HTTP_ERROR' and evidence['diagnostic'] is None
         assert len(wire) == 1 and stream.closed
+
+
+def test_http_io_timeout_is_recorded_apart_from_the_call_deadline():
+    from security_harness.llm.transport import IOTimeout
+    class Slow(MockAdapter):
+        async def generate(self, request):
+            raise IOTimeout()
+    gateway = Gateway(Limits(max_calls=1, reserved_output_tokens=32))
+    assert asyncio.run(gateway.generate(Slow(), REQUEST)) is None
+    assert gateway.evidence[-1]["status"] == "TIMEOUT" and gateway.evidence[-1]["code"] == "IO_TIMEOUT"
+
+
+@pytest.mark.parametrize("usage,verified", [(None, False), (5, True)])
+def test_output_budget_verification_is_explicit(usage, verified):
+    class Reporting(MockAdapter):
+        async def generate(self, request):
+            return Reply("EPSILON_SYNTHETIC_OK", output_tokens=usage)
+    gateway = Gateway(Limits(max_calls=1, reserved_output_tokens=32))
+    assert asyncio.run(gateway.generate(Reporting(), REQUEST)) is not None
+    assert gateway.evidence[-1]["output_budget_verified"] is verified
