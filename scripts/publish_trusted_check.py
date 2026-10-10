@@ -105,6 +105,24 @@ def revoke(client):
         pass  # 盡力撤銷；權杖本身仍會在一小時內到期。 / Best effort; the token still expires within an hour.
 
 
+LOCK_WAIT_SECONDS = 60
+
+
+def acquire_lock(fd, wait=LOCK_WAIT_SECONDS, clock=time.monotonic, sleep=time.sleep):
+    """有限等待共用鎖；所有 PR 實例共用一把鎖，彼此排隊而不是立即失敗。
+
+Wait a bounded time for the shared lock, so PR instances queue instead of failing at once."""
+    deadline = clock() + wait
+    while True:
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            return
+        except BlockingIOError:
+            if clock() >= deadline:
+                raise Denied("LOCK_BUSY") from None
+            sleep(0.5)
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--settings", type=Path, required=True)
@@ -140,7 +158,7 @@ def main():
                 need(external is not None and not external.resolve().is_relative_to(ROOT.resolve()), "EXTERNAL_STATE_REQUIRED")
             lock_fd = os.open(args.lock_file, os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, 0o600)
             need(stat.S_ISREG(os.fstat(lock_fd).st_mode), "LOCK_FILE")
-            fcntl.flock(lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            acquire_lock(lock_fd)
             state = load_state(args.state_file)
             if state.get("backoff_until", 0) > time.time():
                 result.update(code="THROTTLED_BACKOFF")

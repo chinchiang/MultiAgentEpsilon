@@ -16,10 +16,12 @@ START = '<!-- repository-tree:start -->'
 END = '<!-- repository-tree:end -->'
 
 
-def inventory():
-    raw = candidate_git.run(ROOT, 'ls-files', '-co', '--exclude-standard', '-z',
+def inventory(root=ROOT, untracked=True):
+    """列出要檢查的檔案；候選目錄只看已追蹤檔案。 / Files to check; a candidate checkout uses tracked files only."""
+    flags = ('-co', '--exclude-standard') if untracked else ('-c',)
+    raw = candidate_git.run(root, 'ls-files', *flags, '-z',
                             capture_output=True, check=True, timeout=10).stdout.decode()
-    return sorted(set(p for p in raw.split('\0') if p and (ROOT / p).is_file()))
+    return sorted(set(p for p in raw.split('\0') if p and (root / p).is_file() and not (root / p).is_symlink()))
 
 
 def repository_tree(paths):
@@ -39,14 +41,14 @@ def repository_tree(paths):
     return '```text\n' + '\n'.join(lines) + '\n```'
 
 
-def validate(paths):
+def validate(paths, root=ROOT):
     errors = []
-    markdown = [ROOT / p for p in paths if p.endswith('.md')]
+    markdown = [root / p for p in paths if p.endswith('.md')]
     for path in markdown:
         text = path.read_text()
         for anchor in ('zh-tw', 'en'):
             if text.count(f'<a id="{anchor}"></a>') != 1:
-                errors.append(f'{path.relative_to(ROOT)}: language anchor / 語言入口 {anchor}')
+                errors.append(f'{path.relative_to(root)}: language anchor / 語言入口 {anchor}')
         if '<a id="en"></a>' in text:
             zh, en = text.split('<a id="en"></a>', 1)
             if not re.search('[\u4e00-\u9fff]', zh) or not re.search('[A-Za-z]{3,}', en):
@@ -57,17 +59,19 @@ def validate(paths):
             if parts.scheme or parts.netloc:
                 continue
             destination = (path.parent / unquote(parts.path)).resolve() if parts.path else path
-            if not destination.is_relative_to(ROOT) or not destination.exists():
+            if not destination.is_relative_to(root.resolve()) or not destination.exists():
                 errors.append(f'{path.name}: missing local link / 本機連結不存在 {target}')
-            elif parts.fragment in ('en', 'zh-tw') and f'<a id="{parts.fragment}"></a>' not in destination.read_text():
+            elif (parts.fragment in ('en', 'zh-tw') and
+                  (not destination.is_file() or f'<a id="{parts.fragment}"></a>' not in destination.read_text())):
                 errors.append(f'{path.name}: missing linked anchor / 連結錨點不存在 {target}')
-    architecture = ROOT / 'docs/architecture-overview.zh-TW.md'
-    text = architecture.read_text()
-    actual = text.split(START, 1)[1].split(END, 1)[0].strip()
-    if actual != repository_tree(paths):
+    architecture = root / 'docs/architecture-overview.zh-TW.md'
+    text = architecture.read_text() if architecture.is_file() else ''
+    if text.count(START) != 1 or text.count(END) != 1:
+        errors.append('repository tree markers missing / 缺少目錄樹標記')
+    elif text.split(START, 1)[1].split(END, 1)[0].strip() != repository_tree(paths):
         errors.append('repository tree is stale / 目錄樹尚未同步')
     for name in paths:
-        path = ROOT / name
+        path = root / name
         if path.suffix == '.mmd':
             svg = path.with_suffix('.svg')
             if not svg.is_file():
@@ -89,22 +93,27 @@ def validate(paths):
     return errors
 
 
-def main():
+def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--update-tree', action='store_true', help='同步目錄樹 / regenerate repository tree')
-    args = parser.parse_args()
-    paths = inventory()
+    parser.add_argument('--root', type=Path, default=ROOT,
+                        help='要檢查的 checkout，候選僅讀取不執行 / checkout to check; a candidate is read, never executed')
+    args = parser.parse_args(argv)
+    root = args.root.resolve()
+    if args.update_tree and root != ROOT:
+        parser.error('只能更新本儲存庫的目錄樹 / --update-tree only applies to this repository')
+    paths = inventory(root, untracked=root == ROOT)
     if args.update_tree:
         path = ROOT / 'docs/architecture-overview.zh-TW.md'
         before, tail = path.read_text().split(START, 1)
         _, after = tail.split(END, 1)
         path.write_text(before + START + '\n' + repository_tree(paths) + '\n' + END + after)
-    errors = validate(paths)
+    errors = validate(paths, root)
     for error in errors:
         print(error)
     if not errors:
         print(f'雙語結構與連結檢查通過 / Documentation checks passed ({len(paths)} files)')
-    return bool(errors)
+    return 1 if errors else 0
 
 
 if __name__ == '__main__':

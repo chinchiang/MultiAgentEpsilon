@@ -5,6 +5,8 @@ on:
     branches: [main]
   pull_request_target:
     branches: [main]
+    # edited 用於改 base 的重評估；不可在 job 層級略過：略過的同名檢查會被規則集當成通過。 / edited covers base
+    # retargeting. Never skip it at job level: a skipped same-name check would satisfy the ruleset.
     types: [opened, synchronize, reopened, ready_for_review, edited]
   workflow_dispatch:
     inputs:
@@ -34,14 +36,14 @@ jobs:
       evidence-digest: ${{ steps.evidence.outputs.artifact-digest }}
     steps:
       - name: Checkout evaluator from trusted base
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           path: trusted
           ref: ${{ github.event.pull_request.base.sha || github.sha }}
           fetch-depth: 0
           persist-credentials: false
       - name: Checkout candidate as data only
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           path: candidate
           # 候選 checkout 只當資料，執行限於受限 runtime。 / Candidate checkout is data only; execution stays in the restricted runtime.
@@ -50,7 +52,7 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
       - name: Set Python
-        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: '3.12'
       - name: Record evaluator-owned CI provenance
@@ -79,12 +81,13 @@ jobs:
       - name: Bilingual documentation checks / 雙語文件檢查
         working-directory: trusted
         run: python -I scripts/check_docs.py
+      - name: Candidate documentation checks / 候選文件檢查
+        working-directory: trusted
+        # 只讀取候選文件與 Python 語法樹，不執行候選程式。 / Reads candidate documents and Python syntax trees; never executes them.
+        run: python -I scripts/check_docs.py --root ../candidate
       - name: Evaluator regressions and isolation adversarial checks
         working-directory: trusted
         run: .venv/bin/python -m pytest --junitxml=artifacts/pytest.xml
-      - name: Offline security mutation checks
-        working-directory: trusted
-        run: .venv/bin/python -I scripts/mutation_check.py
       - name: Prove seeded defect still blocks
         working-directory: trusted
         run: .venv/bin/python -I scripts/expect_block.py
@@ -110,12 +113,52 @@ jobs:
       - name: Retain evaluator-owned evidence
         id: evidence
         if: always()
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: ${{ github.event_name == 'workflow_dispatch' && 'manual-security' || 'trusted-security' }}-${{ github.run_id }}-${{ github.run_attempt }}
           path: |
             trusted/artifacts/
             audit/
+          retention-days: 7
+          if-no-files-found: error
+
+  mutation-tests:
+    # 突變測試有自己的 20 分鐘期限，獨立 job 避免耗盡評估工作的時間。 / The mutation campaign has its own
+    # 20-minute deadline; a separate job keeps it from exhausting the evaluator's budget.
+    name: ${{ github.event_name == 'workflow_dispatch' && 'manual-mutation-tests' || 'trusted-mutation-tests' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    steps:
+      # 只突變可信基準本身，不取得候選或任何憑證。 / Mutates only the trusted baseline; no candidate or credentials.
+      - name: Checkout evaluator from trusted base
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          path: trusted
+          ref: ${{ github.event.pull_request.base.sha || github.sha }}
+          # bootstrap 的 G2 需要完整歷史。 / Bootstrap G2 requires full history.
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Set Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: '3.12'
+      - name: Install only evaluator dependencies
+        working-directory: trusted
+        run: python -I scripts/bootstrap.py
+      - name: Install verified property-test tools / 安裝已驗證性質測試工具
+        working-directory: trusted
+        run: python -I scripts/install_test_tools.py
+      - name: Offline security mutation checks
+        working-directory: trusted
+        run: .venv/bin/python -I scripts/mutation_check.py
+      - name: Retain mutation report
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: ${{ github.event_name == 'workflow_dispatch' && 'manual-mutations' || 'trusted-mutations' }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: trusted/artifacts/
           retention-days: 7
           if-no-files-found: error
 
@@ -131,7 +174,7 @@ jobs:
     steps:
       # 全新 runner 不取得候選檔案、evaluator 匯入或模型憑證。 / A fresh runner receives no candidate files, evaluator imports or model credentials.
       - name: Sign evaluator-owned evidence
-        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
         with:
           subject-name: ${{ github.event_name == 'workflow_dispatch' && 'manual-security' || 'trusted-security' }}-${{ github.run_id }}-${{ github.run_attempt }}
           subject-digest: sha256:${{ needs.trusted-security-pilot.outputs.evidence-digest }}
@@ -139,16 +182,18 @@ jobs:
   security-completion:
     # 規則集採計最終工作，僅評估成功不足以放行。 / The ruleset counts this final job; evaluator success alone cannot satisfy it.
     name: ${{ github.event_name == 'workflow_dispatch' && 'manual-security-completion' || 'trusted-security-pilot' }}
-    needs: [trusted-security-pilot, attest-evidence]
+    needs: [trusted-security-pilot, attest-evidence, mutation-tests]
     if: always()
     runs-on: ubuntu-24.04
     timeout-minutes: 2
     permissions: {}
     steps:
-      - name: Require evaluator and attestation success
+      - name: Require evaluator, attestation and mutation success
         env:
           EVALUATOR_RESULT: ${{ needs.trusted-security-pilot.result }}
           ATTESTATION_RESULT: ${{ needs.attest-evidence.result }}
+          MUTATION_RESULT: ${{ needs.mutation-tests.result }}
         run: |
           test "$EVALUATOR_RESULT" = success
           test "$ATTESTATION_RESULT" = success
+          test "$MUTATION_RESULT" = success

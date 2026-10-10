@@ -20,11 +20,13 @@ ROOT = Path(__file__).resolve().parents[1]
 
 @pytest.mark.parametrize('attack', ['missing-final-job', 'signing-failed', 'final-skipped', 'missing-final-step'])
 def test_green_evaluator_requires_verified_signing_and_final_gate(bundle, attack):
-    if attack == 'missing-final-job': bundle['jobs'].pop()
-    elif attack == 'signing-failed': bundle['jobs'][1]['conclusion'] = 'failure'
-    elif attack == 'final-skipped': bundle['jobs'][2]['conclusion'] = 'skipped'
-    else: bundle['jobs'][2]['steps'] = []
-    with pytest.raises(publisher.Denied, match='JOB_SOURCE|COMPLETION_STEP_INCOMPLETE'):
+    jobs = {j['name']: j for j in bundle['jobs']}
+    if attack == 'missing-final-job': bundle['jobs'].remove(jobs['trusted-security-pilot'])
+    elif attack == 'signing-failed': jobs['Attest evaluator-owned evidence']['conclusion'] = 'failure'
+    elif attack == 'final-skipped': jobs['trusted-security-pilot']['conclusion'] = 'skipped'
+    else: jobs['trusted-security-pilot']['steps'] = []
+    expected = 'COMPLETION_STEP_INCOMPLETE' if attack == 'missing-final-step' else 'JOB_SOURCE'
+    with pytest.raises(publisher.Denied, match=expected):
         publisher.validate_bundle(**bundle)
 
 
@@ -49,16 +51,14 @@ def bundle():
            "workflow_id": 99, "path": settings["workflow_path"], "event": "pull_request_target",
            "head_sha": "b"*40, "head_branch": "feature", "head_repository": {"id": 10}, "status": "completed", "conclusion": "success",
            "actor": {"login": "author"}, "triggering_actor": {"login": "author"}, "pull_requests": [{"number": 5}]}
-    steps = ["Record evaluator-owned CI provenance", "Check protected changes and exact-head independent approval",
-             "Evaluator regressions and isolation adversarial checks", "Offline security mutation checks", "Prove seeded defect still blocks",
-             "Evaluate candidate through external oracle", "Remove evaluator regression database",
-             "Reap cancelled security runs", "Retain evaluator-owned evidence"]
     jobs = [{"name": "trusted-security-evaluation", "conclusion": "success",
-             "steps": [{"name": n, "conclusion": "success"} for n in steps]}]
+             "steps": [{"name": n, "conclusion": "success"} for n in publisher.REQUIRED_STEPS]},
+            {"name": "trusted-mutation-tests", "conclusion": "success",
+             "steps": [{"name": n, "conclusion": "success"} for n in publisher.MUTATION_STEPS]}]
     jobs.append({"name": "Attest evaluator-owned evidence", "conclusion": "success",
                  "steps": [{"name": "Sign evaluator-owned evidence", "conclusion": "success"}]})
     jobs.append({'name': 'trusted-security-pilot', 'conclusion': 'success',
-                 'steps': [{'name': 'Require evaluator and attestation success', 'conclusion': 'success'}]})
+                 'steps': [{'name': publisher.COMPLETION_STEP, 'conclusion': 'success'}]})
     review = {"id": 11, "state": "APPROVED", "commit_id": "b"*40, "user": {"login": "reviewer"}}
     subject = "worktree-manifest-v1:sha256:" + "c"*64
     run_id = "11111111-1111-4111-8111-111111111111"
@@ -511,7 +511,7 @@ def test_run_base_binding_accepts_the_only_pr_and_fails_closed_on_missing_listin
 
 @pytest.mark.parametrize('state', ['failure', 'skipped', 'missing'])
 def test_required_mutation_step_cannot_be_omitted(bundle, state):
-    steps = bundle['jobs'][0]['steps']
+    steps = next(j for j in bundle['jobs'] if j['name'] == 'trusted-mutation-tests')['steps']
     step = next(s for s in steps if s['name'] == 'Offline security mutation checks')
     if state == 'missing':
         steps.remove(step)
@@ -519,3 +519,20 @@ def test_required_mutation_step_cannot_be_omitted(bundle, state):
         step['conclusion'] = state
     with pytest.raises(publisher.Denied):
         publisher.validate_bundle(**bundle)
+
+
+@pytest.mark.parametrize('state', ['failure', 'missing'])
+def test_mutation_job_cannot_be_omitted_or_fail(bundle, state):
+    job = next(j for j in bundle['jobs'] if j['name'] == 'trusted-mutation-tests')
+    if state == 'missing':
+        bundle['jobs'].remove(job)
+    else:
+        job['conclusion'] = state
+    with pytest.raises(publisher.Denied, match='JOB_SOURCE'):
+        publisher.validate_bundle(**bundle)
+
+
+def test_publisher_step_names_match_the_workflow():
+    workflow = (ROOT / '.github/workflows/security.yml').read_text()
+    for name in (*publisher.REQUIRED_STEPS, *publisher.MUTATION_STEPS, publisher.COMPLETION_STEP):
+        assert f'- name: {name}\n' in workflow, name

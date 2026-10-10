@@ -148,9 +148,13 @@ excluded: identities that touched the head (run actors, commit author/committer)
 
 
 REQUIRED_STEPS = ("Record evaluator-owned CI provenance", "Check protected changes and exact-head independent approval",
-                  "Evaluator regressions and isolation adversarial checks", "Offline security mutation checks", "Prove seeded defect still blocks",
+                  "Bilingual documentation checks / 雙語文件檢查", "Candidate documentation checks / 候選文件檢查",
+                  "Evaluator regressions and isolation adversarial checks", "Prove seeded defect still blocks",
                   "Evaluate candidate through external oracle", "Remove evaluator regression database",
                   "Reap cancelled security runs", "Retain evaluator-owned evidence")
+# 突變測試在獨立 job，有自己的期限。 / Mutation testing runs in its own job with its own deadline.
+MUTATION_STEPS = ("Offline security mutation checks", "Retain mutation report")
+COMPLETION_STEP = "Require evaluator, attestation and mutation success"
 CLEANUP_KEYS = ("completed", "temporary_directory_removed", "run_directory_removed", "process_group_terminated")
 
 
@@ -262,16 +266,19 @@ def validate_bundle(settings, gate_policy, pr, run, newer_runs, jobs, files, rev
     need(type(run["run_attempt"]) is int and run["run_attempt"] >= 1, "RUN_ATTEMPT")
     reject_newer_runs(run, newer_runs, pr["head"]["sha"])
     named = {j["name"]: j for j in jobs}
-    need(len(jobs) == len(named) == 3
-         and set(named) == {"trusted-security-evaluation", "Attest evaluator-owned evidence", "trusted-security-pilot"}
+    need(len(jobs) == len(named) == 4
+         and set(named) == {"trusted-security-evaluation", "trusted-mutation-tests",
+                            "Attest evaluator-owned evidence", "trusted-security-pilot"}
          and all(j["conclusion"] == "success" for j in jobs), "JOB_SOURCE")
     steps = {s["name"]: s["conclusion"] for s in named["trusted-security-evaluation"]["steps"]}
     need(all(steps.get(s) == "success" for s in REQUIRED_STEPS), "REQUIRED_STEP_INCOMPLETE")
+    mutation = {s["name"]: s["conclusion"] for s in named["trusted-mutation-tests"]["steps"]}
+    need(all(mutation.get(s) == "success" for s in MUTATION_STEPS), "MUTATION_STEP_INCOMPLETE")
     signing = named["Attest evaluator-owned evidence"]["steps"]
     need(any(s["name"] == "Sign evaluator-owned evidence" and s["conclusion"] == "success"
              for s in signing), "ATTESTATION_STEP_INCOMPLETE")
     completion = named['trusted-security-pilot']['steps']
-    need(any(s['name'] == 'Require evaluator and attestation success' and s['conclusion'] == 'success'
+    need(any(s['name'] == COMPLETION_STEP and s['conclusion'] == 'success'
              for s in completion), 'COMPLETION_STEP_INCOMPLETE')
     excluded = {person["login"] for person in (run.get("actor"), run.get("triggering_actor"))
                 if isinstance(person, dict) and person.get("login")} | set(commit_identities)

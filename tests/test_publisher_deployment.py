@@ -101,3 +101,41 @@ def test_preparation_rejects_unsafe_inputs_without_overwriting_existing_files(ev
         assert (output / "publisher.json").read_text() == "existing pin"
     else:
         assert not output.exists()
+
+
+def test_shared_lock_queues_then_reports_busy_instead_of_failing_immediately(tmp_path):
+    import fcntl
+    import os
+    from scripts import publish_trusted_check as cli
+    from security_harness.trusted_publisher import Denied
+    path = tmp_path / 'publisher.lock'
+    holder = os.open(path, os.O_CREAT | os.O_RDWR, 0o600)
+    waiter = os.open(path, os.O_RDWR)
+    try:
+        fcntl.flock(holder, fcntl.LOCK_EX)
+        now = [0.0]
+        released = []
+        def sleep(seconds):
+            now[0] += seconds
+            if now[0] >= 5 and not released:
+                fcntl.flock(holder, fcntl.LOCK_UN)
+                released.append(True)
+        cli.acquire_lock(waiter, wait=60, clock=lambda: now[0], sleep=sleep)
+        assert released and now[0] < 60
+        fcntl.flock(waiter, fcntl.LOCK_UN)
+        fcntl.flock(holder, fcntl.LOCK_EX)
+        now[0] = 0.0
+        with pytest.raises(Denied, match='LOCK_BUSY'):
+            cli.acquire_lock(waiter, wait=3, clock=lambda: now[0], sleep=lambda s: now.__setitem__(0, now[0] + s))
+    finally:
+        os.close(waiter)
+        os.close(holder)
+
+
+def test_timer_spreads_instances_and_unit_documents_python_requirement():
+    base = Path(__file__).resolve().parents[1] / 'deploy/trusted-publisher'
+    timer = (base / 'epsilon-publisher@.timer').read_text()
+    service = (base / 'epsilon-publisher@.service').read_text()
+    assert 'RandomizedDelaySec=' in timer
+    assert 'ExecStart=/usr/bin/python3 -I ' in service and 'Python 3.12' in service
+    assert service.count('--lock-file /var/lib/epsilon-publisher/publisher.lock') == 1

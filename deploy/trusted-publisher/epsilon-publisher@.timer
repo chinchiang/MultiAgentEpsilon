@@ -6,6 +6,8 @@ OnBootSec=60s
 # 每輪約 20 次 API 呼叫，已驗證 blob 快取於狀態檔； / Each cycle costs roughly 20 API calls (verified blobs are cached in the state
 # 120 秒週期維持在安裝權杖速率額度內。 / file), so a 120 s cadence stays well inside the installation rate limit.
 OnUnitInactiveSec=120s
+# 分散各 PR 實例的啟動時間，減少共用鎖排隊。 / Spread PR instances so they rarely queue on the shared lock.
+RandomizedDelaySec=45s
 Unit=epsilon-publisher@%i.service
 
 [Install]

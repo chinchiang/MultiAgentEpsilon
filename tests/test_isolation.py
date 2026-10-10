@@ -150,3 +150,28 @@ def test_wrong_user_or_image_is_refused(kwargs, field):
     from security_harness.isolation import verify_container
     with pytest.raises(RuntimeError, match=f"mismatch: {field}"):
         verify_container(inspected(), **kwargs)
+
+
+def test_runtime_image_lock_drops_only_test_tooling_and_keeps_hashes():
+    from scripts.build_runtime import TEST_ONLY, runtime_requirements
+    from security_harness.preflight import parse_lock
+    source = (ROOT / "requirements.lock").read_text()
+    text, excluded = runtime_requirements(source)
+    assert excluded == sorted(TEST_ONLY)
+    approved = {r["name"]: r for r in parse_lock(ROOT / "requirements.lock")}
+    path = ROOT / ".state" / "runtime-lock-test.txt"
+    try:
+        path.write_text(text)
+        kept = {r["name"]: r for r in parse_lock(path)}
+    finally:
+        path.unlink(missing_ok=True)
+    assert set(kept) == set(approved) - TEST_ONLY
+    assert all(kept[n]["version"] == approved[n]["version"] and kept[n]["hashes"] == approved[n]["hashes"] for n in kept)
+
+
+def test_runtime_image_lock_refuses_a_changed_test_tool_set():
+    from scripts.build_runtime import runtime_requirements
+    source = (ROOT / "requirements.lock").read_text()
+    without_pytest = "\n".join(l for l in source.split("\n") if not l.startswith("pytest=="))
+    with pytest.raises(ValueError, match="test-only"):
+        runtime_requirements(without_pytest)
