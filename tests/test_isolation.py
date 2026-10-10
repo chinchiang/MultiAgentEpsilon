@@ -107,3 +107,46 @@ def test_candidate_socket_symlink_never_connects_host_endpoint(tmp_path):
             run_isolated(candidate)
         with pytest.raises(socket.timeout):
             listener.accept()
+
+
+def inspected(**host_overrides):
+    """合成 docker inspect 結果，對應 run_flags 實際套用的值。 / Synthetic docker inspect data matching run_flags."""
+    from security_harness import isolation
+    host = {"NetworkMode": "none", "ReadonlyRootfs": True, "Privileged": False, "CapDrop": ["ALL"], "CapAdd": None,
+            "SecurityOpt": ["no-new-privileges"], "Memory": isolation.MEMORY_BYTES,
+            "MemorySwap": isolation.MEMORY_BYTES, "PidsLimit": isolation.PIDS_LIMIT, "NanoCpus": 1_000_000_000,
+            "Ulimits": [{"Name": "nofile", "Soft": isolation.NOFILE_LIMIT, "Hard": isolation.NOFILE_LIMIT}]}
+    host.update(host_overrides)
+    return {"HostConfig": host, "Config": {"User": "10001:10001", "Image": "ref"}, "Image": "sha256:" + "a" * 64,
+            "Mounts": [{"Destination": "/candidate"}]}
+
+
+def test_verified_container_records_every_checked_control():
+    from security_harness.isolation import verify_container
+    evidence = verify_container(inspected(), user="10001:10001", image_id="sha256:" + "a" * 64, image_ref="ref")
+    assert evidence["network"] == "none" and evidence["mount_destinations"] == ["/candidate"]
+    assert set(evidence["verified"]) == {"network", "readonly_root", "privileged", "cap_drop", "no_new_privileges",
+                                         "memory", "pids", "cpus", "nofile", "user", "image"}
+
+
+@pytest.mark.parametrize("override,field", [
+    ({"NetworkMode": "bridge"}, "network"), ({"ReadonlyRootfs": False}, "readonly_root"),
+    ({"Privileged": True}, "privileged"), ({"CapDrop": []}, "cap_drop"), ({"CapAdd": ["NET_RAW"]}, "cap_drop"),
+    ({"SecurityOpt": []}, "no_new_privileges"), ({"Memory": 0}, "memory"), ({"MemorySwap": -1}, "memory"),
+    ({"PidsLimit": None}, "pids"), ({"NanoCpus": 0}, "cpus"), ({"Ulimits": None}, "nofile"),
+])
+def test_any_weakened_isolation_control_is_refused(override, field):
+    from security_harness.isolation import verify_container
+    with pytest.raises(RuntimeError, match=f"mismatch: {field}"):
+        verify_container(inspected(**override), user="10001:10001")
+
+
+@pytest.mark.parametrize("kwargs,field", [
+    ({"user": "0:0"}, "user"),
+    ({"user": "10001:10001", "image_id": "sha256:" + "b" * 64}, "image"),
+    ({"user": "10001:10001", "image_ref": "other"}, "image"),
+])
+def test_wrong_user_or_image_is_refused(kwargs, field):
+    from security_harness.isolation import verify_container
+    with pytest.raises(RuntimeError, match=f"mismatch: {field}"):
+        verify_container(inspected(), **kwargs)

@@ -54,11 +54,31 @@ def test_unknown_severity_known_vulnerability_blocks_and_keeps_cve_alias(tmp_pat
 
 @pytest.mark.parametrize('response', [None, [], {'next_page_token': 'more'}, {'vulns': None},
     {'vulns': [advisory('other')]}, {'vulns': [advisory(), advisory()]},
-    {'vulns': [advisory(withdrawn='2026-01-01')]}, {'vulns': [{'id': 'x'}]},
+    {'vulns': [advisory(withdrawn=True)]}, {'vulns': [advisory(withdrawn='')]}, {'vulns': [{'id': 'x'}]},
     {'vulns': [advisory(aliases='CVE')]}, {'vulns': [advisory(id='bad\nidentifier')]}])
 def test_partial_or_wrong_database_response_never_completes(tmp_path, response):
     with pytest.raises(deps.DependencyError):
         deps.scan(lockfile(tmp_path), fetch=lambda *args: response)
+
+
+@pytest.mark.parametrize('locked,published', [('example', 'Example'), ('example', 'EXAMPLE'),
+                                              ('typing-extensions', 'typing_extensions'),
+                                              ('zope-interface', 'Zope.Interface')])
+def test_advisory_package_name_uses_pep503_spelling(tmp_path, locked, published):
+    # OSV 保留原始拼寫；舊版精確比對把真實公告誤判為查詢失敗。 / OSV keeps the published spelling; the old exact
+    # match turned a real advisory into a misleading query failure.
+    path = tmp_path / 'requirements.lock'
+    path.write_text(f'{locked}==1.0 --hash=sha256:' + 'a' * 64 + '\n')
+    evidence = deps.scan(path, fetch=lambda *args: {'vulns': [advisory(published)]}, now=NOW)
+    assert [f['advisory_id'] for f in evidence['findings']] == ['GHSA-example-0001']
+
+
+def test_withdrawn_advisory_is_not_a_live_finding(tmp_path):
+    evidence = deps.scan(lockfile(tmp_path), fetch=lambda *args: {'vulns': [advisory(withdrawn='2026-01-01T00:00:00Z')]},
+                         now=NOW)
+    assert evidence['status'] == 'COMPLETE' and evidence['findings'] == []
+    packages = [{'name': 'example', 'version': '1.0', 'approved_hashes': ['a' * 64]}]
+    assert judge(evidence, packages) == 'ALLOW'
 
 
 def test_unavailable_database_and_changing_lock_do_not_return_clean_scan(tmp_path):

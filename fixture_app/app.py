@@ -6,12 +6,13 @@ import json
 import re
 import secrets
 from pathlib import Path
+from typing import Annotated
 from urllib.parse import urlsplit
 
 import psycopg
 from psycopg.rows import dict_row
 from psycopg import sql
-from fastapi import Depends, FastAPI, Header, HTTPException
+from fastapi import Depends, FastAPI, Header, HTTPException, Path as PathParam
 from pydantic import BaseModel, ConfigDict, Field
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -35,7 +36,7 @@ def connect(dsn: str, schema: str):
         conn = psycopg.connect(dsn, row_factory=dict_row, connect_timeout=5)
     except psycopg.Error:
         raise RuntimeError("disposable PostgreSQL unavailable; connection details withheld") from None
-    conn.execute(sql.SQL("SET search_path TO {}, pg_catalog").format(sql.Identifier(schema)))
+    conn.execute(sql.SQL("SET search_path TO pg_catalog, {}").format(sql.Identifier(schema)))
     return conn
 
 
@@ -48,9 +49,12 @@ def seed(dsn: str) -> tuple[str, dict[str, str]]:
     passwords = {name: secrets.token_urlsafe(24) for name in ("alice", "bob", "carol", "admin")}
     with connect(dsn, schema) as conn:
         conn.execute(sql.SQL("CREATE SCHEMA {}").format(sql.Identifier(schema)))
-        conn.execute("CREATE TABLE users (id text PRIMARY KEY, tenant text NOT NULL, role text NOT NULL, salt text NOT NULL, password_hash text NOT NULL)")
-        conn.execute("CREATE TABLE items (id integer PRIMARY KEY, tenant text NOT NULL, owner text NOT NULL REFERENCES users(id), value text NOT NULL)")
-        conn.execute("CREATE TABLE sessions (token_hash text PRIMARY KEY, user_id text NOT NULL REFERENCES users(id), expires_at timestamptz NOT NULL)")
+        # pg_catalog 位於搜尋路徑首位，建立物件須明確指定 schema。 / pg_catalog leads the search path, so creation names the schema.
+        for table, columns in (
+                ("users", "id text PRIMARY KEY, tenant text NOT NULL, role text NOT NULL, salt text NOT NULL, password_hash text NOT NULL"),
+                ("items", "id integer PRIMARY KEY, tenant text NOT NULL, owner text NOT NULL REFERENCES users(id), value text NOT NULL"),
+                ("sessions", "token_hash text PRIMARY KEY, user_id text NOT NULL REFERENCES users(id), expires_at timestamptz NOT NULL")):
+            conn.execute(sql.SQL("CREATE TABLE {} (" + columns + ")").format(sql.Identifier(schema, table)))
         for name, password in passwords.items():
             salt = secrets.token_hex(16)
             conn.execute("INSERT INTO users VALUES (%s,%s,%s,%s,%s)",
@@ -65,15 +69,21 @@ def cleanup(dsn: str, schema: str):
         conn.execute(sql.SQL("DROP SCHEMA {} CASCADE").format(sql.Identifier(schema)))
 
 
+# PostgreSQL 文字不接受 NUL；先在輸入層拒絕，避免伺服器錯誤。 / PostgreSQL text rejects NUL; refuse it at input
+# validation instead of surfacing a server error.
+NO_NUL = r"^[^\x00]*$"
+ItemId = Annotated[int, PathParam(ge=1, le=2**31 - 1)]
+
+
 class Login(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    username: str = Field(max_length=64)
-    password: str = Field(max_length=256)
+    username: str = Field(max_length=64, pattern=NO_NUL)
+    password: str = Field(max_length=256, pattern=NO_NUL)
 
 
 class Update(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    value: str = Field(min_length=1, max_length=128)
+    value: str = Field(min_length=1, max_length=128, pattern=NO_NUL)
 
 
 def create_app(dsn: str, schema: str, *, variant: str = "fixed") -> FastAPI:
@@ -121,7 +131,7 @@ def create_app(dsn: str, schema: str, *, variant: str = "fixed") -> FastAPI:
         return row and row["tenant"] == user["tenant"] and (row["owner"] == user["id"] or user["role"] == "admin")
 
     @app.get("/items/{item_id}")
-    def get_item(item_id: int, user=Depends(principal)):
+    def get_item(item_id: ItemId, user=Depends(principal)):
         with connect(dsn, schema) as conn:
             row = conn.execute("SELECT * FROM items WHERE id=%s", (item_id,)).fetchone()
         if row is None or (variant == "fixed" and not permitted(row, user)):
@@ -129,7 +139,7 @@ def create_app(dsn: str, schema: str, *, variant: str = "fixed") -> FastAPI:
         return row
 
     @app.patch("/items/{item_id}")
-    def update_item(item_id: int, body: Update, user=Depends(principal)):
+    def update_item(item_id: ItemId, body: Update, user=Depends(principal)):
         with connect(dsn, schema) as conn:
             if variant == "vulnerable":
                 # 刻意植入的指定缺陷，同一 oracle 必須能偵測。 / Deliberate seeded defect; same oracle must detect this variant.
@@ -148,7 +158,7 @@ def create_app(dsn: str, schema: str, *, variant: str = "fixed") -> FastAPI:
             return conn.execute("SELECT * FROM items WHERE tenant=%s ORDER BY id", (user["tenant"],)).fetchall()
 
     @app.delete("/items/{item_id}", status_code=204)
-    def delete_item(item_id: int, user=Depends(principal)):
+    def delete_item(item_id: ItemId, user=Depends(principal)):
         with connect(dsn, schema) as conn:
             if variant == "vulnerable":
                 row = conn.execute("DELETE FROM items WHERE id=%s RETURNING *", (item_id,)).fetchone()

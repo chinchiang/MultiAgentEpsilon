@@ -15,7 +15,7 @@ def test_identical_oracle_rejects_vulnerable_and_accepts_fixed():
     vulnerable = run_authorization(dsn, "vulnerable")
     fixed = run_authorization(dsn, "fixed")
     contract = json.loads((Path(__file__).resolve().parents[1] / "security/policy.json").read_text())["gate_contracts"]["AUTH"]
-    assert len(vulnerable) == len(fixed) == len(contract["case_ids"]) == 32
+    assert len(vulnerable) == len(fixed) == len(contract["case_ids"]) == 44
     failed = {x["case"] for x in vulnerable if not x["passed"]}
     assert failed == set(contract["seeded_defect_case_ids"]) == {
         "bob: unauthorized read denied without data",
@@ -39,3 +39,49 @@ def test_duplicate_json_key_cannot_hide_private_response_data():
     response = httpx.Response(404, content=b'{"detail":"private","detail":"item not found"}')
     with pytest.raises(ValueError, match="duplicate"):
         response_body(response)
+
+
+@pytest.mark.integration
+def test_oracle_queries_fail_fast_when_candidate_holds_a_table_lock():
+    import time
+    import psycopg
+    from security_harness import fixture_database
+    from security_harness.authorization import snapshot
+    dsn = database_url()
+    schema, _ = fixture_database.seed(dsn)
+    try:
+        with fixture_database.connect(dsn, schema) as holder:
+            holder.execute("LOCK TABLE items IN ACCESS EXCLUSIVE MODE")
+            started = time.monotonic()
+            with pytest.raises(psycopg.errors.LockNotAvailable):
+                snapshot(dsn, schema, fixture_database.connect)
+            assert time.monotonic() - started < 10
+    finally:
+        fixture_database.cleanup(dsn, schema)
+
+
+@pytest.mark.integration
+def test_oracle_search_path_resolves_builtins_before_fixture_schema():
+    from security_harness import fixture_database
+    dsn = database_url()
+    schema, _ = fixture_database.seed(dsn)
+    try:
+        with fixture_database.connect(dsn, schema) as conn:
+            assert conn.execute("SELECT current_schemas(false) AS s").fetchone()["s"] == ["pg_catalog", schema]
+            assert conn.execute("SELECT count(*) AS n FROM items").fetchone()["n"] == 3
+    finally:
+        fixture_database.cleanup(dsn, schema)
+
+
+@pytest.mark.parametrize("actual,expected", [
+    (1, True), (True, 1), (1.0, 1), ({"id": 1.0}, {"id": 1}), ([1], [True]), ({"a": 1, "b": 2}, {"a": 1}),
+    ([1, 2], [1]), (None, {}), ("1", 1)])
+def test_response_comparison_is_type_strict(actual, expected):
+    from security_harness.authorization import same
+    assert not same(actual, expected)
+
+
+def test_response_comparison_accepts_identical_json():
+    from security_harness.authorization import same
+    value = {"detail": [{"loc": ["body", "owner"], "ctx": {"le": 1}, "input": None, "ok": True}]}
+    assert same(json.loads(json.dumps(value)), value)
