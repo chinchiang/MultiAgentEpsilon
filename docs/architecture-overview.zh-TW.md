@@ -220,11 +220,13 @@ MultiAgentEpsilon/
 │   ├── test_adversarial_authorization.py
 │   ├── test_authorization.py
 │   ├── test_candidate_git.py
+│   ├── test_check_docs.py
 │   ├── test_container_http.py
 │   ├── test_dependencies.py
 │   ├── test_expect_block.py
 │   ├── test_github_readonly.py
 │   ├── test_gitleaks.py
+│   ├── test_governance_consistency.py
 │   ├── test_import_boundaries.py
 │   ├── test_inputs.py
 │   ├── test_isolation.py
@@ -241,6 +243,7 @@ MultiAgentEpsilon/
 │   ├── test_policy.py
 │   ├── test_preflight.py
 │   ├── test_publisher_deployment.py
+│   ├── test_response_comparison.py
 │   ├── test_review_boundaries.py
 │   ├── test_review_variants.py
 │   ├── test_run_evidence.py

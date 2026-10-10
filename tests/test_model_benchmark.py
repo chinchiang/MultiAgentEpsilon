@@ -5,7 +5,6 @@ import asyncio
 import copy
 import json
 import os
-import signal
 import sqlite3
 import subprocess
 import sys
@@ -18,7 +17,7 @@ from security_harness.llm import benchmark as bench
 from security_harness.llm import benchmark_score as score
 from security_harness.llm import benchmark_runner as runner
 from security_harness.llm import lifecycle as life
-from security_harness.llm.gateway import ModelError, Reply, digest
+from security_harness.llm.gateway import ModelError, Reply
 from security_harness.lifecycle import prepare_run
 
 
@@ -131,19 +130,18 @@ def test_review_schema_rejects_untrusted_variants(mutation):
     elif mutation == 'oversize-reason': value['reason'] = 'x' * 401
     elif mutation == 'control-character': value['reason'] = 'run\ncommand'
     else: value['tool_calls'] = [{'name': 'shell'}]
-    with pytest.raises(ModelError):
+    with pytest.raises(ModelError, match='^INVALID_RESPONSE$'):
         bench.parse_review(json.dumps(value), case, token)
 
 
 @pytest.mark.parametrize('raw', ['{"verdict":"CLEAN","verdict":"VULNERABLE"}', '```json\n{}\n```', '{"x":NaN}', '[]'])
 def test_noncanonical_model_envelopes_rejected(raw):
-    with pytest.raises(ModelError):
+    with pytest.raises(ModelError, match='^INVALID_RESPONSE$'):
         bench.parse_review(raw, bench.load_cases()['B01'], str(uuid.uuid4()))
 
 
 @pytest.mark.parametrize('failure', ['abstain', 'schema', 'timeout', 'refusal', 'configuration'])
 def test_unassessed_cases_do_not_disappear_from_miss_rate(tmp_path, monkeypatch, failure):
-    import scripts.model_smoke as smoke
     from security_harness.llm import config as model_config
     class Adapter(bench.MockReviewer):
         provider = 'gemini'
@@ -185,7 +183,7 @@ def test_evidence_variants_cannot_fake_a_complete_benchmark(tmp_path, mutation):
     elif mutation == 'stale-oracle': data['oracle_sha256'] = '0' * 64
     elif mutation == 'changed-plan': data['plan'].reverse()
     else: data['checks'][0]['review'] = data['checks'][1]['review']
-    with pytest.raises((ValueError, ModelError)):
+    with pytest.raises((ValueError, ModelError), match='^(?:INVALID_RESPONSE|call\\ binding\\ mismatch|duplicate\\ call\\ evidence|incomplete\\ or\\ duplicate\\ review\\ plan|invalid\\ case\\ binding|stale\\ or\\ invalid\\ benchmark\\ identity|worker\\ changed\\ the\\ review\\ plan)$'):
         score.summarize(data, original)
 
 
@@ -208,7 +206,6 @@ def test_agreeing_wrong_models_still_require_human_review_and_localization_is_sc
 
 
 def test_cancelled_collection_keeps_all_planned_cases_in_analysis(tmp_path, monkeypatch):
-    import scripts.model_smoke as smoke
     from security_harness.llm import config as model_config
     class Hang(bench.MockReviewer):
         provider, family = 'gemini', 'gemini'
@@ -239,7 +236,7 @@ def test_adjudication_is_append_only_unsigned_and_bound_to_exact_report(tmp_path
     assert score.note_matches_report(note, path) and path.read_bytes() == original
     second = score.add_adjudication(path, 'B06', 'NEEDS_MORE_EVIDENCE', 'synthetic-reviewer', 'A separate test note.')
     assert second != note_path and note_path.exists()
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match='^invalid\\ adjudication$'):
         score.add_adjudication(path, 'B06', 'ALLOW', 'synthetic-reviewer', 'Must never become a gate approval.')
     path.write_bytes(original + b' ')
     assert not score.note_matches_report(note, path)
@@ -271,7 +268,7 @@ def test_larger_review_budget_is_bound_to_every_request_and_total_cap():
     report['output_tokens_per_review'] = 512
     with pytest.raises(ValueError, match='request binding|limits mismatch'):
         score.validate_collection(report)
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match='^invalid\\ gateway\\ limit$'):
         runner.initial_report(['mock-review-a', 'mock-review-b'], list(bench.SUITES['injection']), str(uuid.uuid4()), 1024)
 
 

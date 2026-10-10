@@ -85,6 +85,13 @@ jobs:
         working-directory: trusted
         # 只讀取候選文件與 Python 語法樹，不執行候選程式。 / Reads candidate documents and Python syntax trees; never executes them.
         run: python -I scripts/check_docs.py --root ../candidate
+      - name: Static checks / 靜態檢查
+        working-directory: trusted
+        # --isolated 固定規則，候選的設定檔不能放寬檢查；ruff 只解析不執行。 / --isolated pins the rules so candidate
+        # configuration cannot relax them; ruff parses, never executes.
+        run: |
+          .venv/bin/ruff check --isolated --select F,E9 --target-version py312 --exclude .venv,.tools,.state,artifacts .
+          .venv/bin/ruff check --isolated --select F,E9 --target-version py312 ../candidate
       - name: Evaluator regressions and isolation adversarial checks
         working-directory: trusted
         run: .venv/bin/python -m pytest --junitxml=artifacts/pytest.xml

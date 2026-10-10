@@ -25,6 +25,17 @@ TARGETS = {
         ('validate_cases', 'seeded_defects', 'decide'), ('tests/test_policy.py', 'tests/test_security_properties.py')),
     'security_harness/trusted_publisher.py': (
         ('strict_json',), ('tests/test_trusted_publisher.py', 'tests/test_security_properties.py')),
+    'security_harness/preflight.py': (
+        ('validate_package_policy', 'check_metadata'), ('tests/test_preflight.py',)),
+    'security_harness/authorization.py': (
+        ('same',), ('tests/test_response_comparison.py',)),
+    'security_harness/isolation.py': (
+        ('verify_container',), ('tests/test_isolation.py', '-m', 'not integration')),
+    'security_harness/scope.py': (
+        ('valid_remote_hosts', 'validate_model_roe'),
+        ('tests/test_scope.py', 'tests/test_model_hardening.py::test_model_roe_rejects_malformed_destination_allowlists',
+         'tests/test_model_hardening.py::test_model_roe_boundaries_are_inclusive',
+         'tests/test_model_hardening.py::test_remote_host_allowlist_size_boundary')),
     'security_harness/llm/benchmark.py': (
         ('bounded_text', 'validate_review', 'parse_review'), ('tests/test_model_benchmark.py', '--deselect=tests/test_model_benchmark.py::test_review_cli_supervision_and_explicit_live_opt_in', 'tests/test_security_properties.py')),
 }

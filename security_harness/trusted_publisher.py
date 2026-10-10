@@ -159,6 +159,7 @@ excluded: identities that touched the head (run actors, commit author/committer)
 
 REQUIRED_STEPS = ("Record evaluator-owned CI provenance", "Check protected changes and exact-head independent approval",
                   "Bilingual documentation checks / 雙語文件檢查", "Candidate documentation checks / 候選文件檢查",
+                  "Static checks / 靜態檢查",
                   "Evaluator regressions and isolation adversarial checks", "Prove seeded defect still blocks",
                   "Evaluate candidate through external oracle", "Remove evaluator regression database",
                   "Reap cancelled security runs", "Retain evaluator-owned evidence")

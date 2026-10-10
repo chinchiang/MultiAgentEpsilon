@@ -105,7 +105,7 @@ def test_candidate_socket_symlink_never_connects_host_endpoint(tmp_path):
         app.write_text(source)
         with pytest.raises(RuntimeError, match="container HTTP request failed"):
             run_isolated(candidate)
-        with pytest.raises(socket.timeout):
+        with pytest.raises(socket.timeout, match='^timed\\ out$'):
             listener.accept()
 
 

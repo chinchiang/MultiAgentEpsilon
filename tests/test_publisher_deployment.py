@@ -95,7 +95,7 @@ def test_preparation_rejects_unsafe_inputs_without_overwriting_existing_files(ev
     if attack == "existing_output":
         output.mkdir()
         (output / "publisher.json").write_text("existing pin")
-    with pytest.raises((Denied, FileExistsError)):
+    with pytest.raises((Denied, FileExistsError), match=r"^(?:APP_IDENTIFIERS|EVALUATOR_NOT_CLEAN|EVALUATOR_SHA_MISMATCH|OUTPUT_MUST_BE_EXTERNAL|SHARED_ACTIONS_APP|TRUST_POLICY_MISMATCH|\[Errno 17\] File exists: .*)$"):
         prepare(root, output, sha, app_id, installation_id)
     if attack == "existing_output":
         assert (output / "publisher.json").read_text() == "existing pin"

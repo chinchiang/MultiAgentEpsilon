@@ -136,6 +136,49 @@ def test_junit_cannot_inflate_coverage_with_duplicate_or_unnamed_tests(bundle, a
         publisher.validate_bundle(**bundle)
 
 
+EXPECTED_DENIAL = {
+    "app": "SHARED_ACTIONS_APP",
+    "repo": "RUN_REPOSITORY",
+    "workflow": "RUN_SOURCE",
+    "event": "RUN_SOURCE",
+    "failed_run": "RUN_NOT_SUCCESS",
+    "draft": "PR_NOT_REVIEWABLE",
+    "base": "BASE_NOT_APPROVED",
+    "head": "RUN_SHA",
+    "evaluator_run_source": "RUN_SHA",
+    "attempt": "PROVENANCE_MISMATCH",
+    "new_run": "RUN_LISTING_IDENTITY",
+    "step_skipped": "REQUIRED_STEP_INCOMPLETE",
+    "foreign_job": "JOB_SOURCE",
+    "author": "INDEPENDENT_APPROVAL_MISSING",
+    "push_actor": "INDEPENDENT_APPROVAL_MISSING",
+    "triggering_actor": "INDEPENDENT_APPROVAL_MISSING",
+    "commit_author": "INDEPENDENT_APPROVAL_MISSING",
+    "read_role": "INDEPENDENT_APPROVAL_MISSING",
+    "triage_role": "INDEPENDENT_APPROVAL_MISSING",
+    "unknown_role": "REVIEW_PERMISSION_UNKNOWN",
+    "stale_review": "INDEPENDENT_APPROVAL_MISSING",
+    "dismissed": "INDEPENDENT_APPROVAL_MISSING",
+    "changes_requested": "CHANGES_REQUESTED",
+    "guard": "TRUSTED_GUARD",
+    "guard_review": "BASELINE_APPROVAL",
+    "policy": "REPORT_DIGEST",
+    "subject": "REPORT_DIGEST",
+    "evaluator": "REPORT_DIGEST",
+    "history": "HISTORY_SHA",
+    "missing_case": "GATE_REJECTED",
+    "duplicate_case": "GATE_REJECTED",
+    "gate_error": "GATE_REJECTED",
+    "stale_gate": "GATE_REJECTED",
+    "future_gate": "GATE_REJECTED",
+    "cleanup": "CLEANUP_INCOMPLETE",
+    "failed_tests": "JUNIT_COUNTS",
+    "zero_tests": "JUNIT_COUNTS",
+    "skipped_tests": "JUNIT_COUNTS",
+    "junit_entity": "JUNIT_LIMIT",
+}
+
+
 @pytest.mark.parametrize("attack", ["app", "repo", "workflow", "event", "failed_run", "draft", "base",
                                     "head", "evaluator_run_source", "attempt", "new_run", "step_skipped", "foreign_job",
                                     "author", "push_actor", "triggering_actor", "commit_author",
@@ -186,7 +229,9 @@ def test_spoofed_or_stale_evidence_never_passes(bundle, attack):
             "failed_tests": b'<testsuite tests="360" failures="1"/>', "zero_tests": b'<testsuite tests="0"/>',
             "skipped_tests": b'<testsuite tests="360" skipped="1"/>'}[attack]
     elif attack == "junit_entity": bundle["files"]["trusted/artifacts/pytest.xml"] = b'<!DOCTYPE x [<!ENTITY x "x">]><testsuite tests="360"/>'
-    with pytest.raises(publisher.Denied):
+    # 每種攻擊須由預期的防線攔下，而非碰巧被較早的檢查拒絕。 / Each attack must be stopped by its intended guard,
+    # not incidentally refused by an earlier check.
+    with pytest.raises(publisher.Denied, match=f"^{EXPECTED_DENIAL[attack]}$"):
         publisher.validate_bundle(**bundle)
 
 
@@ -211,17 +256,17 @@ def test_artifact_symlink_and_duplicate_names_are_rejected():
         entry = zipfile.ZipInfo("report.json")
         entry.external_attr = (stat.S_IFLNK | 0o777) << 16
         archive.writestr(entry, "/etc/passwd")
-    with pytest.raises(publisher.Denied): publisher.unpack_evidence(data.getvalue())
+    with pytest.raises(publisher.Denied, match='^ARTIFACT_ENTRY$'): publisher.unpack_evidence(data.getvalue())
     data = io.BytesIO()
     with zipfile.ZipFile(data, "w") as archive:
         archive.writestr("report.json", "{}")
         with pytest.warns(UserWarning): archive.writestr("report.json", "{}")
-    with pytest.raises(publisher.Denied): publisher.unpack_evidence(data.getvalue())
+    with pytest.raises(publisher.Denied, match='^ARTIFACT_ENTRY$'): publisher.unpack_evidence(data.getvalue())
 
 
 @pytest.mark.parametrize("text", ['{"a":1,"a":2}', '{"a":NaN}'])
 def test_ambiguous_json_rejected(text):
-    with pytest.raises(publisher.Denied): publisher.strict_json(text)
+    with pytest.raises(publisher.Denied, match='^(?:DUPLICATE_JSON_KEY|NONFINITE_JSON)$'): publisher.strict_json(text)
 
 
 def test_remote_manifest_matches_local_without_executing_source(tmp_path):
@@ -405,7 +450,7 @@ def test_seeded_defect_must_have_real_complete_negative_evidence(bundle, attack)
     elif attack == "missing_case": mutate_json(bundle, path, lambda d: d["records"][2]["cases"].pop())
     elif attack == "invalid_case_type": mutate_json(bundle, path, lambda d: d["records"][2]["cases"][-1].update(passed="true"))
     elif attack == "fake_junit_count": bundle["files"]["trusted/artifacts/pytest.xml"] = b'<testsuite tests="360"/>'
-    with pytest.raises(ValueError): publisher.validate_bundle(**bundle)
+    with pytest.raises(ValueError, match='^(?:JUNIT_COUNTS|NEGATIVE_BINDING|NEGATIVE_CLEANUP|NEGATIVE_EVIDENCE_MISSING|NEGATIVE_FINDINGS|NEGATIVE_HISTORY|invalid\\ case\\ coverage)$'): publisher.validate_bundle(**bundle)
 
 
 @pytest.mark.parametrize("change", ["none", "head", "rerun", "new_run", "review_dismissed", "review_permission",
@@ -524,7 +569,7 @@ def test_required_mutation_step_cannot_be_omitted(bundle, state):
         steps.remove(step)
     else:
         step['conclusion'] = state
-    with pytest.raises(publisher.Denied):
+    with pytest.raises(publisher.Denied, match='^MUTATION_STEP_INCOMPLETE$'):
         publisher.validate_bundle(**bundle)
 
 

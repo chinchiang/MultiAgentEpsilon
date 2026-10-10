@@ -7,7 +7,7 @@ from security_harness import container_http
 
 
 def test_host_paths_cannot_be_used_as_container_identity(tmp_path):
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match='^invalid\\ candidate\\ container\\ identity$'):
         container_http.BoundedClient(str(tmp_path / 'app.sock'))
 
 
@@ -19,7 +19,7 @@ def test_host_paths_cannot_be_used_as_container_identity(tmp_path):
 def test_forged_bridge_envelope_cannot_expand_host_response(monkeypatch, data):
     monkeypatch.setattr(container_http, 'bounded_output', lambda *a, **kw: json.dumps(data).encode())
     client = container_http.BoundedClient('epsilon-isolated-' + 'a' * 16 + '-app')
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match='^(?:Only\\ base64\\ data\\ is\\ allowed|container\\ HTTP\\ body\\ too\\ large|invalid\\ container\\ HTTP\\ envelope)$'):
         client.get('/health')
 
 
@@ -30,7 +30,7 @@ def test_bridge_stdout_flood_is_bounded():
 
 
 def test_bridge_nonreading_child_is_timed_out():
-    with pytest.raises(TimeoutError):
+    with pytest.raises(TimeoutError, match='^container\\ HTTP\\ deadline\\ exceeded$'):
         container_http.bounded_output([sys.executable, '-c', 'import time; time.sleep(30)'],
                                       b'x' * 16384, timeout=0.2)
 

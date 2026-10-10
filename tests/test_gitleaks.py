@@ -45,10 +45,10 @@ def test_secret_removed_from_tree_still_found_in_history(tmp_path):
 
 
 def test_missing_tampered_scanner_and_empty_scope_fail(tmp_path):
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match='^empty\\ scan\\ scope$'):
         run(tmp_path)
     (tmp_path / "data").write_text("safe")
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match='^scanner\\ integrity\\ mismatch$'):
         scan(tmp_path, ROOT / ".tools/gitleaks", ROOT / "security/gitleaks.toml", "incorrect")
 
 
@@ -77,7 +77,7 @@ def history_repo(tmp_path, secret_message):
 
 
 def test_candidate_grafts_cannot_truncate_scanned_history(tmp_path):
-    git = history_repo(tmp_path, secret_message=False)
+    history_repo(tmp_path, secret_message=False)
     parent = subprocess.run(["git", "-C", str(tmp_path), "rev-parse", "HEAD~1"], capture_output=True, text=True).stdout
     # 宣告 HEAD~1 沒有父提交，舊版會漏掉含機密的第一個提交。 / Declare HEAD~1 parentless; the old scan missed the first commit.
     (tmp_path / ".git/info/grafts").write_text(parent)

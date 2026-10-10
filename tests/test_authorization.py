@@ -31,7 +31,7 @@ def test_identical_oracle_rejects_vulnerable_and_accepts_fixed():
 
 
 def test_external_database_refused_before_connect():
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match='^only\\ the\\ disposable\\ loopback\\ fixture\\ database\\ is\\ allowed$'):
         connect("postgresql://user@192.0.2.1/production", "epsilon_" + "a" * 16)
 
 
@@ -53,7 +53,7 @@ def test_oracle_queries_fail_fast_when_candidate_holds_a_table_lock():
         with fixture_database.connect(dsn, schema) as holder:
             holder.execute("LOCK TABLE items IN ACCESS EXCLUSIVE MODE")
             started = time.monotonic()
-            with pytest.raises(psycopg.errors.LockNotAvailable):
+            with pytest.raises(psycopg.errors.LockNotAvailable, match='lock timeout'):
                 snapshot(dsn, schema, fixture_database.connect)
             assert time.monotonic() - started < 10
     finally:
@@ -71,17 +71,3 @@ def test_oracle_search_path_resolves_builtins_before_fixture_schema():
             assert conn.execute("SELECT count(*) AS n FROM items").fetchone()["n"] == 3
     finally:
         fixture_database.cleanup(dsn, schema)
-
-
-@pytest.mark.parametrize("actual,expected", [
-    (1, True), (True, 1), (1.0, 1), ({"id": 1.0}, {"id": 1}), ([1], [True]), ({"a": 1, "b": 2}, {"a": 1}),
-    ([1, 2], [1]), (None, {}), ("1", 1)])
-def test_response_comparison_is_type_strict(actual, expected):
-    from security_harness.authorization import same
-    assert not same(actual, expected)
-
-
-def test_response_comparison_accepts_identical_json():
-    from security_harness.authorization import same
-    value = {"detail": [{"loc": ["body", "owner"], "ctx": {"le": 1}, "input": None, "ok": True}]}
-    assert same(json.loads(json.dumps(value)), value)

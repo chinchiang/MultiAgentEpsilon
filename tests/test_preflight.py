@@ -32,7 +32,7 @@ def test_valid_pinned_wheel():
 def test_artifact_failure_blocks(field, value):
     metadata = deepcopy(META)
     metadata["urls"][0][field] = value
-    with pytest.raises(PreflightError):
+    with pytest.raises(PreflightError, match='^(?:example:\\ artifact\\ inside\\ cooling\\ period|example:\\ lock\\ hash\\ not\\ published\\ by\\ registry|example:\\ no\\ approved\\ wheel;\\ source\\ builds\\ forbidden|example:\\ unexpected\\ artifact\\ origin|example:\\ yanked\\ artifact)$'):
         check_metadata(RECORD, metadata, POLICY, NOW)
 
 
@@ -41,7 +41,7 @@ def test_artifact_failure_blocks(field, value):
 def test_unlocked_or_executable_input_refused(tmp_path, body):
     path = tmp_path / "requirements.lock"
     path.write_text(body)
-    with pytest.raises(PreflightError):
+    with pytest.raises(PreflightError, match='^(?:empty\\ or\\ duplicate\\ lock\\ entries|lock\\ must\\ contain\\ only\\ exact\\ pins\\ and\\ SHA\\-256\\ hashes)$'):
         parse_lock(path)
 
 
@@ -50,9 +50,9 @@ def test_unknown_and_registry_failure_do_not_pass(tmp_path):
     path.write_text("example==1.0 --hash=sha256:" + HASH)
     def unavailable(*args):
         raise TimeoutError("registry unavailable")
-    with pytest.raises(TimeoutError):
+    with pytest.raises(TimeoutError, match='^registry\\ unavailable$'):
         verify(path, POLICY, fetch=unavailable, now=NOW)
-    with pytest.raises(PreflightError):
+    with pytest.raises(PreflightError, match='^invalid\\ package\\ policy$'):
         verify(path, {**POLICY, "allowed_packages": []}, fetch=lambda *args: META, now=NOW)
     assert len(verify(path, POLICY, fetch=lambda *args: META, now=NOW)) == 1
 
@@ -60,7 +60,7 @@ def test_unknown_and_registry_failure_do_not_pass(tmp_path):
 def test_duplicate_packages_rejected(tmp_path):
     path = tmp_path / "requirements.lock"
     path.write_text(("example==1.0 --hash=sha256:" + HASH + "\n") * 2)
-    with pytest.raises(PreflightError):
+    with pytest.raises(PreflightError, match='^empty\\ or\\ duplicate\\ lock\\ entries$'):
         parse_lock(path)
 
 
@@ -88,3 +88,30 @@ def test_missing_package_policy_field_refused():
     for key in POLICY:
         with pytest.raises(PreflightError, match="invalid package policy"):
             validate_package_policy({k: v for k, v in POLICY.items() if k != key})
+
+
+def test_registry_version_mismatch_alone_is_refused():
+    meta = deepcopy(META)
+    meta["info"]["version"] = "2.0"
+    with pytest.raises(PreflightError, match="registry identity mismatch"):
+        check_metadata(RECORD, meta, POLICY, NOW)
+
+
+def test_cooling_period_boundary_is_exact():
+    meta = deepcopy(META)
+    boundary = NOW - timedelta(days=POLICY["minimum_package_age_days"])
+    meta["urls"][0]["upload_time_iso_8601"] = boundary.isoformat()
+    assert check_metadata(RECORD, meta, POLICY, NOW)["approved_hash_count"] == 1
+    meta["urls"][0]["upload_time_iso_8601"] = (boundary + timedelta(seconds=1)).isoformat()
+    with pytest.raises(PreflightError, match="inside cooling period"):
+        check_metadata(RECORD, meta, POLICY, NOW)
+
+
+@pytest.mark.parametrize("days,valid", [(1, True), (365, True), (0, False), (366, False)])
+def test_cooling_period_policy_range_is_inclusive(days, valid):
+    policy = {**POLICY, "minimum_package_age_days": days}
+    if valid:
+        validate_package_policy(policy)
+    else:
+        with pytest.raises(PreflightError, match="invalid package policy"):
+            validate_package_policy(policy)

@@ -42,7 +42,7 @@ def test_document_unauthorized_reads_are_observable(case_id, principal):
     if case_id == 'B07':
         assert read(records, principal, 'doc') == 'synthetic private document'
     else:
-        with pytest.raises(PermissionError):
+        with pytest.raises(PermissionError, match='^denied$'):
             read(records, principal, 'doc')
     assert json.dumps(records, sort_keys=True) == before
 
@@ -63,7 +63,7 @@ def test_file_escape_reads_actual_temporary_sentinel(case_id, attack, tmp_path):
     if case_id == 'B09':
         assert read(base, names[attack]) == 'synthetic outside data'
     else:
-        with pytest.raises(PermissionError):
+        with pytest.raises(PermissionError, match='^denied$'):
             read(base, names[attack])
     assert secret.read_text() == 'synthetic outside data'
 
@@ -85,7 +85,7 @@ def test_ssrf_untrusted_destinations_never_leave_mock_transport(case_id, target)
             assert fetch(client, target) == 'synthetic upstream data'
             assert len(requests) == 1
         else:
-            with pytest.raises(PermissionError):
+            with pytest.raises(PermissionError, match='^denied$'):
                 fetch(client, target)
             assert requests == []
         requests.clear()
@@ -109,7 +109,7 @@ def test_ssrf_redirects_cannot_reach_second_mock_destination(case_id, status):
             assert fetch(client, allowed) == 'synthetic internal data'
             assert requests == [allowed, internal]
         else:
-            with pytest.raises(ValueError):
+            with pytest.raises(ValueError, match='^unexpected\\ upstream\\ status$'):
                 fetch(client, 'status')
             assert requests == [allowed]
 

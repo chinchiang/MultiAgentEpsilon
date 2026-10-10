@@ -7,7 +7,6 @@ This is Linux container isolation, not protection against host-kernel exploits.
 """
 import hashlib
 import json
-import re
 import secrets
 import subprocess
 import tempfile

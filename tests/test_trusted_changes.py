@@ -172,7 +172,7 @@ def test_reviewer_who_pushed_an_earlier_pr_commit_cannot_approve(monkeypatch):
 ])
 def test_incomplete_pr_commit_listing_fails_closed(monkeypatch, commits):
     from security_harness.trusted_publisher import Denied
-    with pytest.raises(Denied):
+    with pytest.raises(Denied, match='^(?:PR_COMMITS_HEAD|PR_COMMITS_TRUNCATED)$'):
         guard_with_commits(monkeypatch, commits)()
 
 

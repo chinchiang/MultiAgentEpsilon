@@ -7,7 +7,7 @@ import unicodedata
 import uuid
 from pathlib import Path
 
-from .gateway import Request, Reply, ModelError, digest, request_digest
+from .gateway import Request, Reply, ModelError, digest, request_digest  # noqa: F401 - 公開再匯出 / public re-export
 from .output_schema import REVIEW_FORMAT
 from .transport import strict_json
 

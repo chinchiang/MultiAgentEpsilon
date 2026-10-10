@@ -1,13 +1,11 @@
 """針對已回報信任、復原、範圍與帳目攻擊的回歸。
 
 Regressions for the reported trust, recovery, coverage and accounting attacks."""
-import asyncio
 import copy
 import hashlib
 import json
 import os
 import secrets
-import signal
 import subprocess
 import sys
 import time
@@ -18,9 +16,8 @@ import pytest
 from security_harness import lifecycle, trusted_publisher as publisher
 from security_harness.audit import AuditRun
 from security_harness.llm import benchmark as bench, benchmark_score as score
-from security_harness.llm.gateway import Gateway, Limits, Request
+from security_harness.llm.gateway import Request
 from security_harness.results import executable_bits, write_json
-from tests.test_trusted_publisher import bundle
 from tests.test_model_benchmark import collected
 
 
@@ -86,7 +83,7 @@ def test_budget_and_rules_of_engagement_tampering_cannot_be_scored_complete(tmp_
     elif field == 'reserved_limit': report['limits']['reserved_output_tokens'] += 1
     elif field == 'model_roe_sha256': report[field] = '0' * 64
     else: report[field] += 1
-    with pytest.raises(ValueError): score.summarize(report)
+    with pytest.raises(ValueError, match='^(?:model\\ RoE\\ binding\\ mismatch|reservation\\ accounting\\ mismatch|review\\ limits\\ mismatch)$'): score.summarize(report)
 
 
 def test_successful_calls_cannot_erase_their_reservations(tmp_path):
@@ -177,9 +174,10 @@ def test_git_metadata_secrets_are_scanned_and_redacted(tmp_path, location):
 @pytest.mark.parametrize('codepoint', [0x034f, 0x3164, 0x2800, 0xfe00, 0xfe0f, 0xe0100, 0xe01ef])
 def test_invisible_review_text_is_rejected(codepoint):
     from tests.test_model_benchmark import review_value
+    from security_harness.llm.gateway import ModelError
     case, token, value = review_value()
     value['reason'] += chr(codepoint)
-    with pytest.raises(Exception): bench.parse_review(json.dumps(value), case, token)
+    with pytest.raises(ModelError, match='^INVALID_RESPONSE$'): bench.parse_review(json.dumps(value), case, token)
 
 
 def test_all_contexts_avoid_per_case_answer_category_hints():
@@ -295,7 +293,7 @@ def test_bedrock_array_keyword_omission_keeps_local_finding_limit():
     # 答案必須明確因四項超額而失敗。 / answer must fail specifically because there are four findings.
     for finding in review['findings']:
         bench.validate_review({**review, 'findings': [finding]}, case, 'opaque-id')
-    with pytest.raises(ModelError):
+    with pytest.raises(ModelError, match='^INVALID_RESPONSE$'):
         bench.validate_review(review, case, 'opaque-id')
 
 
@@ -331,7 +329,7 @@ def test_verifier_installer_rejects_bad_digest_and_nonfile_entries(attack):
            'binary_sha256': hashlib.sha256(content).hexdigest()}
     if attack == 'archive': pin['archive_sha256'] = '0'*64
     if attack == 'binary': pin['binary_sha256'] = '0'*64
-    with pytest.raises(ValueError): verified_binary(body, pin)
+    with pytest.raises(ValueError, match='^(?:ARCHIVE_DIGEST|BINARY_DIGEST|BINARY_ENTRY)$'): verified_binary(body, pin)
 
 
 @pytest.mark.parametrize('name', ['../outside', '/outside', 'aws\\outside'])
@@ -348,7 +346,7 @@ def test_aws_installer_refuses_archive_path_escape(tmp_path, name):
 
 def test_unsigned_adjudication_consumer_refuses_notes_for_changed_report(tmp_path):
     report, path = collected(tmp_path)
-    note = score.add_adjudication(path, report['case_ids'][0], 'NEEDS_MORE_EVIDENCE', 'Synthetic', 'Review pending.')
+    score.add_adjudication(path, report['case_ids'][0], 'NEEDS_MORE_EVIDENCE', 'Synthetic', 'Review pending.')
     assert score.read_adjudications(path)[0]['identity_verified'] is False
     path.write_bytes(path.read_bytes() + b'\n')
     with pytest.raises(ValueError, match='stale'): score.read_adjudications(path)
@@ -418,11 +416,9 @@ def test_full_guard_fetches_and_excludes_the_rerun_actor(bundle, monkeypatch):
 
 def test_glm_blind_review_worker_scoring_and_cleanup_use_mock_transport_only(tmp_path, monkeypatch):
     import httpx
-    from scripts import model_smoke
     from security_harness.llm import config as model_config
     from security_harness.llm.adapters import GLMAdapter
     from security_harness.llm.transport import JsonHTTP
-    from security_harness.llm.gateway import Request
     from tests.test_model_gateway import Bytes
     async def handler(request):
         payload = json.loads(request.content)
@@ -484,5 +480,5 @@ def test_adjudication_notes_stay_inside_the_report_directory(tmp_path, attack):
         (notes / 'x.json').symlink_to(outside / 'x.json')
     else:
         (notes / 'x.json').write_text('{"pad": "' + 'a' * 20000 + '"}')
-    with pytest.raises(OSError if attack == 'note_symlink' else ValueError):
+    with pytest.raises(OSError if attack == 'note_symlink' else ValueError, match='Too many levels of symbolic links|input exceeds read limit'):
         score.read_adjudications(path)

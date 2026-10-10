@@ -3,7 +3,6 @@
 Offline provider contracts and regressions for the trusted model boundary."""
 import asyncio
 import json
-import os
 import subprocess
 import sys
 from pathlib import Path
@@ -13,7 +12,7 @@ import pytest
 
 from security_harness.llm.adapters import BedrockAdapter, GeminiAdapter, GLMAdapter
 from security_harness.llm.gateway import Gateway, Limits, MockAdapter, ModelError, Reply, Request
-from security_harness.llm.transport import AwsCLI, JsonHTTP, RESPONSE_BYTES, strict_json
+from security_harness.llm.transport import AwsCLI, JsonHTTP, RESPONSE_BYTES
 
 
 @pytest.fixture(autouse=True)
@@ -340,7 +339,7 @@ def test_missing_usage_is_unknown_and_profile_family_is_unverified():
 
 @pytest.mark.parametrize("value", [0, -1, float("inf"), float("nan"), True, 61])
 def test_invalid_deadline_rejected(value):
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match='^invalid\\ gateway\\ deadline$'):
         Limits(timeout_seconds=value)
 
 

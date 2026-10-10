@@ -156,9 +156,9 @@ def test_run_identity_accepts_only_hex_or_canonical_uuid(run_id):
     from security_harness.isolation import cleanup_run
     from security_harness.lifecycle import run_directory, valid_run_id
     assert not valid_run_id(run_id)
-    with pytest.raises((ValueError, TypeError)):
+    with pytest.raises((ValueError, TypeError), match='^invalid\\ run\\ identity$'):
         run_directory(Path("/tmp"), run_id)
-    with pytest.raises((ValueError, TypeError)):
+    with pytest.raises((ValueError, TypeError), match='^invalid\\ isolation\\ run\\ ID$'):
         cleanup_run(run_id)
 
 

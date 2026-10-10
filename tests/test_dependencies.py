@@ -3,7 +3,6 @@
 Known-vulnerability counterexamples and incomplete/tampered coverage block."""
 from copy import deepcopy
 from datetime import datetime, timedelta, timezone
-import hashlib
 import json
 
 import pytest
@@ -57,7 +56,7 @@ def test_unknown_severity_known_vulnerability_blocks_and_keeps_cve_alias(tmp_pat
     {'vulns': [advisory(withdrawn=True)]}, {'vulns': [advisory(withdrawn='')]}, {'vulns': [{'id': 'x'}]},
     {'vulns': [advisory(aliases='CVE')]}, {'vulns': [advisory(id='bad\nidentifier')]}])
 def test_partial_or_wrong_database_response_never_completes(tmp_path, response):
-    with pytest.raises(deps.DependencyError):
+    with pytest.raises(deps.DependencyError, match='^incomplete\\ query\\ coverage$'):
         deps.scan(lockfile(tmp_path), fetch=lambda *args: response)
 
 
@@ -135,7 +134,7 @@ def test_tampered_or_incomplete_evidence_blocks(attack):
 
 @pytest.mark.parametrize('raw', [b'{"vulns":[],"vulns":[]}', b'{"x":NaN}'])
 def test_ambiguous_json_refused(raw):
-    with pytest.raises(deps.DependencyError): deps.strict_json(raw)
+    with pytest.raises(deps.DependencyError, match='^(?:duplicate\\ JSON\\ key|nonfinite\\ JSON)$'): deps.strict_json(raw)
 
 
 def test_network_request_has_fixed_host_exact_identity_limits_and_no_redirect(monkeypatch):
@@ -160,5 +159,5 @@ def test_network_request_has_fixed_host_exact_identity_limits_and_no_redirect(mo
 @pytest.mark.parametrize('number', ['1e309', '-1e309', 'NaN', 'Infinity'])
 def test_osv_json_rejects_nonfinite_numbers_even_in_metadata(number):
     from security_harness.dependencies import strict_json, DependencyError
-    with pytest.raises(DependencyError):
+    with pytest.raises(DependencyError, match='^nonfinite\\ JSON$'):
         strict_json('{"vulns": [], "metadata": {"score": ' + number + '}}')

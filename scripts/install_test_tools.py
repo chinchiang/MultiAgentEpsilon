@@ -20,7 +20,7 @@ from security_harness.results import digest_file, write_json
 def install():
     lock = ROOT / 'requirements-test.lock'
     policy = json.loads((ROOT / 'security/policy.json').read_text())
-    policy['allowed_packages'] = ['hypothesis', 'sortedcontainers']
+    policy['allowed_packages'] = ['hypothesis', 'ruff', 'sortedcontainers']
     if {r['name'] for r in parse_lock(lock)} != set(policy['allowed_packages']):
         raise ValueError('unexpected test tool inventory')
     provenance = verify(lock, policy)

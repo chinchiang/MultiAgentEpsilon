@@ -250,12 +250,34 @@ def evaluate(client, dsn, schema, passwords, connect, settle=SETTLE_SECONDS):
 
 
 def run_authorization(dsn: str, variant: str = "fixed") -> list[dict]:
-    # 僅供開發的 adapter；可信 CI 使用 isolation.run_isolated。 / Development-only adapter. Trusted CI uses isolation.run_isolated instead.
-    from fastapi.testclient import TestClient
+    """僅供開發：在本機 loopback 以真實 HTTP 執行同一 oracle；可信 CI 使用 isolation.run_isolated。
+
+Development only: the same oracle over real loopback HTTP; trusted CI uses isolation.run_isolated."""
+    import socket
+    import threading
+    import httpx
+    import uvicorn
     from fixture_app.app import create_app, connect, seed, cleanup
     schema, passwords = seed(dsn)
+    listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     try:
-        with TestClient(create_app(dsn, schema, variant=variant), follow_redirects=False) as client:
-            return evaluate(client, dsn, schema, passwords, connect)
+        listener.bind(("127.0.0.1", 0))
+        server = uvicorn.Server(uvicorn.Config(create_app(dsn, schema, variant=variant), log_level="error",
+                                               access_log=False, lifespan="off"))
+        thread = threading.Thread(target=server.run, kwargs={"sockets": [listener]}, daemon=True)
+        thread.start()
+        try:
+            deadline = time.monotonic() + 10
+            while not server.started:
+                if time.monotonic() >= deadline or not thread.is_alive():
+                    raise RuntimeError("local fixture server did not start")
+                time.sleep(0.02)
+            base = "http://127.0.0.1:%d" % listener.getsockname()[1]
+            with httpx.Client(base_url=base, timeout=10, trust_env=False, follow_redirects=False) as client:
+                return evaluate(client, dsn, schema, passwords, connect)
+        finally:
+            server.should_exit = True
+            thread.join(timeout=10)
     finally:
+        listener.close()
         cleanup(dsn, schema)

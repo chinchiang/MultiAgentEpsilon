@@ -5,7 +5,6 @@ import ast
 import os
 from pathlib import Path
 import shutil
-import sys
 import time
 
 import pytest
@@ -74,7 +73,7 @@ def test_timeout_is_separate_from_killed_and_child_is_reaped(tmp_path):
     assert run_tests(root, ['test_wait.py'], root / 'run.log', 2) == ('TIMEOUT', 0)
     assert time.monotonic() - before < 10
     child = int(pid.read_text())
-    with pytest.raises(ProcessLookupError):
+    with pytest.raises(ProcessLookupError, match='No such process'):
         os.kill(child, 0)
 
 

@@ -41,7 +41,7 @@ def test_review_must_be_rederived_from_its_own_provider_response(tmp_path, tampe
     else:
         data['checks'][1].update(status='ERROR', code='REFUSED', review=None)
         data['checks'][1]['response_text'] = data['checks'][0]['response_text']
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match='^(?:failed\\ attempt\\ contains\\ a\\ trusted\\ review|unbound\\ review)$'):
         score.summarize(data)
 
 
@@ -224,5 +224,26 @@ def test_model_roe_rejects_malformed_destination_allowlists(hosts):
     roe = _json.loads((_Path(__file__).resolve().parents[1] / "security/model-roe.json").read_text())
     validate_model_roe(roe, ["mock"])
     roe["allowed_remote_hosts"] = hosts
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match='^live\\ model\\ calls\\ are\\ outside\\ the\\ approved\\ model\\ RoE$'):
         validate_model_roe(roe, ["mock"])
+
+
+def test_model_roe_boundaries_are_inclusive():
+    import json as _json
+    from pathlib import Path as _Path
+    from security_harness.scope import MODEL_PROVIDERS, validate_model_roe
+    roe = _json.loads((_Path(__file__).resolve().parents[1] / "security/model-roe.json").read_text())
+    every = [*MODEL_PROVIDERS, 'mock', 'mock-review-a', 'mock-review-b']
+    allowed = list(roe["allowed_live_providers"])
+    # 選用全部供應商、所有允許的真實供應商與最小呼叫上限都必須可接受。 / Selecting every provider, every allowed live
+    # provider and the smallest call cap must all be accepted.
+    validate_model_roe({**roe, "allowed_live_providers": list(MODEL_PROVIDERS)}, every, 0)
+    validate_model_roe(roe, allowed, len(allowed))
+    validate_model_roe({**roe, "max_calls_per_run": 1}, ["mock"], 1)
+
+
+@pytest.mark.parametrize("count,valid", [(8, True), (9, False)])
+def test_remote_host_allowlist_size_boundary(count, valid):
+    from security_harness.scope import valid_remote_hosts
+    hosts = {"glm": [], "lmstudio": [f"h{i}.example" for i in range(count)]}
+    assert valid_remote_hosts(hosts) is valid
