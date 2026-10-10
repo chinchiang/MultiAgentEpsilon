@@ -55,6 +55,25 @@ MUTATIONS = {'wrong_password_accepted': ('if not user or not hmac.compare_digest
 
 MUTATIONS.update({
     'expired_session_accepted': (' AND s.expires_at>now()', ''),
+    # 寫入端點自行查 session，未驗證到期與缺少身分。 / The write endpoint resolves sessions itself, ignoring expiry and missing identity.
+    'patch_weaker_session_check': (
+        'def update_item(item_id: ItemId, body: Update, user=Depends(principal)):\n'
+        '        with connect(dsn, schema) as conn:\n',
+        'def update_item(item_id: ItemId, body: Update, authorization: str = Header(default="")):\n'
+        '        with connect(dsn, schema) as conn:\n'
+        '            user = conn.execute("SELECT u.id,u.tenant,u.role FROM sessions s JOIN users u ON u.id=s.user_id '
+        'WHERE s.token_hash=%s", (hashlib.sha256(authorization[7:].encode()).hexdigest(),)).fetchone() '
+        'or {"id": "", "tenant": "", "role": ""}\n'),
+    # 回應後才排程的跨租戶寫入；舊 oracle 的前後快照看不到。 / A cross-tenant write scheduled after the response,
+    # invisible to per-request before/after snapshots.
+    'delayed_cross_tenant_write': (
+        '        if not row:\n            raise HTTPException(404, "item not found")\n\n    return app',
+        '        if not row:\n            raise HTTPException(404, "item not found")\n'
+        '        if user["role"] == "admin":\n'
+        '            def later():\n'
+        '                with connect(dsn, schema) as conn:\n'
+        '                    conn.execute("UPDATE items SET value=\'delayed-side-effect\' WHERE id=3")\n'
+        '            __import__("threading").Timer(0.3, later).start()\n\n    return app'),
     'admin_cross_tenant_delete': (
         "DELETE FROM items WHERE id=%s AND tenant=%s AND (owner=%s OR %s='admin') RETURNING *",
         "DELETE FROM items WHERE id=%s AND ((tenant=%s AND owner=%s) OR %s='admin') RETURNING *"),
@@ -62,7 +81,11 @@ MUTATIONS.update({
 
 EXPECTED = {
     'expired_session_accepted': {'expired session read denied', 'expired session logout denied',
-                                 'expired session delete denied'},
+                                 'expired session delete denied', 'expired session write denied',
+                                 'expired session export denied'},
+    'patch_weaker_session_check': {'anonymous write denied', 'forged bearer write denied',
+                                   'expired session write denied', 'logged-out session write denied'},
+    'delayed_cross_tenant_write': {'no delayed or out-of-band state changes'},
     'admin_cross_tenant_delete': {'admin cross-tenant delete denied without side effect'},
     'wrong_password_accepted': {'wrong password denied without session'},
     'cross_tenant_404_leak': {'admin cross-tenant denied'},

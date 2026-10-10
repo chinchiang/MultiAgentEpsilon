@@ -6,7 +6,7 @@ HTTP is limited to literal loopback; remote HTTPS preserves proxy and CA trust.
 import re
 from urllib.parse import urlsplit, urlunsplit
 
-from .adapters import chat_reply
+from .adapters import chat_payload, chat_reply
 from .gateway import ModelError
 from .output_schema import REVIEW_FORMAT, request_schema
 from .transport import JsonHTTP, validate_url
@@ -81,10 +81,7 @@ class LMStudioAdapter:
         ids = [m['id'] for m in models]
         if len(set(ids)) != len(ids) or ids.count(self.model) != 1:
             raise ModelError('CONFIGURATION', 'MODEL_IDENTITY')
-        payload = {'model': self.model,
-                   'messages': [{'role': 'system', 'content': request.system},
-                                {'role': 'user', 'content': request.user}],
-                   'max_tokens': request.max_output_tokens, 'temperature': 0, 'stream': False, 'n': 1}
+        payload = chat_payload(self.model, request)
         if request.response_format == REVIEW_FORMAT:
             payload['response_format'] = {'type': 'json_schema', 'json_schema': {
                 'name': 'security_review', 'strict': True, 'schema': request_schema(request, 'lmstudio')}}

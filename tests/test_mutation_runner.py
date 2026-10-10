@@ -5,7 +5,6 @@ import ast
 import os
 from pathlib import Path
 import shutil
-import sys
 import time
 
 import pytest
@@ -74,7 +73,7 @@ def test_timeout_is_separate_from_killed_and_child_is_reaped(tmp_path):
     assert run_tests(root, ['test_wait.py'], root / 'run.log', 2) == ('TIMEOUT', 0)
     assert time.monotonic() - before < 10
     child = int(pid.read_text())
-    with pytest.raises(ProcessLookupError):
+    with pytest.raises(ProcessLookupError, match='No such process'):
         os.kill(child, 0)
 
 
@@ -84,3 +83,17 @@ def test_changed_case_identity_cannot_count_as_a_kill(tmp_path):
     assert classify(1, xml, 1, {('test', 'a')}) == 'ERROR'
     xml.write_text('<testsuite><testcase classname="test" name="a"/><testcase classname="test" name="a"><failure/></testcase></testsuite>')
     assert classify(1, xml, 2) == 'ERROR'
+
+
+def test_nested_same_column_boolean_nodes_are_mutated_independently():
+    from scripts.mutation_check import mutations
+    source = 'def target(a, b, c):\n    return a and b or c\n'
+    produced = {identity: text for identity, text in mutations(source, ('target',))}
+    bodies = sorted(text.split('return ', 1)[1].strip() for text in produced.values())
+    # 外層 Or→And 與內層 And→Or 是兩個不同突變。 / Outer Or->And and inner And->Or are two distinct mutants.
+    assert bodies == ['(a and b) and c', '(a or b) or c']
+
+
+def test_mutation_worker_denies_process_launch_paths():
+    from scripts.mutation_worker import DENIED_EVENTS
+    assert {'subprocess.Popen', 'os.system', 'os.exec', 'os.posix_spawn', 'os.fork', 'socket.connect'} <= DENIED_EVENTS

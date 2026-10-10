@@ -12,9 +12,11 @@ import uvicorn
 from fixture_app.app import create_app, database_url
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--schema", required=True)
-    parser.add_argument("--port", type=int, default=18765)
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--schema", required=True,
+                        help='合成 fixture schema 名稱 / synthetic fixture schema name')
+    parser.add_argument("--port", type=int, default=18765,
+                        help='loopback 連接埠 / loopback port')
     args = parser.parse_args()
     uvicorn.run(create_app(database_url(), args.schema), host="127.0.0.1", port=args.port,
                 access_log=False, log_level="error")

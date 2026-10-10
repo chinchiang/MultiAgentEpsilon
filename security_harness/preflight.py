@@ -90,9 +90,25 @@ def check_metadata(record: dict, metadata: dict, policy: dict, now: datetime) ->
             "registry": "https://pypi.org", "wheel_only_required": True}
 
 
+def validate_package_policy(policy: dict) -> None:
+    """套件來源政策須為精確型別；字串清單會變成子字串比對，零天冷卻期會停用延遲。
+
+Package-source policy needs exact types: a string allowlist would become a substring
+    match, and a zero-day cooling period would silently disable the delay."""
+    packages = policy.get("allowed_packages")
+    if (type(policy.get("schema_version")) is not int or policy["schema_version"] != 1
+            or policy.get("allowed_registry") != "https://pypi.org"
+            or policy.get("allowed_artifact_host") != "files.pythonhosted.org"
+            or type(policy.get("minimum_package_age_days")) is not int
+            or not 1 <= policy["minimum_package_age_days"] <= 365
+            or not isinstance(packages, list) or not packages
+            or any(not isinstance(n, str) or not n or canonical(n) != n for n in packages)
+            or len(set(packages)) != len(packages)):
+        raise PreflightError("invalid package policy")
+
+
 def verify(lock: Path, policy: dict, fetch=fetch_metadata, now=None) -> list[dict]:
-    if policy["allowed_registry"] != "https://pypi.org":
-        raise PreflightError("this adapter only supports the approved PyPI registry")
+    validate_package_policy(policy)
     now = now or datetime.now(timezone.utc)
     records = parse_lock(lock)
     checked = []

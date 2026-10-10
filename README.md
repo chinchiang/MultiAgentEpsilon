@@ -27,6 +27,7 @@ MultiAgentEpsilon/
 │   └── llm/             模型 gateway、adapter、盲審與評分
 ├── tests/               契約、缺陷變體與隔離回歸
 ├── requirements.lock    固定版本與套件雜湊
+├── requirements-test.lock 測試工具（Hypothesis、ruff）的版本與雜湊
 ├── requirements.in      套件宣告
 ├── pyproject.toml       Python 與 pytest 設定
 └── SECURITY.md          資安回報及處理範圍
@@ -49,6 +50,8 @@ python3 -I scripts/dev_db.py start
 .venv/bin/python -I scripts/run_security.py
 ```
 
+沒有 Docker 或 PostgreSQL 時，可先以 `.venv/bin/python -m pytest -m "not integration"` 執行離線子集；完整驗收仍須包含整合測試。靜態檢查為 `.venv/bin/ruff check .`，pytest 會把任何警告視為失敗。
+
 `bootstrap.py` 先核對 PyPI 套件、固定版本、所有 lock 雜湊、7 天冷卻期與 wheel 可用性；驗證 Gitleaks 官方 release checksum 及固定 binary digest，再跑 G2。成功後才下載與安裝 hash-verified wheels，禁用 source builds、額外 index 與隱含依賴解析。首版使用明確核准的 23 個套件；依賴更新需重新審查，不自動擴充 allowlist。
 
 `build_runtime.py` 以固定 digest 的 Python 映像及已核對 hash 的 wheels 離線建立容器 runtime。`run_security.py` 在無網路、非 root、唯讀根檔案系統的容器執行候選程式。HTTP socket 位於容器的限額 tmpfs，由容器內 bridge 連線，透過有時間／大小限制的 Docker exec 通道傳回不可信回應；host 不解析候選控制的 socket 路徑。可信評分器在容器外核對回應與資料庫副作用。候選 lock 必須與受測 runtime 一致；依賴變更須先更新可信基準並重建。詳見 [可信執行與合併保護](docs/trusted-execution.zh-TW.md)。
@@ -59,9 +62,9 @@ python3 -I scripts/dev_db.py start
 
 結果 schema 為第 3 版，拒絕舊版 gate 證據：每筆 gate 綁定相同 run ID、subject 與 policy digest。subject 使用 `worktree-manifest-v1`，雜湊明確編碼的逐檔路徑、型態、執行權限、大小及內容 SHA-256。AUTH 必須包含政策指定的唯一案例集合；缺漏、重複、未知 ID 或彙總不一致均 BLOCK。
 
-AUTH 有 32 個必要案例，包含錯誤密碼及不存在帳號，以及 admin 的同租戶寫入（允許）與跨租戶寫入（拒絕且無副作用）。拒絕回應、讀取及匯出依合成 API 契約比對完整 JSON，拒絕重複 key；每個案例核對完整 users／items／sessions 快照與允許的變更。這是合成 fixture 的契約，不是任意 API 的通用回應規則。七種已重現缺陷（含 admin 寫入條件越過租戶邊界）的真實隔離回歸見 `tests/test_adversarial_authorization.py`。
+AUTH 有 44 個必要案例，包含錯誤密碼及不存在帳號、admin 的同租戶寫入（允許）與跨租戶寫入（拒絕且無副作用），以及寫入與匯出端點對匿名、偽造、過期與已登出身分的拒絕。oracle 自行維護預期狀態，案例之間或最後靜置期間出現的延遲寫入也會失敗。拒絕回應、讀取及匯出依合成 API 契約比對完整 JSON 與型別，拒絕重複 key；每個案例核對完整 users／items／sessions 快照與允許的變更。這是合成 fixture 的契約，不是任意 API 的通用回應規則。九種已重現缺陷（含 admin 寫入條件越過租戶邊界、寫入端點較弱的工作階段檢查，以及回應後才排程的跨租戶寫入）的真實隔離回歸見 `tests/test_adversarial_authorization.py`。
 
-每次執行在解析設定前建立 `artifacts/<run-id>/report.json`；錯誤只保存階段與例外類型，不記錄敏感例外文字。`artifacts/latest.txt` 是 security run 索引；bootstrap、preflight 與 runtime-build 使用各自的索引。這些是未簽章的執行證據，不是可信 attestation。停止並刪除本地開發資料庫：
+每次執行在解析設定前建立 `artifacts/<run-id>/report.json`；錯誤只保存階段與例外類型，不記錄敏感例外文字。`artifacts/latest.txt` 是 security run 索引；bootstrap、preflight 與 runtime-build 使用各自的索引。這些是未簽章的執行證據，不是可信 attestation。`python3 -I scripts/dev_db.py status` 可查詢本地開發資料庫是否執行中；停止並刪除它：
 
 ```bash
 python3 -I scripts/dev_db.py stop
@@ -73,8 +76,8 @@ python3 -I scripts/dev_db.py stop
 |---|---|---|
 | G0／G4 | [試點授權矩陣與威脅](docs/pilot-scope.zh-TW.md) | 真實應用 owner、完整威脅建模及適用性核准 |
 | G1 | PyPI metadata、固定版本／hash、冷卻期、wheel-only；鎖定檔 CycloneDX SBOM、OSV 精確版本漏洞查詢 | 安裝映像清冊、KEV／EPSS、惡意套件行為、其他生態系 |
-| G2 | 真實 Gitleaks、遮罩、工作樹及候選 HEAD 可達 blobs、限額 gzip／zip／tar 展開 | 服務端 Push Protection、遠端不可得歷史／快取、金鑰撤銷 |
-| 授權回歸 | 登入負例、同角色、跨租戶、管理者讀寫、欄位限制、登出及完整 fixture 狀態；32 個案例 | 完整 G5／Web/API 黑箱掃描、TLS／CSRF／JWT／SSRF |
+| G2 | 真實 Gitleaks、遮罩、工作樹及候選 HEAD 可達 blobs、限額 gzip／zip／tar 展開 | 伺服器端 Push Protection、遠端不可得歷史／快取、金鑰撤銷 |
+| 授權回歸 | 登入負例、同角色、跨租戶、管理者讀寫、欄位限制、登出、各端點身分狀態、輸入邊界、延遲副作用及完整 fixture 狀態；44 個案例 | 完整 G5／Web/API 黑箱掃描、TLS／CSRF／JWT／SSRF |
 | 政策與證據 | 嚴格結果格式、故障阻擋、subject／policy digest、基準變更檢查、CI 簽章與來源驗證 | 專用可信發布器正式部署、例外生命週期、普通開發者的完整遠端繞過驗收 |
 | CI | 遠端 main／PR 正反例、固定 actions SHA、最小權限、早期拒絕證據與清理；main 規則已讀回 | 專用可信來源尚未部署，普通開發者繞過驗收仍未完成 |
 | 多模型 | [受限 gateway 與模型 adapter](docs/model-gateway.zh-TW.md)、[合成盲測與裁決試點](docs/blind-review.zh-TW.md) | GLM 真實推論、兩個真實家族的多輪穩定性、完整 G6／偏誤驗收 |
@@ -87,13 +90,13 @@ G2 與 subject digest 共用輸入清冊：生成物名稱只在 repository 根�
 
 ## CI 啟用界線
 
-[security.yml](.github/workflows/security.yml) 改用 `pull_request_target`，只執行 base SHA 的 evaluator、安裝程序與測試；候選 checkout 僅作資料，只有限定的 `fixture_app` 來源會送入無網路容器。評估工作的 token 權限為 contents/read、pull-requests/read 與 actions/read，不提供模型或部署金鑰；獨立簽署工作另有 id-token/write 與 attestations/write。所有路徑（包含 fixture、README 與文件）都須經可信、具寫入權限的獨立審查者對最新 head 核准。main push 與手動執行亦使用同一評分路徑；手動選取的 workflow ref 代表維護者選定的 evaluator，不能自動當成已核准基準。因此 main 上的 workflow 手動執行時，檢查名稱固定為 `manual-security-evaluation`、artifact 為 `manual-security-*`。`workflow_dispatch` 使用所選 ref 的 YAML，有推送權限者在自己分支改掉 job 名稱仍可產生同名檢查，所以審查者仍須以下述工具核對來源。執行完畢前，CI 會用發布程式的同一套證據契約自我檢查（`check_publishable_evidence.py`），證據與契約不一致時該 run 直接失敗。
+[security.yml](.github/workflows/security.yml) 改用 `pull_request_target`，只執行 base SHA 的 evaluator、安裝程序與測試；候選 checkout 僅作資料，只有限定的 `fixture_app` 來源會送入無網路容器。評估工作的權杖權限為 contents/read、pull-requests/read 與 actions/read，不提供模型或部署金鑰；獨立簽署工作另有 id-token/write 與 attestations/write。所有路徑（包含 fixture、README 與文件）都須經可信、具寫入權限的獨立審查者對最新 head 核准。main push 與手動執行亦使用同一評分路徑；手動選取的 workflow ref 代表維護者選定的 evaluator，不能自動當成已核准基準。因此 main 上的 workflow 手動執行時，檢查名稱固定為 `manual-security-evaluation`、artifact 為 `manual-security-*`。`workflow_dispatch` 使用所選 ref 的 YAML，有推送權限者在自己分支改掉 job 名稱仍可產生同名檢查，所以審查者仍須以下述工具核對來源。執行完畢前，CI 會用發布程式的同一套證據契約自我檢查（`check_publishable_evidence.py`），證據與契約不一致時該 run 直接失敗。
 
 新執行入口預設受保護。基準更新需由可信 reviewer 對目前 head SHA 獨立核准；guard 即時查核 GitHub PR／reviews，撤回核准、換版或作者自行核准皆不放行。此 run 仍以舊基準判定，合併後才成為下一輪基準。
 
 **main 規則集 24512048 已啟用並讀回確認。** 必要檢查仍使用共用 GitHub Actions App 15368；名稱與 App ID 無法唯一識別可信 workflow：有推送權限者可以用自己的 workflow，回訪的 fork 貢獻者也能以 `on: pull_request` 產生同名綠燈。`pull_request_target` 執行的是 PR **base 分支**上的 workflow，同一路徑在其他分支的修改版本有相同 workflow ID。專用 App 綁定前，審查者在核准或合併前應執行 `python3 -I scripts/verify_required_check.py --pr <編號>`：它以 GitHub 的 run 中繼資料確認 PR head 上每一個 `trusted-security-pilot` 都來自可信 workflow 路徑的 `pull_request_target` run，run 的 head 分支與此 PR 相同，且沒有任何（含已關閉）共用同一 head、卻開到其他分支的 PR；任一條件不符即 BLOCK。[專用 App 發布程式與部署範本](docs/trusted-check-publisher.zh-TW.md)已準備，App 與服務尚未部署。基準遷移程序見 [操作文件](docs/trusted-execution.zh-TW.md)，先前遠端基線見 [驗收紀錄](docs/remote-ci-validation.zh-TW.md)。
 
-PR #18 已獲獨立核准並合併至 `main`（`218fd7a`）。合併後的 [CI 執行 37866429806](https://github.com/chinchiang/MultiAgentEpsilon/actions/runs/37866429806) 通過 883 項測試，修正版 32 個案例／0 項缺陷為 ALLOW，指定缺陷版 32 個案例／9 項缺陷為 BLOCK；清理、證據摘要與真實簽章均已核對。專用 GitHub App 部署與真實 LM Studio 驗收仍待完成。
+正式 main `28be2e0` 已合併 PR #20（離線突變與性質測試），合併後的 [CI 執行 37911499955](https://github.com/chinchiang/MultiAgentEpsilon/actions/runs/37911499955) 成功；該基準為 930 項測試，修正版 32 個案例／0 項缺陷為 ALLOW，指定缺陷版 32 個案例／9 項缺陷為 BLOCK，並完成清理與簽章。[2026-10-10 稽核修正](docs/audit-20261010.zh-TW.md)將 AUTH 擴為 44 個案例、測試增為 1149 項，須經獨立審查與合併後才成為新基準。專用 GitHub App 部署與真實 LM Studio 驗收仍待完成。
 
 ## 離線突變與性質測試
 
@@ -104,6 +107,7 @@ PR #18 已獲獨立核准並合併至 `main`（`218fd7a`）。合併後的 [CI �
 - [系統架構、執行流程與完整目錄結構](docs/architecture-overview.zh-TW.md)
 - [試點範圍、授權矩陣與限制](docs/pilot-scope.zh-TW.md)
 - [實作現況與剩餘待辦](docs/milestone-status.zh-TW.md)（[歷史紀錄](docs/milestone-history.zh-TW.md)）
+- [2026-10-10 稽核修正紀錄](docs/audit-20261010.zh-TW.md)
 - [可信執行、基準更新與合併保護](docs/trusted-execution.zh-TW.md)
 - [遠端合併保護：設定與驗收缺口](docs/remote-merge-protection.zh-TW.md)
 - [專用檢查發布程式與部署範本](docs/trusted-check-publisher.zh-TW.md)
@@ -120,11 +124,11 @@ PR #18 已獲獨立核准並合併至 `main`（`218fd7a`）。合併後的 [CI �
 
 可用 `--rounds` 在同一總預算內執行重複盲測；逐輪結果、失敗分類與穩定性判讀見 [多輪盲測文件](docs/repeated-review.zh-TW.md)。
 
-本輪修正與完整驗收記錄見[安全邊界修正](docs/security-boundaries-20261008.zh-TW.md)。已產生簽章或通過本機測試，仍須完成專用 App 的部署、Ruleset 來源綁定與遠端驗收。
+2026-10-08 的修正與驗收記錄見[安全邊界修正](docs/security-boundaries-20261008.zh-TW.md)；專用 App 的部署、Ruleset 來源綁定與遠端驗收仍待完成。
 
-本輪新增依賴漏洞閘門、刪除／過期工作階段案例及模型變體的範圍、證據與部署缺口，見[後續擴充紀錄](docs/security-expansion-20261008.zh-TW.md)。PR #16／#17 已獨立核准並合併；正式 main `438d7a4` 的 787 項測試、32／0 正例、32／9 指定缺陷與簽章均已驗收。本輪 LM Studio 與雙語變更則須另經審查與驗收。
+依賴漏洞閘門、刪除／過期工作階段案例及模型變體的範圍、證據與部署缺口，見[後續擴充紀錄](docs/security-expansion-20261008.zh-TW.md)。PR #16／#17 已獨立核准並合併為 main `438d7a4`（787 項測試、32／0 正例、32／9 指定缺陷與簽章）；其後 LM Studio 與雙語變更已於 PR #18／#19 合併。
 
-LM Studio／Nemotron 的連線限制、操作及待實測項目見 [LM Studio 指南](docs/lmstudio.zh-TW.md)；本輪稽核與回歸見 [稽核修正紀錄](docs/audit-20261009.zh-TW.md)。
+LM Studio／Nemotron 的連線限制、操作及待實測項目見 [LM Studio 指南](docs/lmstudio.zh-TW.md)；歷次稽核與回歸見 [2026-10-09 稽核](docs/audit-20261009.zh-TW.md) 與 [2026-10-10 稽核](docs/audit-20261010.zh-TW.md)。
 
 <a id="en"></a>
 
@@ -148,7 +152,7 @@ The [architecture, flows, and full tree](docs/architecture-overview.zh-TW.md#en)
 | `security/` | Policies, tool pins, rules of engagement, synthetic cases and reference answers |
 | `security_harness/`, `security_harness/llm/` | Trusted evaluation, isolation, scanning, evidence; bounded model adapters and scoring |
 | `tests/` | Contracts, seeded variants, isolation, and regression tests |
-| `requirements.in`, `requirements.lock`, `pyproject.toml` | Declared dependencies, version/hash lock, Python/pytest configuration |
+| `requirements.in`, `requirements.lock`, `requirements-test.lock`, `pyproject.toml` | Declared dependencies, version/hash locks for the application and test tools, Python/pytest/ruff configuration |
 | `SECURITY.md` | Security-reporting scope and channel availability |
 
 ## Run the pilot
@@ -165,13 +169,15 @@ python3 -I scripts/dev_db.py start
 python3 -I scripts/dev_db.py stop
 ```
 
+Without Docker or PostgreSQL, `.venv/bin/python -m pytest -m "not integration"` runs the offline subset; full acceptance still includes integration tests. Static checks run with `.venv/bin/ruff check .`, and pytest treats every warning as an error.
+
 Bootstrap validates the approved 23-package inventory against PyPI identity, pinned versions, all lock hashes, a seven-day cooling period, and wheel availability. It verifies the scanner's release checksum and pinned binary digest, runs G2, and checks exact-version OSV results before installation. Only verified wheels are installed, with hashes required and source builds, extra indexes, and implicit dependency resolution disabled. Dependency updates require review.
 
 The runtime uses a pinned Python image and verified wheels in an offline build. Candidate code runs in a non-root container with no network and a read-only root. A bounded bridge inside the container sends HTTP to a socket in limited tmpfs; the host never connects through a candidate-controlled socket path. The host oracle checks complete responses and database side effects. The candidate lock must match the tested runtime lock. The development database is loopback-only; isolated evaluation creates a separate networkless database with least-privilege application credentials and removes it afterwards. All data is synthetic.
 
 `expect_block.py` requires exactly the nine policy-listed defects: unauthorized read/write/delete by bob and carol, and cross-tenant read/write/delete by admin. A different set with the same count, or a tool error, does not pass. The fixed pipeline returns 0 for this bounded pilot's ALLOW and 1 for BLOCK. ERROR, TIMEOUT, zero required targets, missing gates, stale evidence, and mismatched run/subject/policy bindings cannot pass. Positive actions and full database side effects are also checked.
 
-Evidence schema 3 uses a `worktree-manifest-v1` digest over explicit paths, types, executable classification, sizes, and SHA-256 content. AUTH requires the exact unique set of 32 cases and consistent case/finding totals. Cases cover login failures, ownership, tenants, admin delegation, field changes, logout, expiration, deletion, and input boundaries. Full JSON and users/items/sessions snapshots are checked. These are contracts of the synthetic API, not universal API rules. Seven concrete mutation families have isolated regressions.
+Evidence schema 3 uses a `worktree-manifest-v1` digest over explicit paths, types, executable classification, sizes, and SHA-256 content. AUTH requires the exact unique set of 44 cases and consistent case/finding totals. Cases cover login failures, ownership, tenants, admin delegation, field changes, logout, expiration, deletion, every authenticated endpoint under anonymous/forged/expired/logged-out identities, and input boundaries. Full typed JSON and users/items/sessions snapshots are checked; the oracle keeps its own expected state, so delayed writes between cases or during a final settle period fail. These are contracts of the synthetic API, not universal API rules. Nine concrete mutation families have isolated regressions.
 
 Reports are created before configuration parsing at `artifacts/<run-id>/report.json`; failures store stages and exception types, not sensitive exception text. `latest.txt` points only to security runs; other operations have separate indexes. Local reports are unsigned. CI separately signs its uploaded evidence ZIP. Model supervision records workers/AWS groups before execution, publishes completion after cleanup, and supports later janitor recovery after SIGKILL.
 
@@ -182,7 +188,7 @@ Reports are created before configuration parsing at `artifacts/<run-id>/report.j
 | G0/G4 | Synthetic scope, authorization matrix, threat examples | Product owner, full threat model, approved applicability |
 | G1 | PyPI provenance, pinned hashes, cooling, wheel-only installation, declared-lock CycloneDX SBOM, OSV queries | Installed-image inventory, KEV/EPSS, malicious-package behavior, other ecosystems |
 | G2 | Gitleaks; worktree and candidate-HEAD history; bounded gzip/ZIP/tar expansion and metadata scanning | Server-side push protection, unavailable history/caches, credential revocation |
-| AUTH | 32 synthetic authentication/authorization and side-effect cases | Complete product DAST, TLS, CSRF, JWT, SSRF testing |
+| AUTH | 44 synthetic authentication/authorization and side-effect cases | Complete product DAST, TLS, CSRF, JWT, SSRF testing |
 | Policy/evidence | Strict contracts, failure blocking, digests, protected changes, CI signatures and source verification | Dedicated publisher deployment, exception lifecycle, complete developer-role remote probes |
 | Models | Mock, Gemini, Bedrock, GLM interfaces; new LM Studio text interface and batch comparison | Real LM Studio/Nemotron acceptance, paused GLM, larger cross-family stability/bias studies |
 
@@ -198,7 +204,7 @@ Every path, including fixture and documentation, requires an independent, write-
 
 Ruleset 24512048 is active without bypass, but the shared Actions App 15368 and a check name do not uniquely identify a trusted workflow. Until the dedicated App is deployed, run `python3 -I scripts/verify_required_check.py --pr <number>` before approval/merge. It validates every same-named check's event, workflow, head repository/branch, whole-run success, and absence of another-base or retargeted PR sharing that head, including closed PRs. See the [publisher guide](docs/trusted-check-publisher.zh-TW.md#en). App deployment and developer-role denial acceptance remain pending.
 
-PR #18 received independent approval and merged into `main` (`218fd7a`). Post-merge [CI run 37866429806](https://github.com/chinchiang/MultiAgentEpsilon/actions/runs/37866429806) passed 883 tests: the fixed target allowed all 32 cases with zero findings, and the seeded target was blocked with exactly nine findings among 32 cases. Cleanup, evidence digests, and real signatures were verified. Dedicated GitHub App deployment and real LM Studio acceptance remain pending.
+Reviewed main `28be2e0` merged PR #20 (offline mutation and property tests); post-merge [CI run 37911499955](https://github.com/chinchiang/MultiAgentEpsilon/actions/runs/37911499955) succeeded with the 930-test baseline: the fixed target allowed 32 cases with zero findings, the seeded target was blocked with exactly nine, and cleanup and signatures were verified. The [October 10 audit](docs/audit-20261010.zh-TW.md#en) expands AUTH to 44 cases and the suite to 1149 tests; it becomes the baseline only after independent review and merge. Dedicated GitHub App deployment and real LM Studio acceptance remain pending.
 
 ## Offline mutation and property tests
 
@@ -209,7 +215,7 @@ PR #18 received independent approval and merged into `main` (`218fd7a`). Post-me
 - [Current milestones](docs/milestone-status.zh-TW.md#en), [history](docs/milestone-history.zh-TW.md#en), [scope](docs/pilot-scope.zh-TW.md#en), [ASVS mapping](docs/asvs-coverage.zh-TW.md#en).
 - [Trusted execution](docs/trusted-execution.zh-TW.md#en), [remote protection](docs/remote-merge-protection.zh-TW.md#en), [CI evidence](docs/remote-ci-validation.zh-TW.md#en), [coverage/cleanup](docs/coverage-lifecycle-acceptance.zh-TW.md#en).
 - [Gateway](docs/model-gateway.zh-TW.md#en), [blind reviews](docs/blind-review.zh-TW.md#en), [repeated reviews](docs/repeated-review.zh-TW.md#en), [structured output](docs/structured-output.zh-TW.md#en), [LM Studio](docs/lmstudio.zh-TW.md#en).
-- [Boundary fixes](docs/security-boundaries-20261008.zh-TW.md#en), [dependency/AUTH expansion](docs/security-expansion-20261008.zh-TW.md#en), [current audit](docs/audit-20261009.zh-TW.md#en).
+- [Boundary fixes](docs/security-boundaries-20261008.zh-TW.md#en), [dependency/AUTH expansion](docs/security-expansion-20261008.zh-TW.md#en), [October 9 audit](docs/audit-20261009.zh-TW.md#en), [October 10 audit](docs/audit-20261010.zh-TW.md#en).
 
 `model_review.py --suite boundaries` runs offline paired authorization/path/SSRF examples; `--rounds` shares a bounded total budget. Historical B09–B12 Gemini/Claude live pairs had valid classifications and locations, but do not establish larger-sample stability or bias reduction. The catalog is now v3; prior v2 results remain historical. Model outputs never decide security gates.
 

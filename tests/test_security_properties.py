@@ -23,9 +23,9 @@ NAMES = st.lists(st.text(alphabet='abcdefghijklmnopqrstuvwxyz0123456789', min_si
 def test_exact_case_sets_accept_reordering_and_real_booleans(names, passed):
     contract = {'case_ids': names}
     validate_cases([{'case': n, 'passed': passed} for n in reversed(names)], contract)
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match='^invalid\\ case\\ coverage$'):
         validate_cases([{'case': n, 'passed': int(passed)} for n in names], contract)
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match='^missing,\\ duplicate\\ or\\ unknown\\ case\\ ID$'):
         validate_cases([{'case': names[0], 'passed': True} for _ in names], contract)
 
 
@@ -34,7 +34,7 @@ def test_exact_case_sets_accept_reordering_and_real_booleans(names, passed):
 def test_seeded_manifest_requires_nonempty_proper_subset(names):
     assert seeded_defects({'case_ids': names, 'seeded_defect_case_ids': names[:-1]}) == set(names[:-1])
     for invalid in ([], names, names + ['outside'], [names[0], names[0]]):
-        with pytest.raises(ValueError):
+        with pytest.raises(ValueError, match='^invalid\\ seeded\\ defect\\ manifest$'):
             seeded_defects({'case_ids': names, 'seeded_defect_case_ids': invalid})
 
 
@@ -70,7 +70,7 @@ def test_future_and_expired_evidence_never_allows(seconds):
 def test_duplicate_json_keys_rejected_at_any_depth(key, value):
     encoded = json.dumps(key)
     raw = '{"outer":{' + encoded + ':' + str(value) + ',' + encoded + ':0}}'
-    with pytest.raises(Denied):
+    with pytest.raises(Denied, match='^DUPLICATE_JSON_KEY$'):
         strict_json(raw.encode())
     assert strict_json(json.dumps({key: value}).encode()) == {key: value}
 
@@ -96,33 +96,33 @@ def test_review_consistency_and_exact_source_reference(lines, verdict):
     assert validate_review(value, case, 'review') == value
     for invalid in (0, lines + 1, True, -1):
         forged = deepcopy(value); forged['findings'][0]['line'] = invalid
-        with pytest.raises(ModelError):
+        with pytest.raises(ModelError, match='^INVALID_RESPONSE$'):
             validate_review(forged, case, 'review')
     for field, replacement in [('evidence', 'fabricated'), ('cwe', 'CWE-0')]:
         forged = deepcopy(value); forged['findings'][0][field] = replacement
-        with pytest.raises(ModelError):
+        with pytest.raises(ModelError, match='^INVALID_RESPONSE$'):
             validate_review(forged, case, 'review')
     value['findings'] *= 2
-    with pytest.raises(ModelError):
+    with pytest.raises(ModelError, match='^INVALID_RESPONSE$'):
         validate_review(value, case, 'review')
 
 
 @PROPERTY
 @given(st.integers(min_value=309, max_value=10000), st.sampled_from(['', '-']))
 def test_publisher_rejects_floating_point_overflow(exponent, sign):
-    with pytest.raises(Denied):
+    with pytest.raises(Denied, match='^NONFINITE_JSON$'):
         strict_json(('{"nested":[{"value":' + sign + '1e' + str(exponent) + '}]}').encode())
 
 
 @pytest.mark.parametrize('invalid', [None, [], '', {}, [None], [''], ['a', 'a']])
 def test_invalid_case_manifest_rejected(invalid):
-    with pytest.raises((ValueError, TypeError)):
+    with pytest.raises((ValueError, TypeError), match='^invalid\\ required\\ case\\ manifest$'):
         validate_cases([], {'case_ids': invalid})
 
 
 @pytest.mark.parametrize('seeded', [[''], [None], ['a', 'a']])
 def test_invalid_seeded_identity_rejected(seeded):
-    with pytest.raises((ValueError, TypeError)):
+    with pytest.raises((ValueError, TypeError), match='^invalid\\ seeded\\ defect\\ manifest$'):
         seeded_defects({'case_ids': ['', None, 'a', 'b'], 'seeded_defect_case_ids': seeded})
 
 
@@ -165,18 +165,18 @@ def test_three_distinct_findings_and_json_byte_limit_are_inclusive():
     value = {'review_id': 'r', 'verdict': 'VULNERABLE', 'findings': findings[:3], 'reason': 'checked'}
     assert validate_review(value, case, 'r') == value
     value['findings'] = findings
-    with pytest.raises(ModelError):
+    with pytest.raises(ModelError, match='^INVALID_RESPONSE$'):
         validate_review(value, case, 'r')
     value.update(verdict='CLEAN', findings=[])
     raw = json.dumps(value)
     padded = raw + ' ' * (16384 - len(raw.encode()))
     assert parse_review(padded, case, 'r') == value
-    with pytest.raises(ModelError):
+    with pytest.raises(ModelError, match='^RESPONSE_LIMIT$'):
         parse_review(padded + ' ', case, 'r')
 
 
 def test_matching_empty_case_identity_is_still_invalid():
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match='^invalid\\ required\\ case\\ manifest$'):
         validate_cases([{'case': '', 'passed': True}], {'case_ids': ['']})
 
 

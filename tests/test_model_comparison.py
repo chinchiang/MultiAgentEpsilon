@@ -29,15 +29,15 @@ def test_incompatible_or_replayed_batches_are_rejected(tmp_path, attack):
     elif attack == 'model':
         for c in data['calls']: c['model_label'] = 'changed-model'
     if b != a: b.write_text(json.dumps(data))
-    with pytest.raises(ValueError): compare([a, b])
+    with pytest.raises(ValueError, match='^(?:analysis\\ mismatch\\ /\\ 分析內容不一致|duplicate\\ or\\ unfinished\\ report\\ /\\ 重複或未清理的報告|incompatible\\ experiment\\ /\\ 實驗設定不相容|model\\ identity\\ cannot\\ be\\ compared\\ /\\ 無法比較模型識別|sampling\\ policy\\ mismatch|unbalanced\\ case\\ repetitions\\ /\\ 各案例輪次不一致)$'): compare([a, b])
 
 
 def test_configuration_failure_without_model_identity_cannot_be_pooled(tmp_path, monkeypatch):
-    from scripts import model_smoke
+    from security_harness.llm import config as model_config
     from security_harness.llm.gateway import ModelError
     def unavailable(*args):
         raise ModelError('CONFIGURATION')
-    monkeypatch.setattr(model_smoke, 'configured_adapter', unavailable)
+    monkeypatch.setattr(model_config, 'configured_adapter', unavailable)
     report, path = collected(tmp_path, providers=['lmstudio'], case_ids=['B13', 'B14'])
     assert report['cleanup']['completed'] and report['status'] == 'INCOMPLETE'
     assert report['analysis']['provider_metrics']['lmstudio']['positive_miss_rate_all'] == 1

@@ -20,11 +20,13 @@ ROOT = Path(__file__).resolve().parents[1]
 
 @pytest.mark.parametrize('attack', ['missing-final-job', 'signing-failed', 'final-skipped', 'missing-final-step'])
 def test_green_evaluator_requires_verified_signing_and_final_gate(bundle, attack):
-    if attack == 'missing-final-job': bundle['jobs'].pop()
-    elif attack == 'signing-failed': bundle['jobs'][1]['conclusion'] = 'failure'
-    elif attack == 'final-skipped': bundle['jobs'][2]['conclusion'] = 'skipped'
-    else: bundle['jobs'][2]['steps'] = []
-    with pytest.raises(publisher.Denied, match='JOB_SOURCE|COMPLETION_STEP_INCOMPLETE'):
+    jobs = {j['name']: j for j in bundle['jobs']}
+    if attack == 'missing-final-job': bundle['jobs'].remove(jobs['trusted-security-pilot'])
+    elif attack == 'signing-failed': jobs['Attest evaluator-owned evidence']['conclusion'] = 'failure'
+    elif attack == 'final-skipped': jobs['trusted-security-pilot']['conclusion'] = 'skipped'
+    else: jobs['trusted-security-pilot']['steps'] = []
+    expected = 'COMPLETION_STEP_INCOMPLETE' if attack == 'missing-final-step' else 'JOB_SOURCE'
+    with pytest.raises(publisher.Denied, match=expected):
         publisher.validate_bundle(**bundle)
 
 
@@ -49,16 +51,14 @@ def bundle():
            "workflow_id": 99, "path": settings["workflow_path"], "event": "pull_request_target",
            "head_sha": "b"*40, "head_branch": "feature", "head_repository": {"id": 10}, "status": "completed", "conclusion": "success",
            "actor": {"login": "author"}, "triggering_actor": {"login": "author"}, "pull_requests": [{"number": 5}]}
-    steps = ["Record evaluator-owned CI provenance", "Check protected changes and exact-head independent approval",
-             "Evaluator regressions and isolation adversarial checks", "Offline security mutation checks", "Prove seeded defect still blocks",
-             "Evaluate candidate through external oracle", "Remove evaluator regression database",
-             "Reap cancelled security runs", "Retain evaluator-owned evidence"]
     jobs = [{"name": "trusted-security-evaluation", "conclusion": "success",
-             "steps": [{"name": n, "conclusion": "success"} for n in steps]}]
+             "steps": [{"name": n, "conclusion": "success"} for n in publisher.REQUIRED_STEPS]},
+            {"name": "trusted-mutation-tests", "conclusion": "success",
+             "steps": [{"name": n, "conclusion": "success"} for n in publisher.MUTATION_STEPS]}]
     jobs.append({"name": "Attest evaluator-owned evidence", "conclusion": "success",
                  "steps": [{"name": "Sign evaluator-owned evidence", "conclusion": "success"}]})
     jobs.append({'name': 'trusted-security-pilot', 'conclusion': 'success',
-                 'steps': [{'name': 'Require evaluator and attestation success', 'conclusion': 'success'}]})
+                 'steps': [{'name': publisher.COMPLETION_STEP, 'conclusion': 'success'}]})
     review = {"id": 11, "state": "APPROVED", "commit_id": "b"*40, "user": {"login": "reviewer"}}
     subject = "worktree-manifest-v1:sha256:" + "c"*64
     run_id = "11111111-1111-4111-8111-111111111111"
@@ -66,7 +66,7 @@ def bundle():
                result("G2", "COMPLETED", "scan", 1, 0, subject, "f"*64, "synthetic", run_id=run_id,
                       evidence={"coverage": {"status": "COMPLETE", "selected_files": 1, "selected_bytes": 1,
                       "scanned_leaves": 1, "scanned_bytes": 1, "expanded_bytes": 0, "archives": 0,
-                      "history_blobs": 1, "unsupported_files": 0, "history_head": "b"*40}}),
+                      "history_blobs": 1, "unsupported_files": 0, "history_head": "b"*40}, "findings": []}),
                result("AUTH", "COMPLETED", "test", len(policy["gate_contracts"]["AUTH"]["case_ids"]), 0, subject, "f"*64, "synthetic", run_id=run_id,
                       cases=[{"case": n, "passed": True} for n in policy["gate_contracts"]["AUTH"]["case_ids"]])]
     records[0]["packages"], records[0]["sca"] = clean_evidence(23, now)
@@ -136,6 +136,49 @@ def test_junit_cannot_inflate_coverage_with_duplicate_or_unnamed_tests(bundle, a
         publisher.validate_bundle(**bundle)
 
 
+EXPECTED_DENIAL = {
+    "app": "SHARED_ACTIONS_APP",
+    "repo": "RUN_REPOSITORY",
+    "workflow": "RUN_SOURCE",
+    "event": "RUN_SOURCE",
+    "failed_run": "RUN_NOT_SUCCESS",
+    "draft": "PR_NOT_REVIEWABLE",
+    "base": "BASE_NOT_APPROVED",
+    "head": "RUN_SHA",
+    "evaluator_run_source": "RUN_SHA",
+    "attempt": "PROVENANCE_MISMATCH",
+    "new_run": "RUN_LISTING_IDENTITY",
+    "step_skipped": "REQUIRED_STEP_INCOMPLETE",
+    "foreign_job": "JOB_SOURCE",
+    "author": "INDEPENDENT_APPROVAL_MISSING",
+    "push_actor": "INDEPENDENT_APPROVAL_MISSING",
+    "triggering_actor": "INDEPENDENT_APPROVAL_MISSING",
+    "commit_author": "INDEPENDENT_APPROVAL_MISSING",
+    "read_role": "INDEPENDENT_APPROVAL_MISSING",
+    "triage_role": "INDEPENDENT_APPROVAL_MISSING",
+    "unknown_role": "REVIEW_PERMISSION_UNKNOWN",
+    "stale_review": "INDEPENDENT_APPROVAL_MISSING",
+    "dismissed": "INDEPENDENT_APPROVAL_MISSING",
+    "changes_requested": "CHANGES_REQUESTED",
+    "guard": "TRUSTED_GUARD",
+    "guard_review": "BASELINE_APPROVAL",
+    "policy": "REPORT_DIGEST",
+    "subject": "REPORT_DIGEST",
+    "evaluator": "REPORT_DIGEST",
+    "history": "HISTORY_SHA",
+    "missing_case": "GATE_REJECTED",
+    "duplicate_case": "GATE_REJECTED",
+    "gate_error": "GATE_REJECTED",
+    "stale_gate": "GATE_REJECTED",
+    "future_gate": "GATE_REJECTED",
+    "cleanup": "CLEANUP_INCOMPLETE",
+    "failed_tests": "JUNIT_COUNTS",
+    "zero_tests": "JUNIT_COUNTS",
+    "skipped_tests": "JUNIT_COUNTS",
+    "junit_entity": "JUNIT_LIMIT",
+}
+
+
 @pytest.mark.parametrize("attack", ["app", "repo", "workflow", "event", "failed_run", "draft", "base",
                                     "head", "evaluator_run_source", "attempt", "new_run", "step_skipped", "foreign_job",
                                     "author", "push_actor", "triggering_actor", "commit_author",
@@ -186,7 +229,9 @@ def test_spoofed_or_stale_evidence_never_passes(bundle, attack):
             "failed_tests": b'<testsuite tests="360" failures="1"/>', "zero_tests": b'<testsuite tests="0"/>',
             "skipped_tests": b'<testsuite tests="360" skipped="1"/>'}[attack]
     elif attack == "junit_entity": bundle["files"]["trusted/artifacts/pytest.xml"] = b'<!DOCTYPE x [<!ENTITY x "x">]><testsuite tests="360"/>'
-    with pytest.raises(publisher.Denied):
+    # 每種攻擊須由預期的防線攔下，而非碰巧被較早的檢查拒絕。 / Each attack must be stopped by its intended guard,
+    # not incidentally refused by an earlier check.
+    with pytest.raises(publisher.Denied, match=f"^{EXPECTED_DENIAL[attack]}$"):
         publisher.validate_bundle(**bundle)
 
 
@@ -211,17 +256,17 @@ def test_artifact_symlink_and_duplicate_names_are_rejected():
         entry = zipfile.ZipInfo("report.json")
         entry.external_attr = (stat.S_IFLNK | 0o777) << 16
         archive.writestr(entry, "/etc/passwd")
-    with pytest.raises(publisher.Denied): publisher.unpack_evidence(data.getvalue())
+    with pytest.raises(publisher.Denied, match='^ARTIFACT_ENTRY$'): publisher.unpack_evidence(data.getvalue())
     data = io.BytesIO()
     with zipfile.ZipFile(data, "w") as archive:
         archive.writestr("report.json", "{}")
         with pytest.warns(UserWarning): archive.writestr("report.json", "{}")
-    with pytest.raises(publisher.Denied): publisher.unpack_evidence(data.getvalue())
+    with pytest.raises(publisher.Denied, match='^ARTIFACT_ENTRY$'): publisher.unpack_evidence(data.getvalue())
 
 
 @pytest.mark.parametrize("text", ['{"a":1,"a":2}', '{"a":NaN}'])
 def test_ambiguous_json_rejected(text):
-    with pytest.raises(publisher.Denied): publisher.strict_json(text)
+    with pytest.raises(publisher.Denied, match='^(?:DUPLICATE_JSON_KEY|NONFINITE_JSON)$'): publisher.strict_json(text)
 
 
 def test_remote_manifest_matches_local_without_executing_source(tmp_path):
@@ -405,7 +450,7 @@ def test_seeded_defect_must_have_real_complete_negative_evidence(bundle, attack)
     elif attack == "missing_case": mutate_json(bundle, path, lambda d: d["records"][2]["cases"].pop())
     elif attack == "invalid_case_type": mutate_json(bundle, path, lambda d: d["records"][2]["cases"][-1].update(passed="true"))
     elif attack == "fake_junit_count": bundle["files"]["trusted/artifacts/pytest.xml"] = b'<testsuite tests="360"/>'
-    with pytest.raises(ValueError): publisher.validate_bundle(**bundle)
+    with pytest.raises(ValueError, match='^(?:JUNIT_COUNTS|NEGATIVE_BINDING|NEGATIVE_CLEANUP|NEGATIVE_EVIDENCE_MISSING|NEGATIVE_FINDINGS|NEGATIVE_HISTORY|invalid\\ case\\ coverage)$'): publisher.validate_bundle(**bundle)
 
 
 @pytest.mark.parametrize("change", ["none", "head", "rerun", "new_run", "review_dismissed", "review_permission",
@@ -484,9 +529,16 @@ def test_config_validation_is_available_before_installing_root_owned_paths(tmp_p
 def base_binding(twin=None, branch="feature", listed=True):
     pr = {"number": 5, "base": {"ref": "main", "repo": {"id": 10}},
           "head": {"sha": "b"*40, "ref": "feature", "repo": {"id": 10}}}
-    run = {"head_branch": branch, "head_repository": {"id": 10}}
+    run = {"head_sha": "b"*40, "head_branch": branch, "head_repository": {"id": 10}}
     prs = ([pr] if listed else []) + ([twin] if twin else [])
     return run, pr, prs
+
+
+def test_run_for_another_head_sha_is_refused():
+    run, pr, prs = base_binding()
+    run["head_sha"] = "c"*40
+    with pytest.raises(publisher.Denied, match="RUN_SHA"):
+        publisher.validate_run_base(run, pr, prs, "main")
 
 
 @pytest.mark.parametrize("twin,branch,code", [
@@ -511,11 +563,22 @@ def test_run_base_binding_accepts_the_only_pr_and_fails_closed_on_missing_listin
 
 @pytest.mark.parametrize('state', ['failure', 'skipped', 'missing'])
 def test_required_mutation_step_cannot_be_omitted(bundle, state):
-    steps = bundle['jobs'][0]['steps']
+    steps = next(j for j in bundle['jobs'] if j['name'] == 'trusted-mutation-tests')['steps']
     step = next(s for s in steps if s['name'] == 'Offline security mutation checks')
     if state == 'missing':
         steps.remove(step)
     else:
         step['conclusion'] = state
-    with pytest.raises(publisher.Denied):
+    with pytest.raises(publisher.Denied, match='^MUTATION_STEP_INCOMPLETE$'):
+        publisher.validate_bundle(**bundle)
+
+
+@pytest.mark.parametrize('state', ['failure', 'missing'])
+def test_mutation_job_cannot_be_omitted_or_fail(bundle, state):
+    job = next(j for j in bundle['jobs'] if j['name'] == 'trusted-mutation-tests')
+    if state == 'missing':
+        bundle['jobs'].remove(job)
+    else:
+        job['conclusion'] = state
+    with pytest.raises(publisher.Denied, match='JOB_SOURCE'):
         publisher.validate_bundle(**bundle)

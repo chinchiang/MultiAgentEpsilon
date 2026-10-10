@@ -19,7 +19,7 @@ def test_prefix_guard_must_distinguish_sibling_directory(case_id, tmp_path):
     assert read(base, 'ok.txt') == 'allowed'
     if case_id == 'B13': assert read(base, '../allowed-other/sentinel.txt') == 'outside synthetic data'
     else:
-        with pytest.raises(PermissionError): read(base, '../allowed-other/sentinel.txt')
+        with pytest.raises(PermissionError, match='^denied$'): read(base, '../allowed-other/sentinel.txt')
 
 
 @pytest.mark.parametrize('case_id', ['B15', 'B16'])
@@ -39,7 +39,7 @@ def test_hostname_guard_cannot_authorize_other_protocol_port_or_path(case_id, ta
             assert fetch(client, target) == 'synthetic'
             assert seen == [target]
         else:
-            with pytest.raises(PermissionError): fetch(client, target)
+            with pytest.raises(PermissionError, match='^denied$'): fetch(client, target)
             assert seen == []
 
 
@@ -57,5 +57,5 @@ def test_variant_repetitions_fit_existing_caps_and_keep_round_identities_separat
     plan = bench.make_plan(['gemini', 'bedrock'], ['B13', 'B14'], rounds=2)
     assert len(plan) == 8
     assert len({p['review_id'] for p in plan}) == 4
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match='^invalid\\ or\\ over\\-budget\\ review\\ plan$'):
         bench.make_plan(['gemini', 'bedrock'], list(bench.load_cases()), rounds=2)

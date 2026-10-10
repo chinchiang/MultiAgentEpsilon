@@ -45,10 +45,10 @@ def test_secret_removed_from_tree_still_found_in_history(tmp_path):
 
 
 def test_missing_tampered_scanner_and_empty_scope_fail(tmp_path):
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match='^empty\\ scan\\ scope$'):
         run(tmp_path)
     (tmp_path / "data").write_text("safe")
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match='^scanner\\ integrity\\ mismatch$'):
         scan(tmp_path, ROOT / ".tools/gitleaks", ROOT / "security/gitleaks.toml", "incorrect")
 
 
@@ -56,3 +56,37 @@ def test_candidate_inline_allow_comment_cannot_suppress_canary(tmp_path):
     canary = "VIBE_TEST_" + "SECRET_" + secrets.token_hex(16)
     (tmp_path / "settings.py").write_text('token = "' + canary + '" # gitleaks:allow\n')
     assert len(run(tmp_path)["findings"]) == 1
+
+
+def history_repo(tmp_path, secret_message):
+    def git(*args):
+        subprocess.run(["git", "-C", str(tmp_path), *args], check=True, capture_output=True)
+    git("init")
+    git("config", "user.name", "Synthetic fixture")
+    git("config", "user.email", "fixture@example.invalid")
+    (tmp_path / "settings.txt").write_text("VIBE_TEST_" + "SECRET_" + secrets.token_hex(16) if not secret_message else "safe")
+    git("add", ".")
+    git("commit", "-m", ("canary " + "VIBE_TEST_" + "SECRET_" + secrets.token_hex(16)) if secret_message else "first")
+    (tmp_path / "settings.txt").write_text("redacted configuration")
+    git("add", ".")
+    git("commit", "-m", "second")
+    (tmp_path / "other.txt").write_text("unrelated")
+    git("add", ".")
+    git("commit", "-m", "third")
+    return git
+
+
+def test_candidate_grafts_cannot_truncate_scanned_history(tmp_path):
+    history_repo(tmp_path, secret_message=False)
+    parent = subprocess.run(["git", "-C", str(tmp_path), "rev-parse", "HEAD~1"], capture_output=True, text=True).stdout
+    # 宣告 HEAD~1 沒有父提交，舊版會漏掉含機密的第一個提交。 / Declare HEAD~1 parentless; the old scan missed the first commit.
+    (tmp_path / ".git/info/grafts").write_text(parent)
+    found = run(tmp_path, history=True)
+    assert any(x["scope"] == "history" for x in found["findings"])
+
+
+def test_candidate_log_encoding_cannot_hide_commit_metadata(tmp_path):
+    git = history_repo(tmp_path, secret_message=True)
+    git("config", "i18n.logOutputEncoding", "UTF-16")
+    found = run(tmp_path, history=True)
+    assert any(x["scope"] == "history-metadata" for x in found["findings"])

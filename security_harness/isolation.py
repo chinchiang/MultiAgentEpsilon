@@ -7,7 +7,6 @@ This is Linux container isolation, not protection against host-kernel exploits.
 """
 import hashlib
 import json
-import re
 import secrets
 import subprocess
 import tempfile
@@ -20,6 +19,7 @@ from psycopg import sql
 from .authorization import evaluate
 from .fixture_database import connect, seed
 from .inputs import input_files
+from .lifecycle import valid_run_id
 from .container_http import BoundedClient, docker_environment
 from .processes import docker_command
 from .results import digest_file, read_regular
@@ -34,18 +34,52 @@ def docker(*args, check=True, timeout=45):
                           capture_output=True, text=True, check=check, timeout=timeout, env=env)
 
 
+MEMORY_BYTES = 512 * 1024 * 1024
+PIDS_LIMIT = 128
+NOFILE_LIMIT = 4096
+
+
 def run_flags(name, run_id):
-    flags = ["run", "--detach", "--name", name, "--label", "epsilon.isolated=true",
+    # 不從網路拉映像；本機缺映像時失敗而非在評估期間下載。 / Never pull: a missing local image fails instead of downloading mid-evaluation.
+    flags = ["run", "--detach", "--pull=never", "--name", name, "--label", "epsilon.isolated=true",
              "--label", "epsilon.run=" + run_id,
              "--network=none", "--read-only", "--cap-drop=ALL", "--security-opt=no-new-privileges",
-             "--cpus=1", "--memory=512m", "--pids-limit=128", "--log-driver=none"]
+             "--cpus=1", f"--memory={MEMORY_BYTES}", f"--memory-swap={MEMORY_BYTES}",
+             f"--pids-limit={PIDS_LIMIT}", f"--ulimit=nofile={NOFILE_LIMIT}:{NOFILE_LIMIT}", "--log-driver=none"]
     for variable in PROXY_NAMES:
         flags.extend(("--env", variable + "="))
     return flags
 
 
+def verify_container(data, *, user, image_id=None, image_ref=None):
+    """評估前核對 Docker 實際套用的隔離設定，任一不符即拒絕。
+
+Verify the isolation Docker actually applied before evaluation; any mismatch refuses."""
+    host, config = data["HostConfig"], data["Config"]
+    ulimits = {u["Name"]: (u["Soft"], u["Hard"]) for u in host.get("Ulimits") or []}
+    checks = {
+        "network": host["NetworkMode"] == "none",
+        "readonly_root": host["ReadonlyRootfs"] is True,
+        "privileged": host["Privileged"] is False,
+        "cap_drop": host["CapDrop"] == ["ALL"] and not host.get("CapAdd"),
+        "no_new_privileges": host["SecurityOpt"] == ["no-new-privileges"],
+        "memory": host["Memory"] == MEMORY_BYTES and host["MemorySwap"] == MEMORY_BYTES,
+        "pids": host["PidsLimit"] == PIDS_LIMIT,
+        "cpus": host["NanoCpus"] == 1_000_000_000,
+        "nofile": ulimits == {"nofile": (NOFILE_LIMIT, NOFILE_LIMIT)},
+        "user": config["User"] == user,
+        "image": (image_id is None or data["Image"] == image_id) and (image_ref is None or config["Image"] == image_ref),
+    }
+    failed = sorted(k for k, ok in checks.items() if not ok)
+    if failed:
+        raise RuntimeError("isolation configuration mismatch: " + ",".join(failed))
+    return {"network": host["NetworkMode"], "readonly_root": host["ReadonlyRootfs"], "user": config["User"],
+            "image_id": data["Image"], "mount_destinations": sorted(m["Destination"] for m in data["Mounts"]),
+            "verified": sorted(checks)}
+
+
 def cleanup_run(run_id):
-    if not re.fullmatch(r"[a-f0-9-]{32,36}", run_id):
+    if not valid_run_id(run_id):
         raise ValueError("invalid isolation run ID")
     # 清理不是安全測試期限；daemon 較慢時應等待，不能遺留容器。 / Cleanup is not a security deadline: a slow daemon must delay it, not leak containers.
     ids = docker("ps", "-aq", "--filter", "label=epsilon.isolated=true", "--filter", "label=epsilon.run=" + run_id, timeout=30).stdout.split()
@@ -73,7 +107,7 @@ def run_isolated(candidate: Path, variant="fixed", run_id=None) -> dict:
     if source.is_symlink():
         raise ValueError("candidate source is a symlink")
     run_id = run_id or secrets.token_hex(16)
-    if not re.fullmatch(r"[a-f0-9-]{32,36}", run_id):
+    if not valid_run_id(run_id):
         raise ValueError("invalid isolation run ID")
     paths = [p for p in input_files(candidate) if p.is_relative_to(source)]
     if not paths or any(p.suffix != ".py" for p in paths) or sum(p.stat().st_size for p in paths) > 1024 * 1024:
@@ -81,7 +115,9 @@ def run_isolated(candidate: Path, variant="fixed", run_id=None) -> dict:
     names = ["epsilon-isolated-" + secrets.token_hex(8) + suffix for suffix in ("-db", "-app")]
     with tempfile.TemporaryDirectory(prefix="epsilon-iso-") as directory:
         work = Path(directory)
-        work.chmod(0o755)
+        # 只有 Docker daemon（root）需要進入；其他本機使用者不可替換 socket。 / Only the root Docker daemon enters;
+        # other local users cannot plant a socket in the world-writable DB directory.
+        work.chmod(0o700)
         (work / "db").mkdir(mode=0o777)
         (work / "db").chmod(0o777)
         (work / "candidate/fixture_app").mkdir(parents=True)
@@ -108,7 +144,7 @@ def run_isolated(candidate: Path, variant="fixed", run_id=None) -> dict:
                    "--mount", f"type=bind,src={work / 'db'},dst=/var/run/postgresql",
                    "--mount", f"type=bind,src={hba},dst=/etc/epsilon-pg_hba.conf,readonly",
                    "--tmpfs", "/var/lib/postgresql/data:rw,uid=999,gid=999,size=256m",
-                   "--tmpfs", "/tmp:rw,uid=999,gid=999", db_image,
+                   "--tmpfs", "/tmp:rw,uid=999,gid=999,size=16m", db_image,
                    "-c", "hba_file=/etc/epsilon-pg_hba.conf", "-c", "listen_addresses=")
             for _ in range(80):
                 try:
@@ -138,6 +174,11 @@ def run_isolated(candidate: Path, variant="fixed", run_id=None) -> dict:
                    "--mount", f"type=bind,src={work / 'candidate'},dst=/candidate,readonly",
                    "--mount", f"type=bind,src={work / 'db'},dst=/run/epsilon-db,readonly",
                    "--mount", f"type=bind,src={settings},dst=/run/fixture.json,readonly", runtime["image_id"])
+            # 先核對兩個容器的實際組態，再送出任何評估請求。 / Verify both containers' applied configuration before any evaluation request.
+            db_isolation = verify_container(json.loads(docker("inspect", names[0]).stdout)[0],
+                                            user="999:999", image_ref=db_image)
+            app_isolation = verify_container(json.loads(docker("inspect", names[1]).stdout)[0],
+                                             user="10001:10001", image_id=runtime["image_id"])
             client = BoundedClient(names[1])
             health_deadline = time.monotonic() + 20
             while time.monotonic() < health_deadline:
@@ -145,28 +186,28 @@ def run_isolated(candidate: Path, variant="fixed", run_id=None) -> dict:
                     health = client.get("/health")
                     if health.status_code == 200 and health.json().get("fixture_id") == schema and health.json().get("ready"):
                         break
-                except (RuntimeError, ValueError, TimeoutError):
+                except (RuntimeError, ValueError, TimeoutError, AttributeError, BrokenPipeError):
+                    # 非物件 JSON 或提早關閉的管線也只是尚未就緒。 / Non-object JSON or an early-closed pipe means not ready yet.
                     pass
                 time.sleep(0.1)
             else:
                 raise RuntimeError("isolated HTTP service unavailable")
             cases = evaluate(client, dsn, schema, passwords, connect)
-            data = json.loads(docker("inspect", names[1]).stdout)[0]
-            evidence = {"network": data["HostConfig"]["NetworkMode"],
-                        "readonly_root": data["HostConfig"]["ReadonlyRootfs"],
-                        "user": data["Config"]["User"], "image_id": data["Image"],
-                        "mount_destinations": [m["Destination"] for m in data["Mounts"]],
+            evidence = {**app_isolation,
+                        "database": db_isolation,
                         "oracle": "host oracle; bounded container HTTP bridge + independent database queries",
                         "candidate_lock_sha256": candidate_lock,
                         "runtime_lock_sha256": runtime["lock_sha256"],
                         "http_socket_namespace": "candidate container only"}
-            if evidence["network"] != "none" or not evidence["readonly_root"]:
-                raise RuntimeError("isolation configuration mismatch")
             return {"cases": cases, "isolation": evidence}
         finally:
             for name in reversed(names):
-                removed = docker("rm", "--force", name, check=False)
-                if removed.returncode and docker("inspect", name, check=False).returncode == 0:
+                # 單一容器逾時不能跳過另一個容器的移除。 / One container's timeout must not skip removing the other.
+                try:
+                    removed = docker("rm", "--force", name, check=False)
+                    if removed.returncode and docker("inspect", name, check=False).returncode == 0:
+                        cleanup_errors.append(name)
+                except subprocess.TimeoutExpired:
                     cleanup_errors.append(name)
             if cleanup_errors:
                 raise RuntimeError("isolated resource cleanup failed")

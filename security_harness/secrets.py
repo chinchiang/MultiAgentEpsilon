@@ -3,15 +3,17 @@
 Verified Gitleaks over an explicit, bounded worktree and HEAD-blob inventory."""
 from __future__ import annotations
 
+import hashlib
 import json
+import os
 import re
 import subprocess
 import tempfile
 from pathlib import Path
 
 from . import candidate_git
-from .results import digest_file, read_regular
-from .inputs import input_files
+from .results import read_regular
+from .inputs import CACHES, ROOT_GENERATED, input_files
 from .limits import LIMITS, ResourceLimit
 from .processes import bounded_output
 from .scan_content import ContentInventory, load_binary_allowlist
@@ -109,7 +111,10 @@ HEAD commit messages/identities and all tag names/annotated-tag metadata.
 
 def scan(root: Path, binary: Path, config: Path, expected_hash: str, *, history=True,
          require_history=False, binary_allowlist: Path | None = None) -> dict:
-    if digest_file(binary) != expected_hash:
+    # 先讀入位元組驗證雜湊，之後只執行私有副本，避免驗證與執行之間被替換。 / Verify the bytes, then run only a
+    # private copy, so the binary cannot be swapped between verification and execution.
+    scanner_bytes = read_regular(binary, 256 * 1024 * 1024)
+    if hashlib.sha256(scanner_bytes).hexdigest() != expected_hash:
         raise ValueError('scanner integrity mismatch')
     # 允許清單位於可信掃描器設定旁，不取自受掃描樹。 / The allowlist sits next to the trusted scanner config, never in the scanned tree.
     reviewed = load_binary_allowlist(binary_allowlist or config.with_name('binary-allowlist.json'))
@@ -119,14 +124,21 @@ def scan(root: Path, binary: Path, config: Path, expected_hash: str, *, history=
     findings = []
     tip, blobs = history_blobs(root, require_history) if history else (None, [])
     metadata_count = 0
+    deduplicated = 0
     with tempfile.TemporaryDirectory(prefix='epsilon-gitleaks-') as temp:
         temp = Path(temp)
+        scanner = temp / 'gitleaks'
+        fd = os.open(scanner, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o700)
+        with os.fdopen(fd, 'wb') as stream:
+            stream.write(scanner_bytes)
         snapshot = temp / 'snapshot'
         snapshot.mkdir()
         inventory = ContentInventory(snapshot, LIMITS, reviewed)
         selected_bytes = 0
+        worktree_digests = set()
         for path in paths:
             data = read_regular(path, LIMITS.max_file_bytes)
+            worktree_digests.add(hashlib.sha256(data).hexdigest())
             inventory.expanded_bytes += len(data)
             if inventory.expanded_bytes > LIMITS.max_expanded_bytes:
                 raise ResourceLimit('combined scan content limit exceeded')
@@ -137,6 +149,10 @@ def scan(root: Path, binary: Path, config: Path, expected_hash: str, *, history=
                                   limit=LIMITS.max_file_bytes, env=candidate_git.environment())
             if len(data) != size:
                 raise ValueError('history content size mismatch')
+            if hashlib.sha256(data).hexdigest() in worktree_digests:
+                # 與工作樹相同的內容已掃描，不重複占用預算。 / Content identical to a worktree file was already scanned.
+                deduplicated += 1
+                continue
             inventory.expanded_bytes += len(data)
             if inventory.expanded_bytes > LIMITS.max_expanded_bytes:
                 raise ResourceLimit('combined scan content limit exceeded')
@@ -150,7 +166,7 @@ def scan(root: Path, binary: Path, config: Path, expected_hash: str, *, history=
                 metadata_count += 1
         report = temp / 'scan.json'
         # 輸出至有限額報告檔，不擷取原始診斷串流。 / Output goes to a bounded report file, never to a captured diagnostic stream.
-        process = subprocess.run([str(binary), 'dir', str(snapshot), '--config', str(config),
+        process = subprocess.run([str(scanner), 'dir', str(snapshot), '--config', str(config),
                                   '--redact=100', '--ignore-gitleaks-allow', '--gitleaks-ignore-path', str(temp),
                                   '--no-banner', '--report-format=json', '--report-path', str(report)],
                                  stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=90)
@@ -171,6 +187,9 @@ def scan(root: Path, binary: Path, config: Path, expected_hash: str, *, history=
                     'scanned_leaves': len(inventory.entries), 'scanned_bytes': sum(e['bytes'] for e in inventory.entries.values()),
                     'expanded_bytes': inventory.expanded_bytes, 'archives': inventory.archives,
                     'history_head': tip, 'history_blobs': len(blobs), 'unsupported_files': 0,
+                    'history_blobs_deduplicated': deduplicated,
+                    # 明列未掃描的區域，不宣稱涵蓋。 / Name what was not scanned instead of implying coverage.
+                    'excluded_root_paths': sorted(ROOT_GENERATED), 'excluded_cache_names': sorted(CACHES),
                     'history_metadata': metadata_count,
                     'reviewed_binaries': inventory.reviewed,
                     'formats': ['UTF-8', 'gzip', 'zip', 'ustar', 'reviewed-binary-strings'],

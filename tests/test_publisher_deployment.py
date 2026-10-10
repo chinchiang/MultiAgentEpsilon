@@ -95,9 +95,56 @@ def test_preparation_rejects_unsafe_inputs_without_overwriting_existing_files(ev
     if attack == "existing_output":
         output.mkdir()
         (output / "publisher.json").write_text("existing pin")
-    with pytest.raises((Denied, FileExistsError)):
+    with pytest.raises((Denied, FileExistsError), match=r"^(?:APP_IDENTIFIERS|EVALUATOR_NOT_CLEAN|EVALUATOR_SHA_MISMATCH|OUTPUT_MUST_BE_EXTERNAL|SHARED_ACTIONS_APP|TRUST_POLICY_MISMATCH|\[Errno 17\] File exists: .*)$"):
         prepare(root, output, sha, app_id, installation_id)
     if attack == "existing_output":
         assert (output / "publisher.json").read_text() == "existing pin"
     else:
         assert not output.exists()
+
+
+def test_shared_lock_queues_then_reports_busy_instead_of_failing_immediately(tmp_path):
+    import fcntl
+    import os
+    from scripts import publish_trusted_check as cli
+    from security_harness.trusted_publisher import Denied
+    path = tmp_path / 'publisher.lock'
+    holder = os.open(path, os.O_CREAT | os.O_RDWR, 0o600)
+    waiter = os.open(path, os.O_RDWR)
+    try:
+        fcntl.flock(holder, fcntl.LOCK_EX)
+        now = [0.0]
+        released = []
+        def sleep(seconds):
+            now[0] += seconds
+            if now[0] >= 5 and not released:
+                fcntl.flock(holder, fcntl.LOCK_UN)
+                released.append(True)
+        cli.acquire_lock(waiter, wait=60, clock=lambda: now[0], sleep=sleep)
+        assert released and now[0] < 60
+        fcntl.flock(waiter, fcntl.LOCK_UN)
+        fcntl.flock(holder, fcntl.LOCK_EX)
+        now[0] = 0.0
+        with pytest.raises(Denied, match='LOCK_BUSY'):
+            cli.acquire_lock(waiter, wait=3, clock=lambda: now[0], sleep=lambda s: now.__setitem__(0, now[0] + s))
+    finally:
+        os.close(waiter)
+        os.close(holder)
+
+
+def test_timer_spreads_instances_and_unit_documents_python_requirement():
+    base = Path(__file__).resolve().parents[1] / 'deploy/trusted-publisher'
+    timer = (base / 'epsilon-publisher@.timer').read_text()
+    service = (base / 'epsilon-publisher@.service').read_text()
+    assert 'RandomizedDelaySec=' in timer
+    assert 'ExecStart=/usr/bin/python3 -I ' in service and 'Python 3.12' in service
+    assert service.count('--lock-file /var/lib/epsilon-publisher/publisher.lock') == 1
+
+
+def test_repository_leaves_headroom_under_publisher_source_and_call_limits():
+    from security_harness import trusted_publisher as publisher
+    import subprocess
+    tracked = subprocess.run(["git", "-C", str(ROOT), "ls-files"], capture_output=True, text=True, check=True).stdout.split()
+    # 冷快取約需每檔一次 blob 請求加上約 30 次其他呼叫。 / A cold cache needs about one blob call per file plus ~30 others.
+    assert len(tracked) * 2 <= publisher.MAX_SOURCE_FILES
+    assert publisher.MAX_SOURCE_FILES + 50 <= publisher.API_CALL_BUDGET

@@ -18,7 +18,7 @@ def test_supported_scope():
     ("allow_redirects", True), ("external_callback", True), ("llm_calls", True),
 ])
 def test_scope_expansion_rejected(field, value):
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="^RoE\\ exceeds\\ the\\ synthetic\\ loopback\\ pilot's\\ supported\\ scope$"):
         validate_roe({**ROE, field: value})
 
 
@@ -29,7 +29,7 @@ MODEL_ROE = json.loads((Path(__file__).resolve().parents[1] / "security/model-ro
                                       ['gemini', 'gemini'], [None], [], 'gemini'])
 def test_unknown_or_duplicate_provider_cannot_escape_the_roe(providers):
     from security_harness.scope import validate_model_roe
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match='^unknown\\ or\\ duplicate\\ model\\ provider\\ /\\ 未知或重複的模型供應商$'):
         validate_model_roe(MODEL_ROE, providers)
 
 
@@ -46,13 +46,13 @@ def test_security_gates_and_model_calls_keep_separate_rules_of_engagement():
 ])
 def test_model_roe_expansion_rejected(field, value):
     from security_harness.scope import validate_model_roe
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match='^live\\ model\\ calls\\ are\\ outside\\ the\\ approved\\ model\\ RoE$'):
         validate_model_roe({**MODEL_ROE, field: value}, ["gemini"])
 
 
 def test_model_roe_must_list_every_live_provider():
     from security_harness.scope import validate_model_roe
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match='^live\\ model\\ calls\\ are\\ outside\\ the\\ approved\\ model\\ RoE$'):
         validate_model_roe({**MODEL_ROE, "allowed_live_providers": ["gemini"]}, ["gemini", "bedrock"])
 
 
@@ -77,5 +77,24 @@ def test_planned_live_calls_must_fit_the_reviewed_per_run_cap(cap, planned, allo
     if allowed:
         assert validate_model_roe(roe, ["gemini"], planned) is roe
     else:
-        with pytest.raises(ValueError):
+        with pytest.raises(ValueError, match='^live\\ model\\ calls\\ are\\ outside\\ the\\ approved\\ model\\ RoE$'):
             validate_model_roe(roe, ["gemini"], planned)
+
+
+@pytest.mark.parametrize("version", [True, 1.0, "1", None])
+def test_rules_of_engagement_schema_version_is_an_exact_integer(version):
+    from security_harness.scope import validate_model_roe, validate_roe
+    roe = json.loads((Path(__file__).resolve().parents[1] / "security/roe.json").read_text())
+    with pytest.raises(ValueError, match="^RoE\\ exceeds\\ the\\ synthetic\\ loopback\\ pilot's\\ supported\\ scope$"):
+        validate_roe({**roe, "schema_version": version})
+    with pytest.raises(ValueError, match='^live\\ model\\ calls\\ are\\ outside\\ the\\ approved\\ model\\ RoE$'):
+        validate_model_roe({**MODEL_ROE, "schema_version": version}, ["mock"])
+
+
+@pytest.mark.parametrize("raw", ['[]', '{"schema_version": true, "entries": []}', '"text"'])
+def test_binary_allowlist_shape_is_checked_before_use(tmp_path, raw):
+    from security_harness.scan_content import load_binary_allowlist
+    path = tmp_path / "binary-allowlist.json"
+    path.write_text(raw)
+    with pytest.raises(ValueError, match='^invalid\\ binary\\ allowlist$'):
+        load_binary_allowlist(path)

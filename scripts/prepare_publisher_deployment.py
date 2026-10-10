@@ -19,7 +19,7 @@ if __name__ == "__main__":
     sys.path.insert(0, str(ROOT))
 from security_harness import candidate_git
 from security_harness.results import subject_digest, validate_policy, executable_bits
-from security_harness.trusted_publisher import Denied, need, strict_json, validate_settings
+from security_harness.trusted_publisher import GITHUB_ACTIONS_APP_ID, Denied, need, strict_json, validate_settings
 
 
 def archive_digest(data):
@@ -60,7 +60,7 @@ def prepare(root, output, evaluator_sha, app_id=None, installation_id=None):
     need(not status.stdout, "EVALUATOR_NOT_CLEAN")
     for value in (app_id, installation_id):
         need(value is None or type(value) is int and value > 0, "APP_IDENTIFIERS")
-    need(app_id != 15368, "SHARED_ACTIONS_APP")
+    need(app_id != GITHUB_ACTIONS_APP_ID, "SHARED_ACTIONS_APP")
     raw_policy = (root / "security/policy.json").read_bytes()
     policy = strict_json(raw_policy)
     validate_policy(policy)
@@ -103,11 +103,15 @@ def prepare(root, output, evaluator_sha, app_id=None, installation_id=None):
 
 
 def main():
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--evaluator-sha", required=True)
-    parser.add_argument("--app-id", type=int)
-    parser.add_argument("--installation-id", type=int)
-    parser.add_argument("--output-dir", type=Path, required=True)
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--evaluator-sha", required=True,
+                        help='已核准並合併的 evaluator 完整 commit SHA / approved, merged evaluator commit SHA')
+    parser.add_argument("--app-id", type=int,
+                        help='專用 GitHub App ID，未建立時省略 / dedicated GitHub App ID; omit until registered')
+    parser.add_argument("--installation-id", type=int,
+                        help='App 安裝 ID，未建立時省略 / App installation ID; omit until installed')
+    parser.add_argument("--output-dir", type=Path, required=True,
+                        help='儲存庫外的新輸出目錄，不可覆寫 / new output directory outside the repository; never overwritten')
     args = parser.parse_args()
     try:
         result = prepare(ROOT, args.output_dir, args.evaluator_sha, args.app_id, args.installation_id)

@@ -30,3 +30,27 @@ WORKER_RLIMITS = {
 
 class ResourceLimit(ValueError):
     pass
+
+# 模型 worker 的上限；突變 worker 須獨立執行，自行定義。 / Model worker ceilings; the standalone mutation worker
+# defines its own.
+MODEL_WORKER_RLIMITS = {
+    "address_space_bytes": 2 * 1024**3,
+    "per_process_data_bytes": 512 * 1024**2,
+    "per_process_cpu_seconds": 30,
+    "per_file_output_bytes": 1024**2,
+    "file_descriptors": 128,
+}
+
+
+def apply_rlimits(limits, cpu_grace=5):
+    """在目前程序套用 rlimits；CPU 硬上限多給寬限秒數以便收到 SIGXCPU。
+
+Apply rlimits to this process; the CPU hard limit adds grace so SIGXCPU arrives first."""
+    import resource
+    resource.setrlimit(resource.RLIMIT_AS, (limits["address_space_bytes"],) * 2)
+    resource.setrlimit(resource.RLIMIT_DATA, (limits["per_process_data_bytes"],) * 2)
+    resource.setrlimit(resource.RLIMIT_FSIZE, (limits["per_file_output_bytes"],) * 2)
+    resource.setrlimit(resource.RLIMIT_CPU, (limits["per_process_cpu_seconds"],
+                                             limits["per_process_cpu_seconds"] + cpu_grace))
+    resource.setrlimit(resource.RLIMIT_NOFILE, (limits["file_descriptors"],) * 2)
+    resource.setrlimit(resource.RLIMIT_CORE, (0, 0))

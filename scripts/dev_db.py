@@ -105,17 +105,29 @@ def stop():
     print("Owned fixture stopped and disposable data removed")
 
 
-if __name__ == "__main__":
-    parser = argparse.ArgumentParser()
-    parser.add_argument("action", choices=["start", "stop", "status"])
-    args = parser.parse_args()
+# 退出碼：0 成功、2 參數錯誤（argparse）、3 基礎設施錯誤。 / Exit codes: 0 success, 2 usage (argparse),
+# 3 infrastructure failure.
+INFRASTRUCTURE_ERROR = 3
+
+
+def main(argv=None):
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("action", choices=["start", "stop", "status"],
+                        help="啟動、停止或查詢本機合成資料庫 / start, stop or query the local synthetic database")
+    args = parser.parse_args(argv)
     try:
         if args.action == "start":
             start()
         elif args.action == "stop":
             stop()
         else:
-            print("running" if owned() and owned()["State"]["Running"] else "stopped")
+            container = owned()
+            print("running" if container and container["State"]["Running"] else "stopped")
     except Exception as exc:
         print(f"Fixture operation failed ({type(exc).__name__}); no credentials printed")
-        raise SystemExit(2)
+        return INFRASTRUCTURE_ERROR
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

@@ -28,7 +28,17 @@ from xml.etree import ElementTree
 
 from .inputs import excluded
 from .limits import LIMITS
-from .results import decide, seeded_defects, validate_cases, validate_policy
+from .results import EVIDENCE_VERSION, decide, seeded_defects, validate_cases, validate_policy
+
+# 共用 GitHub Actions App；同名檢查不能單憑此 ID 證明來源。 / The shared GitHub Actions App; this ID alone
+# never proves which workflow produced a same-named check.
+GITHUB_ACTIONS_APP_ID = 15368
+GUARD_SCHEMA_VERSION = 2
+# 冷快取時每個來源檔需要一次 blob 請求，預算須高於檔案上限。 / A cold cache costs one blob request per source
+# file, so the call budget must exceed the file ceiling.
+MAX_SOURCE_FILES = 500
+API_CALL_BUDGET = 600
+API_SECONDS = 240
 
 SHA = re.compile(r"[0-9a-f]{40}")
 DIGEST = re.compile(r"[0-9a-f]{64}")
@@ -67,7 +77,7 @@ def validate_settings(settings, gate_policy):
     need(re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", settings.get("repository", "")), "REPOSITORY")
     for key in ("repository_id", "app_id", "installation_id", "workflow_id", "minimum_regression_tests"):
         need(type(settings.get(key)) is int and settings[key] > 0, "SETTINGS_INCOMPLETE")
-    need(settings["app_id"] != 15368, "SHARED_ACTIONS_APP")
+    need(settings["app_id"] != GITHUB_ACTIONS_APP_ID, "SHARED_ACTIONS_APP")
     need(settings.get("base_branch") == "main" and settings.get("check_name") == "epsilon/trusted-merge", "CHECK_SCOPE")
     need(settings.get("workflow_path") == ".github/workflows/security.yml", "WORKFLOW_PATH")
     need(SHA.fullmatch(settings.get("evaluator_sha") or ""), "UNAPPROVED_EVALUATOR")
@@ -148,9 +158,14 @@ excluded: identities that touched the head (run actors, commit author/committer)
 
 
 REQUIRED_STEPS = ("Record evaluator-owned CI provenance", "Check protected changes and exact-head independent approval",
-                  "Evaluator regressions and isolation adversarial checks", "Offline security mutation checks", "Prove seeded defect still blocks",
+                  "Bilingual documentation checks / 雙語文件檢查", "Candidate documentation checks / 候選文件檢查",
+                  "Static checks / 靜態檢查",
+                  "Evaluator regressions and isolation adversarial checks", "Prove seeded defect still blocks",
                   "Evaluate candidate through external oracle", "Remove evaluator regression database",
                   "Reap cancelled security runs", "Retain evaluator-owned evidence")
+# 突變測試在獨立 job，有自己的期限。 / Mutation testing runs in its own job with its own deadline.
+MUTATION_STEPS = ("Offline security mutation checks", "Retain mutation report")
+COMPLETION_STEP = "Require evaluator, attestation and mutation success"
 CLEANUP_KEYS = ("completed", "temporary_directory_removed", "run_directory_removed", "process_group_terminated")
 
 
@@ -203,7 +218,7 @@ Artifact-only contract, shared by the publisher and the CI self-check.
     latest = evidence_file(files, "trusted/artifacts/latest.txt").decode().strip()
     need(re.fullmatch(r"[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}", latest), "LATEST_POINTER")
     report = strict_json(evidence_file(files, f"trusted/artifacts/{latest}/report.json"))
-    need(report.get("schema_version") == 3 and report.get("operation") == "security"
+    need(report.get("schema_version") == EVIDENCE_VERSION and report.get("operation") == "security"
          and report.get("variant") == "fixed" and report.get("run_id") == latest
          and report.get("execution") == "COMPLETED" and report.get("decision") == "ALLOW"
          and not report.get("errors"), "REPORT_NOT_ALLOW")
@@ -219,7 +234,7 @@ Artifact-only contract, shared by the publisher and the CI self-check.
     negative = [r for r in reports if r.get("operation") == "security" and r.get("variant") == "vulnerable"]
     need(len(negative) == 1, "NEGATIVE_EVIDENCE_MISSING")
     negative = negative[0]
-    need(negative.get("schema_version") == 3 and negative.get("execution") == "COMPLETED"
+    need(negative.get("schema_version") == EVIDENCE_VERSION and negative.get("execution") == "COMPLETED"
          and negative.get("decision") == "BLOCK" and not negative.get("errors")
          and negative.get("subject_digest") == settings["evaluator_digest"]
          and negative.get("evaluator_digest") == settings["evaluator_digest"]
@@ -262,22 +277,25 @@ def validate_bundle(settings, gate_policy, pr, run, newer_runs, jobs, files, rev
     need(type(run["run_attempt"]) is int and run["run_attempt"] >= 1, "RUN_ATTEMPT")
     reject_newer_runs(run, newer_runs, pr["head"]["sha"])
     named = {j["name"]: j for j in jobs}
-    need(len(jobs) == len(named) == 3
-         and set(named) == {"trusted-security-evaluation", "Attest evaluator-owned evidence", "trusted-security-pilot"}
+    need(len(jobs) == len(named) == 4
+         and set(named) == {"trusted-security-evaluation", "trusted-mutation-tests",
+                            "Attest evaluator-owned evidence", "trusted-security-pilot"}
          and all(j["conclusion"] == "success" for j in jobs), "JOB_SOURCE")
     steps = {s["name"]: s["conclusion"] for s in named["trusted-security-evaluation"]["steps"]}
     need(all(steps.get(s) == "success" for s in REQUIRED_STEPS), "REQUIRED_STEP_INCOMPLETE")
+    mutation = {s["name"]: s["conclusion"] for s in named["trusted-mutation-tests"]["steps"]}
+    need(all(mutation.get(s) == "success" for s in MUTATION_STEPS), "MUTATION_STEP_INCOMPLETE")
     signing = named["Attest evaluator-owned evidence"]["steps"]
     need(any(s["name"] == "Sign evaluator-owned evidence" and s["conclusion"] == "success"
              for s in signing), "ATTESTATION_STEP_INCOMPLETE")
     completion = named['trusted-security-pilot']['steps']
-    need(any(s['name'] == 'Require evaluator and attestation success' and s['conclusion'] == 'success'
+    need(any(s['name'] == COMPLETION_STEP and s['conclusion'] == 'success'
              for s in completion), 'COMPLETION_STEP_INCOMPLETE')
     excluded = {person["login"] for person in (run.get("actor"), run.get("triggering_actor"))
                 if isinstance(person, dict) and person.get("login")} | set(commit_identities)
     approvals = validate_review(pr, reviews, permissions, settings, excluded)
     guard = strict_json(evidence_file(files, "audit/trusted-guard.json"))
-    need(guard.get("schema_version") == 2 and guard.get("decision") == "ALLOW"
+    need(guard.get("schema_version") == GUARD_SCHEMA_VERSION and guard.get("decision") == "ALLOW"
          and guard.get("base_sha") == pr["base"]["sha"] and guard.get("candidate_sha") == pr["head"]["sha"]
          and guard.get("approval_error") is None, "TRUSTED_GUARD")
     if guard.get("protected_changes"):
@@ -301,7 +319,7 @@ class GitHub:
     def __init__(self, token):
         self.token = token
         self.calls = 0
-        self.deadline = time.monotonic() + 240
+        self.deadline = time.monotonic() + API_SECONDS
         self.opener = urllib.request.build_opener(NoRedirect())
 
     def raw(self, url, method="GET", payload=None, authenticated=True, limit=2 * 1024**2):
@@ -309,7 +327,7 @@ class GitHub:
         need(parsed.scheme == "https" and not parsed.username and not parsed.password and parsed.port in (None, 443), "API_URL")
         need(not authenticated or parsed.netloc == "api.github.com", "AUTH_DESTINATION")
         self.calls += 1
-        need(self.calls <= 300 and time.monotonic() < self.deadline, "API_BUDGET")
+        need(self.calls <= API_CALL_BUDGET and time.monotonic() < self.deadline, "API_BUDGET")
         headers = {"Accept": "application/vnd.github+json", "X-GitHub-Api-Version": "2022-11-28"}
         if authenticated:
             headers["Authorization"] = "Bearer " + self.token
@@ -400,7 +418,7 @@ blob_cache maps verified Git blob IDs to SHA-256. Blob IDs are content
         # 大小上限，不沿用掃描器串流檔案上限。 / ceiling than the scanner's streaming file allowance.
         need(type(size) is int and 0 <= size <= min(LIMITS.max_file_bytes, 1024**2)
              and total <= min(LIMITS.max_input_bytes, 20 * 1024**2)
-             and len(files) < min(LIMITS.max_files, 200), "SOURCE_LIMIT")
+             and len(files) < min(LIMITS.max_files, MAX_SOURCE_FILES), "SOURCE_LIMIT")
         blob_sha = entry["sha"]
         need(SHA.fullmatch(blob_sha), "BLOB_SHA")
         if blob_sha not in contents:
@@ -461,6 +479,7 @@ Bind a pull_request_target run to this PR's base without trusting run evidence.
     new head branch can be evaluated normally. Timelines must be complete API data.
     """
     head = pr["head"]["sha"]
+    need(run.get("head_sha") == head, "RUN_SHA")
     head_repo = (pr["head"].get("repo") or {}).get("id")
     need(head_repo is not None and run.get("head_branch") == pr["head"].get("ref")
          and (run.get("head_repository") or {}).get("id") == head_repo, "RUN_HEAD_BRANCH")
@@ -495,6 +514,30 @@ Accounts GitHub attributes any PR commit to. Self-asserted, so only ever used to
     return set().union(*(identities(c.get("author"), c.get("committer")) for c in commits))
 
 
+def open_config(path, owner_uid):
+    """逐層開啟可信目錄 descriptor；僅保護檔案擁有者，無法防止可寫上層目錄或中途符號連結的替換。
+
+Walk trusted directory descriptors; a file's owner alone cannot protect it
+    from replacement through a writable parent or an intermediate symlink."""
+    need(".." not in path.parts, "CONFIG_PARENT")
+    directory = os.open("/", os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    try:
+        for part in path.parts[1:-1]:
+            try:
+                next_directory = os.open(part, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=directory)
+            except OSError:
+                raise Denied("CONFIG_PARENT") from None
+            os.close(directory)
+            directory = next_directory
+            info = os.fstat(directory)
+            # root 擁有的 sticky 目錄可保護其 root 子目錄。 / Root-owned sticky directories (e.g. /tmp) protect root-owned children.
+            sticky_root = info.st_uid == 0 and info.st_mode & stat.S_ISVTX
+            need(info.st_uid in (0, owner_uid) and (not info.st_mode & 0o022 or sticky_root), "CONFIG_PARENT")
+        return os.open(path.name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=directory)
+    finally:
+        os.close(directory)
+
+
 def verify_artifact_attestation(client, settings, run, raw):
     """以固定驗證器處理密碼學，再把已驗證 SLSA 綁定精確 run attempt；artifact JSON 本身不是來源身分。離線 bundle 避免子程序取得安裝權杖或模型金鑰。
 
@@ -503,7 +546,6 @@ Use a pinned verifier for cryptography, then bind its verified SLSA statement
     Offline bundles avoid giving the subprocess the installation token or model keys.
     """
     from .processes import bounded_output
-    from scripts.publish_trusted_check import open_config
     binary = Path(settings["attestation_verifier"])
     fd = open_config(binary, 0)
     with os.fdopen(fd, "rb") as stream:

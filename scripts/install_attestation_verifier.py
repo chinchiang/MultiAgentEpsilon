@@ -31,7 +31,8 @@ def verified_binary(body, pin):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--output', type=Path, required=True)
+    parser.add_argument('--output', type=Path, required=True,
+                        help='安裝結果 JSON 路徑 / installation result JSON path')
     args = parser.parse_args()
     if platform.system() != 'Linux' or platform.machine() != 'x86_64':
         parser.error('Only the reviewed Linux x86_64 release is supported.')

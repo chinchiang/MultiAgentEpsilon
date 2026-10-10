@@ -172,5 +172,18 @@ def test_reviewer_who_pushed_an_earlier_pr_commit_cannot_approve(monkeypatch):
 ])
 def test_incomplete_pr_commit_listing_fails_closed(monkeypatch, commits):
     from security_harness.trusted_publisher import Denied
-    with pytest.raises(Denied):
+    with pytest.raises(Denied, match='^(?:PR_COMMITS_HEAD|PR_COMMITS_TRUNCATED)$'):
         guard_with_commits(monkeypatch, commits)()
+
+
+@pytest.mark.parametrize("change", [{"require_independent_author": False}, {"require_independent_author": None},
+                                    {"schema_version": 2}])
+def test_guard_refuses_trust_policy_it_cannot_enforce(tmp_path, monkeypatch, change):
+    import scripts.check_trusted_changes as guard
+    policy = json.loads((Path(__file__).resolve().parents[1] / "security/trust-policy.json").read_text())
+    (tmp_path / "security").mkdir()
+    (tmp_path / "security/trust-policy.json").write_text(json.dumps({**policy, **change}))
+    monkeypatch.setattr(guard, "ROOT", tmp_path)
+    monkeypatch.setattr(guard.subprocess, "check_output", lambda *a, **k: pytest.fail("GitHub must not be queried"))
+    with pytest.raises(ValueError, match="unsupported trust policy"):
+        guard.live_approval(7, "h" * 40, "b" * 40)

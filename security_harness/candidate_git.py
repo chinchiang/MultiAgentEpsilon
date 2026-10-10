@@ -15,6 +15,8 @@ OVERRIDES = (
     "core.hooksPath=/dev/null",
     "core.untrackedCache=false",
     "protocol.allow=never",
+    # 候選不可把提交中繼資料轉成掃描器讀不懂的編碼。 / The candidate cannot re-encode commit metadata away from the scanner.
+    "i18n.logOutputEncoding=UTF-8",
 )
 
 
@@ -22,7 +24,9 @@ def environment() -> dict:
     env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
     env.update(GIT_CONFIG_NOSYSTEM="1", GIT_CONFIG_GLOBAL=os.devnull, GIT_OPTIONAL_LOCKS="0",
                GIT_TERMINAL_PROMPT="0", GIT_NO_LAZY_FETCH="1", GIT_NO_REPLACE_OBJECTS="1",
-               GIT_ATTR_NOSYSTEM="1", LC_ALL="C")
+               GIT_ATTR_NOSYSTEM="1", LC_ALL="C",
+               # 候選的 .git/info/grafts 不能截斷要掃描的歷史。 / A candidate's .git/info/grafts cannot truncate scanned history.
+               GIT_GRAFT_FILE=os.devnull)
     return env
 
 

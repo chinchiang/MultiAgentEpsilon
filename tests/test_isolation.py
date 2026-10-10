@@ -105,5 +105,73 @@ def test_candidate_socket_symlink_never_connects_host_endpoint(tmp_path):
         app.write_text(source)
         with pytest.raises(RuntimeError, match="container HTTP request failed"):
             run_isolated(candidate)
-        with pytest.raises(socket.timeout):
+        with pytest.raises(socket.timeout, match='^timed\\ out$'):
             listener.accept()
+
+
+def inspected(**host_overrides):
+    """合成 docker inspect 結果，對應 run_flags 實際套用的值。 / Synthetic docker inspect data matching run_flags."""
+    from security_harness import isolation
+    host = {"NetworkMode": "none", "ReadonlyRootfs": True, "Privileged": False, "CapDrop": ["ALL"], "CapAdd": None,
+            "SecurityOpt": ["no-new-privileges"], "Memory": isolation.MEMORY_BYTES,
+            "MemorySwap": isolation.MEMORY_BYTES, "PidsLimit": isolation.PIDS_LIMIT, "NanoCpus": 1_000_000_000,
+            "Ulimits": [{"Name": "nofile", "Soft": isolation.NOFILE_LIMIT, "Hard": isolation.NOFILE_LIMIT}]}
+    host.update(host_overrides)
+    return {"HostConfig": host, "Config": {"User": "10001:10001", "Image": "ref"}, "Image": "sha256:" + "a" * 64,
+            "Mounts": [{"Destination": "/candidate"}]}
+
+
+def test_verified_container_records_every_checked_control():
+    from security_harness.isolation import verify_container
+    evidence = verify_container(inspected(), user="10001:10001", image_id="sha256:" + "a" * 64, image_ref="ref")
+    assert evidence["network"] == "none" and evidence["mount_destinations"] == ["/candidate"]
+    assert set(evidence["verified"]) == {"network", "readonly_root", "privileged", "cap_drop", "no_new_privileges",
+                                         "memory", "pids", "cpus", "nofile", "user", "image"}
+
+
+@pytest.mark.parametrize("override,field", [
+    ({"NetworkMode": "bridge"}, "network"), ({"ReadonlyRootfs": False}, "readonly_root"),
+    ({"Privileged": True}, "privileged"), ({"CapDrop": []}, "cap_drop"), ({"CapAdd": ["NET_RAW"]}, "cap_drop"),
+    ({"SecurityOpt": []}, "no_new_privileges"), ({"Memory": 0}, "memory"), ({"MemorySwap": -1}, "memory"),
+    ({"PidsLimit": None}, "pids"), ({"NanoCpus": 0}, "cpus"), ({"Ulimits": None}, "nofile"),
+])
+def test_any_weakened_isolation_control_is_refused(override, field):
+    from security_harness.isolation import verify_container
+    with pytest.raises(RuntimeError, match=f"mismatch: {field}"):
+        verify_container(inspected(**override), user="10001:10001")
+
+
+@pytest.mark.parametrize("kwargs,field", [
+    ({"user": "0:0"}, "user"),
+    ({"user": "10001:10001", "image_id": "sha256:" + "b" * 64}, "image"),
+    ({"user": "10001:10001", "image_ref": "other"}, "image"),
+])
+def test_wrong_user_or_image_is_refused(kwargs, field):
+    from security_harness.isolation import verify_container
+    with pytest.raises(RuntimeError, match=f"mismatch: {field}"):
+        verify_container(inspected(), **kwargs)
+
+
+def test_runtime_image_lock_drops_only_test_tooling_and_keeps_hashes():
+    from scripts.build_runtime import TEST_ONLY, runtime_requirements
+    from security_harness.preflight import parse_lock
+    source = (ROOT / "requirements.lock").read_text()
+    text, excluded = runtime_requirements(source)
+    assert excluded == sorted(TEST_ONLY)
+    approved = {r["name"]: r for r in parse_lock(ROOT / "requirements.lock")}
+    path = ROOT / ".state" / "runtime-lock-test.txt"
+    try:
+        path.write_text(text)
+        kept = {r["name"]: r for r in parse_lock(path)}
+    finally:
+        path.unlink(missing_ok=True)
+    assert set(kept) == set(approved) - TEST_ONLY
+    assert all(kept[n]["version"] == approved[n]["version"] and kept[n]["hashes"] == approved[n]["hashes"] for n in kept)
+
+
+def test_runtime_image_lock_refuses_a_changed_test_tool_set():
+    from scripts.build_runtime import runtime_requirements
+    source = (ROOT / "requirements.lock").read_text()
+    without_pytest = "\n".join(l for l in source.split("\n") if not l.startswith("pytest=="))
+    with pytest.raises(ValueError, match="test-only"):
+        runtime_requirements(without_pytest)

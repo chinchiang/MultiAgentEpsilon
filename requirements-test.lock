@@ -1,3 +1,5 @@
 # 離線測試工具，僅於安裝時使用網路 / Offline test tools; network needed only during installation.
 hypothesis==6.168.3 --hash=sha256:26928956c54748e4dfa587333741ab750246123b93484955646ff316cca27eef
 sortedcontainers==2.4.0 --hash=sha256:a163dcaede0f1c021485e957a39245190e74249897e2ae4b2aa38595db237ee0
+# 靜態檢查（pyflakes 規則），僅安裝於 evaluator 測試環境 / Static checks (pyflakes rules), evaluator test environment only.
+ruff==0.16.9 --hash=sha256:a21713e629d3e5bdb2f5c2def1cc7f04f47fa8e1a7eb0571b4a28e1da64bc728

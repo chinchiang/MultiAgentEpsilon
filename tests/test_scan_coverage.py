@@ -7,7 +7,6 @@ import subprocess
 import tarfile
 import zipfile
 from dataclasses import replace
-from pathlib import Path
 
 import pytest
 from security_harness import secrets as scanner, inputs
@@ -63,14 +62,14 @@ def test_secret_removed_from_compressed_history_is_detected(tmp_path):
 @pytest.mark.parametrize('data', [b'\xff\x00\xfe', b'\x00synthetic', b'\x1f\x8bbroken'])
 def test_unknown_or_corrupt_content_never_claims_complete(tmp_path, data):
     (tmp_path / 'data').write_bytes(data)
-    with pytest.raises((UnsupportedContent, OSError, EOFError)):
+    with pytest.raises((UnsupportedContent, OSError, EOFError), match='Compressed file ended before the end-of-stream marker was reached|binary content needs an adapter'):
         run(tmp_path)
 
 
 def test_expansion_bomb_is_stopped_at_small_budget(tmp_path, monkeypatch):
     (tmp_path / 'data').write_bytes(gzip.compress(b'x' * 100000))
     monkeypatch.setattr(scanner, 'LIMITS', replace(LIMITS, max_expanded_bytes=2048))
-    with pytest.raises(ResourceLimit):
+    with pytest.raises(ResourceLimit, match='^expanded\\ content\\ byte\\ limit\\ exceeded$'):
         run(tmp_path)
 
 
@@ -79,7 +78,7 @@ def test_archive_depth_is_bounded(tmp_path):
     for _ in range(4):
         data = gzip.compress(data)
     (tmp_path / 'nested').write_bytes(data)
-    with pytest.raises(ResourceLimit):
+    with pytest.raises(ResourceLimit, match='^archive\\ recursion\\ depth\\ exceeded$'):
         run(tmp_path)
 
 
@@ -87,7 +86,7 @@ def test_zip_path_traversal_is_refused_without_extraction(tmp_path):
     path = tmp_path / 'payload'
     with zipfile.ZipFile(path, 'w') as output:
         output.writestr('../escape.txt', 'synthetic')
-    with pytest.raises(UnsupportedContent):
+    with pytest.raises(UnsupportedContent, match='^unsafe\\ archive\\ member\\ name$'):
         run(tmp_path)
     assert not (tmp_path.parent / 'escape.txt').exists()
 
@@ -97,7 +96,7 @@ def test_aggregate_source_limit_applies_before_digest(tmp_path, monkeypatch):
     for name in ('a', 'b'):
         (tmp_path / name).write_text('x' * 60)
     monkeypatch.setattr(inputs, 'LIMITS', replace(LIMITS, max_input_bytes=100))
-    with pytest.raises(ResourceLimit):
+    with pytest.raises(ResourceLimit, match='^input\\ byte\\ or\\ file\\ limit\\ exceeded$'):
         subject_digest(tmp_path)
 
 
@@ -141,7 +140,7 @@ def test_secret_embedded_in_reviewed_binary_is_still_found(tmp_path, encoding):
 def test_changed_binary_needs_a_new_review(tmp_path):
     reviewed = png_like(b'version-one')
     (tmp_path / 'asset.bin').write_bytes(png_like(b'version-two'))
-    with pytest.raises(UnsupportedContent):
+    with pytest.raises(UnsupportedContent, match='^binary\\ content\\ needs\\ an\\ adapter\\ or\\ a\\ reviewed\\ digest\\ in\\ the\\ binary\\ allowlist$'):
         scan_with(tmp_path, allowlist(tmp_path, reviewed))
 
 
@@ -252,7 +251,7 @@ def tar_directory_with_data(canary):
                                    tar_with_trailing_data, tar_directory_with_data])
 def test_unaccounted_archive_bytes_block(tmp_path, build):
     (tmp_path / 'bundle.bin').write_bytes(build(canary_bytes()))
-    with pytest.raises(UnsupportedContent):
+    with pytest.raises(UnsupportedContent, match='^(?:data\\ after\\ tar\\ end\\-of\\-archive|directory\\ archive\\ member\\ carries\\ data|unaccounted\\ zip\\ bytes)$'):
         run(tmp_path)
 
 

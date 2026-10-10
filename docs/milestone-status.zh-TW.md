@@ -4,11 +4,11 @@
 
 # 第一個里程碑：實作狀態與驗收方式
 
-本文件記錄**現況與可辨識的歷史驗收**（2026-10-09）。PR #18 已獲獨立核准並合併至 `main`（`218fd7a`）。合併後的 [CI 執行 37866429806](https://github.com/chinchiang/MultiAgentEpsilon/actions/runs/37866429806) 通過 883 項測試，修正版 32 個案例／0 項缺陷為 ALLOW，指定缺陷版 32 個案例／9 項缺陷為 BLOCK；清理、證據摘要與真實簽章均已核對。專用 GitHub App 部署與真實 LM Studio 驗收仍待完成。各批次的原始紀錄與當時數字保留於[里程碑歷史紀錄](milestone-history.zh-TW.md)。
+本文件記錄**現況與可辨識的歷史驗收**（2026-10-10）。正式 main `28be2e0` 已合併 PR #20，合併後的 [CI 執行 37911499955](https://github.com/chinchiang/MultiAgentEpsilon/actions/runs/37911499955) 成功：930 項測試，修正版 32 個案例／0 項缺陷為 ALLOW，指定缺陷版 32 個案例／9 項缺陷為 BLOCK，清理與真實簽章均通過。[2026-10-10 稽核修正](audit-20261010.zh-TW.md)把 AUTH 擴為 44 個案例、測試增為 1149 項，合併後才成為新基準。專用 GitHub App 部署與真實 LM Studio 驗收仍待完成。各批次的原始紀錄與當時數字保留於[里程碑歷史紀錄](milestone-history.zh-TW.md)。
 
 ## 遠端治理
 
-- main 由規則集 24512048 保護：沒有 bypass、須經 PR 與 code owner 核准、推送新 commit 後舊核准失效、最後推送須另獲核准、未歸屬變更需額外核准，必要檢查為 GitHub Actions App 15368 的 `trusted-security-pilot`。最新狀態以 `python3 -I scripts/audit_merge_protection.py` 讀回為準。
+- main 由規則集 24512048 保護：沒有 bypass、須經 PR 與 code owner 核准、推送新 commit 後舊核准失效、最後推送須另獲核准、未歸屬變更需額外核准，必要檢查為 GitHub Actions App 15368 的 `trusted-security-pilot`。最新狀態以 `python3 -I scripts/audit_merge_protection.py --pr <編號>` 讀回為準。
 - 目前可信清單為 chinchiang、CatGrocery 與 d98922036ntu；CatGrocery 已接受協作邀請並具 write 權限（2026-10-07 讀回）。PR #14 已合併這項清單變更，三處設定一致；d98922036ntu 的 write 權限已於 2026-10-08 讀回確認。之後的 PR 依規則合併，不需再停用規則集；涉及受保護路徑的 PR，guard 另需具寫入權限、非作者、且未曾提交 PR 中任何 commit 的基準審查者核准。作者為 chinchiang 的 PR 在這項變更合併後可由 CatGrocery 或 d98922036ntu 獨立核准。
 - 首次基準遷移已於 2026-10-06 完成：擁有者暫時停用規則集，以 merge commit 合併 #6（`da567d8`）與 #7（`0ac31cb`）。文件 PR #10 也在規則集停用期間合併，沒有審查紀錄；之後規則集已恢復 active。
 - 必要檢查仍可由其他 workflow 以同名產生。`pull_request_target` 執行的是 PR **base 分支**上的 workflow，run 中繼資料不記錄 base；因此審查者在核准或合併前執行 `python3 -I scripts/verify_required_check.py --pr <編號>`，它要求檢查來自 `pull_request_target`、run 的 head 分支與此 PR 相同，且同一 SHA／head repository／分支沒有其他 base 或曾改 base 的 PR（含已關閉者）。專用 App 的 `epsilon/trusted-merge` 尚未建立、部署或綁定。
@@ -54,15 +54,14 @@ PR #12 已由 CatGrocery 對最新 head `58d9bc0` 獨立核准，正式 [run 375
 **需擁有者決定或操作：**
 
 1. **決定是否清除 git 歷史中的 AWS 帳號識別資訊。** 目前文件已移除，但 commit `2158448` 起的歷史仍含該帳號 ID 與權限集名稱；帳號 ID 不是 API 金鑰；完全移除需另行核准的歷史改寫與協作安排，本輪不暫停規則集或強推，且公開期間可能已被快取。清除後可加入針對帳號 ID 的 Gitleaks 規則（歷史仍含該值時，加入規則會使每次掃描 BLOCK）。
-2. **開啟 repository 的 Secret scanning、Push Protection、Dependabot alerts 與 Private vulnerability reporting**（`SECURITY.md` 指向此回報管道）。
-3. **完成專用 App 消費與部署驗收。** PR #18 已經獨立核准並合併；main `218fd7a` 的 883 項測試及真實遠端簽章已驗證。待辦是受控主機上的 App 消費、必要檢查來源綁定及普通開發者拒絕探測，不能與已完成的簽章生成混為一談。
-4. 把 fork PR 的 workflow 核准政策改為所有外部貢獻者都需核准；開啟 Actions 的 SHA pinning 強制。
-5. 建立並部署專用 App、把 `epsilon/trusted-merge` 加入規則集，並以普通開發者身分完成繞過驗收。
-6. 選定授權條款（目前沒有 LICENSE，公開程式碼等同保留所有權利）。
+2. **開啟儲存庫的 Secret scanning、Push Protection、Dependabot alerts 與 Private vulnerability reporting**（`SECURITY.md` 指向此回報管道）。
+3. 把 fork PR 的 workflow 核准政策改為所有外部貢獻者都需核准；開啟 Actions 的 SHA pinning 強制。
+4. **建立並部署專用 App。** main 的簽章已在真實遠端驗證；待辦是受控主機上的 App 消費、把 `epsilon/trusted-merge` 加入規則集，並以普通開發者身分完成拒絕與繞過探測，不能與已完成的簽章生成混為一談。
+5. 選定授權條款（目前沒有 LICENSE，公開程式碼等同保留所有權利）。
 
 **功能面：** G3、完整 G5、其他生態系的 SBOM／SCA／CVE、ASVS 產品適用性判定、正式發布、GLM 真實推論與結構化輸出（依使用者指示暫停）、較大樣本的跨家族穩定性與偏誤實驗，以及 W15–W25。
 
-**已知限制：** 本地完整流程僅支援 Linux x86_64、Python 3.12 與 Docker（Windows 需使用 WSL）；Starlette TestClient 仍有一項 httpx 棄用警告，遷移前需先做相容性評估。
+**已知限制：** 本地完整流程僅支援 Linux x86_64、Python 3.12 與 Docker（Windows 需使用 WSL）。開發用 oracle 已改為本機 loopback 真實 HTTP，不再使用棄用的 TestClient；pytest 現在把任何警告視為失敗。
 
 ## 可重現驗收
 
@@ -73,7 +72,7 @@ PR #12 已由 CatGrocery 對最新 head `58d9bc0` 獨立核准，正式 [run 375
 - `<run-id>/report.json`：每次新 run 的 G1、G2、AUTH 結果及 ALLOW／BLOCK；本輪候選缺陷版預期恰好 9 個政策指定的 AUTH findings，修正版預期 0。
 - `latest.txt`：最新 run 的索引。檢查 report 的 subject／policy digest 與當次原始碼，不能將舊報告當成本次結果。
 
-`expect_block.py` 要求整個 run 的 `execution` 為 COMPLETED、沒有任何 errors、清理完成、variant 為 vulnerable、三項 gate 都確實完成、G1／G2 無 findings，且本輪候選 32 個授權案例中失敗的恰好是政策 `seeded_defect_case_ids` 列出的 9 個；工具 ERROR、清理失敗、來源在執行中變動、沒有案例或換成其他案例失敗都會使驗收失敗。
+`expect_block.py` 要求整個 run 的 `execution` 為 COMPLETED、沒有任何 errors、清理完成、variant 為 vulnerable、三項 gate 都確實完成、G1／G2 無 findings，且 44 個授權案例中失敗的恰好是政策 `seeded_defect_case_ids` 列出的 9 個；工具 ERROR、清理失敗、來源在執行中變動、沒有案例或換成其他案例失敗都會使驗收失敗。
 
 測試數量以 pytest 收集的項目計算（含 parametrize 展開），不是 `def test_` 的函式數。
 
@@ -87,10 +86,10 @@ W 編號與 G0–G6 閘門編號都來自本地保留的原始規劃。依公開
 | W02 | 公開程式碼與操作文件已發布 | 內部參考資料保留本地。 |
 | W03 | 固定 checksum／digest、wheel-only、DB 限權、候選 git 強化 | 不受信 PR／惡意套件的強隔離（VM／microVM）尚未驗證。 |
 | W04 | 嚴格狀態、必要 coverage 與歷史、subject／policy 綁定；main 真實簽章已驗證 | 專用 App 消費與正式發布。 |
-| W05、W09 | main 已有 32 案例／七種變體 | 完整 G5。 |
+| W05、W09 | main 已有 32 案例／七種變體；本次審視擴為 44 案例／九種變體 | 完整 G5。 |
 | W06、W20 | G1 metadata、鎖定檔 SBOM／OSV SCA 與 G2 | G1 行為分析、安裝映像及其他生態系、G3。 |
 | W08 | main 規則集 active、遠端正反例、run 與 PR base 綁定、全 commit 核准排除 | 專用可信檢查來源與普通開發者繞過驗收；main artifact attestation 已驗證。 |
-| W10–W14 | gateway、模型 adapter、盲測與多輪框架；Gemini／Claude 真實小樣本驗收 | LM Studio 真實推論、較大樣本的穩定性與偏誤實驗；GLM 真實連線暫停。 |
+| W10–W14 | gateway、模型 adapter、盲測與多輪框架；Gemini／Claude 真實小樣本驗收；LM Studio 文字介接器 | LM Studio 真實推論、較大樣本的穩定性與偏誤實驗；GLM 真實連線暫停。 |
 | W15–W19 | 待完成 | 產品適用性、簽章證據、完整 release、營運與正式資料／預算治理。 |
 | W21 | 限縮本地 RoE；模型 RoE 呼叫上限實際執行 | 任意網路掃描、redirect／DNS／工具委派與外部資產授權。 |
 | W22–W25 | 待完成 | 一手來源查核、組織成熟度評分、供應商驗收及產品弱點處理。 |
@@ -107,7 +106,7 @@ W 編號與 G0–G6 閘門編號都來自本地保留的原始規劃。依公開
 
 # Milestone status and acceptance
 
-Current reviewed main is `218fd7a` (2026-10-09), including independently approved PR #18. [Run 37866429806](https://github.com/chinchiang/MultiAgentEpsilon/actions/runs/37866429806) passed 883 tests, fixed 32/0 and seeded 32/9 AUTH, cleanup, evidence digests, and real signature verification. Dedicated GitHub App deployment and real LM Studio acceptance remain pending. Original dated totals remain in [history](milestone-history.zh-TW.md#en).
+Current reviewed main is `28be2e0` (2026-10-10), including PR #20. [Run 37911499955](https://github.com/chinchiang/MultiAgentEpsilon/actions/runs/37911499955) succeeded with 930 tests, fixed 32/0 and seeded 32/9 AUTH, cleanup and real signatures. The [October 10 audit](audit-20261010.zh-TW.md#en) expands AUTH to 44 cases and the suite to 1149 tests; it becomes the baseline after merge. Dedicated GitHub App deployment and real LM Studio acceptance remain pending. Original dated totals remain in [history](milestone-history.zh-TW.md#en).
 
 ## Remote governance
 
@@ -118,26 +117,28 @@ Initial October 6 migration temporarily disabled rules and merged #6 da567d8 and
 | Historical October 6 scenario | Run | Result |
 |---|---|---|
 | #7 retargeted to main | 37446641158 | Base da567d8 evaluator;29 protected changes/no independent approval blocked before candidate execution; check on head |
-| Main push0ac31cb | 37446694680 |532 tests;18/0 ALLOW, exact 6 seeded BLOCK; PUBLISHABLE |
+| Main push 0ac31cb | 37446694680 |532 tests;18/0 ALLOW, exact 6 seeded BLOCK; PUBLISHABLE |
 | #8 admin cross-tenant mutation | 37447163081 | Then-current fixture exemption allowed guard;532 evaluator tests, one precise candidate AUTH finding/BLOCK |
 | #9 removes AUTH policy | 37447183081 | Protected-policy guard BLOCK |
 | #10 Markdown-only | 37448552469 | Then-current guard passed, full trusted run succeeded; merge occurred while rules disabled without reviews |
 
-Historical exemptions no longer apply: all paths now need review. Live source verification rejected #5 head9a47966's manual candidate green as UNTRUSTED_CHECK_SOURCE; #7's real but failed run as LATEST_CHECK_NOT_SUCCESS. October 7 readback accepted #10's base binding and rejected #7-as-#10 with RUN_HEAD_BRANCH.
+Historical exemptions no longer apply: all paths now need review. Live source verification rejected #5 head 9a47966's manual candidate green as UNTRUSTED_CHECK_SOURCE; #7's real but failed run as LATEST_CHECK_NOT_SUCCESS. October 7 readback accepted #10's base binding and rejected #7-as-#10 with RUN_HEAD_BRANCH.
 
 ## October 7 implementation/acceptance
 
-Manual candidate607b8c6 run 37567019081:610 passes/no failures,18/0 ALLOW, exact 6 BLOCK, own-candidate G2 history heads, PUBLISHABLE610. PR #12 received CatGrocery exact-head58d9bc0 approval. Formal run 37568335787 attempt2 used old main's532 tests and verified source/digests/18 positive/six seeded/cleanup. It merged under active/no-bypass rules as41339c6; main run 37598381087 used new 610-test baseline/PUBLISHABLE. Old/new test totals must not be mixed.
+Manual candidate 607b8c6 run 37567019081:610 passes/no failures, 18/0 ALLOW, exact 6 BLOCK, own-candidate G2 history heads, PUBLISHABLE 610. PR #12 received CatGrocery exact-head58d9bc0 approval. Formal run 37568335787 attempt 2 used old main's532 tests and verified source/digests/18 positive/six seeded/cleanup. It merged under active/no-bypass rules as 41339c6; main run 37598381087 used new 610-test baseline/PUBLISHABLE. Old/new test totals must not be mixed.
 
 Fixes hardened candidate Git configuration/hooks/transports/environment/.git discovery; required candidate-owned history; scanned archive metadata/unlisted payload/trailing bytes; required exact clean expect_block completion; blocked worker decisions without cleanup handoff; preserved latest index during janitor; bound required checks to PR source; excluded every PR commit author/committer with 250-list fail-closed cap; enforced actual live RoE count/catalog binding/fixed stop reasons/placeholder rejection/redacted model labels. Credential-free CLI overbudget tests cannot make paid calls, and cleanup removes only all-mock evidence. Event-specific workflow concurrency, no-follow reads, fixed Docker daemon, centralized rlimits, removed unused worker, and public account-ID redaction completed related fixes.
 
-Publisher rechecks mutable same-head PRs/timelines immediately before green, opens root-owned configuration through protected directory descriptors, and prepares immutable clean-checkout archives with exact evaluator/policy digests and SHA256SUMS. Seventeen new regressions brought that historical baseline to627. Preparation/offline/manual CI is not independent approval or live deployment.
+Publisher rechecks mutable same-head PRs/timelines immediately before green, opens root-owned configuration through protected directory descriptors, and prepares immutable clean-checkout archives with exact evaluator/policy digests and SHA256SUMS. Seventeen new regressions brought that historical baseline to 627. Preparation/offline/manual CI is not independent approval or live deployment.
 
 ## Remaining external work
 
-Owner decisions/actions: whether to separately authorize rewriting historical AWS account identifiers (not API secrets; may already be cached); enable/verify Secret scanning, Push Protection, Dependabot and private reporting with capable administrative access; choose a source license; provision dedicated App/installation/key/controlled Linux host and perform developer-role source/merge denial acceptance. Never paste credentials, disable rules, force-push history, or treat connector403 as an automatic-review denial. Current private-reporting enable attempt still returns403.
+Owner decisions/actions: whether to separately authorize rewriting historical AWS account identifiers (not API secrets; may already be cached); enable/verify Secret scanning, Push Protection, Dependabot and private reporting with capable administrative access; require approval for all outside-contributor fork workflows and enforce Actions SHA pinning; choose a source license; provision dedicated App/installation/key/controlled Linux host and perform developer-role source/merge denial acceptance. Never paste credentials, disable rules, force-push history, or treat connector 403 as an automatic-review denial. Current private-reporting enable attempt still returns 403.
 
-Deployment must use approved merged main and explicit regenerated evaluator/policy pins, not a candidate. Reviewed main `218fd7a` is the accepted source for preparing a new deployment bundle; this does not update existing deployment pins or deploy the service. Real LM Studio endpoint/model/schema acceptance and renewed AWS credentials for new v3 Gemini/Claude samples remain separate; GLM live stays paused.
+Deployment must use approved merged main and explicit regenerated evaluator/policy pins, not a candidate. Reviewed main `28be2e0` is the accepted source for preparing a new deployment bundle; this does not update existing deployment pins or deploy the service. Real LM Studio endpoint/model/schema acceptance and renewed AWS credentials for new v3 Gemini/Claude samples remain separate; GLM live stays paused.
+
+Known limits: the complete local flow supports Linux x86_64, Python 3.12 and Docker only (use WSL on Windows). The development oracle now uses real loopback HTTP instead of the deprecated TestClient, and pytest treats every warning as an error.
 
 ## Local acceptance and evidence
 
@@ -153,7 +154,7 @@ python3 -I scripts/dev_db.py start
 python3 -I scripts/dev_db.py stop
 ```
 
-pytest.xml records collected parametrized items, not test-function count. http-smoke.json verifies real loopback health/login/allowed and cross-owner reads. Each run report binds current subject/policy; latest.txt is only an index. expect_block requires COMPLETED/no errors/cleanup/vulnerable variant/all gates complete/G1-G2 clean/exact nine seeded IDs among32 AUTH cases. Tool errors, source drift, empty/different cases, or cleanup failure are failed negative acceptance.
+pytest.xml records collected parametrized items, not test-function count. http-smoke.json verifies real loopback health/login/allowed and cross-owner reads. Each run report binds current subject/policy; latest.txt is only an index. expect_block requires COMPLETED/no errors/cleanup/vulnerable variant/all gates complete/G1-G2 clean/exact nine seeded IDs among 44 AUTH cases. Tool errors, source drift, empty/different cases, or cleanup failure are failed negative acceptance.
 
 | Roadmap item | Implemented scope | Remaining |
 |---|---|---|
@@ -161,7 +162,7 @@ pytest.xml records collected parametrized items, not test-function count. http-s
 | W02 | Public code/docs | Private references stay local |
 | W03 | Checksums, wheel-only, DB least privilege, Git hardening | Hostile multi-tenant VM/microVM isolation |
 | W04 | Strict state/coverage/history/digest and main signatures | Dedicated publisher operation |
-| W05/W09 |32 AUTH cases/seven real mutations | Full G5 |
+| W05/W09 | 32 AUTH cases/seven real mutations on main; 44/nine in the October 10 change | Full G5 |
 | W06/W20 | G1 provenance/lock SBOM/OSV and G2 | Behavior/installed images/other ecosystems/G3 |
 | W08 | Active rules, remote positive/negative CI, run/base binding, all-commit exclusions | Dedicated source and actual non-admin anti-bypass probes |
 | W10–W14 | Gateway/adapters/blind/repeated framework; small Gemini/Claude live samples; LM Studio text adapter | Local real inference, larger stability/bias experiments; GLM paused |
@@ -171,4 +172,4 @@ pytest.xml records collected parametrized items, not test-function count. http-s
 
 W/G numbering originates from retained private planning: G0/G4 scope/authorization/threats, G1 dependencies, G2 secrets, G5 web/API authorization, G6 models; G3 remains unimplemented. No private planning is republished.
 
-October 8 boundary work had 703 then704 tests; see [boundary record](security-boundaries-20261008.zh-TW.md#en). Expansion added CycloneDX1.6/exact-version OSV,32/9 AUTH, and v3 B13–B16, merged as438d7a4 with 787 tests; see [expansion](security-expansion-20261008.zh-TW.md#en). Historical627/703/704 and18/6 figures are not current minimums.
+October 8 boundary work had 703 then 704 tests; see [boundary record](security-boundaries-20261008.zh-TW.md#en). Expansion added CycloneDX 1.6/exact-version OSV, 32/9 AUTH, and v3 B13–B16, merged as 438d7a4 with 787 tests; see [expansion](security-expansion-20261008.zh-TW.md#en). Historical 627/703/704 and 18/6 figures are not current minimums.

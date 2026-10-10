@@ -78,7 +78,19 @@
         "SQL-like update remains literal data",
         "owner deletes own data",
         "repeated delete denied without side effect",
-        "same-tenant admin delete allowed"
+        "same-tenant admin delete allowed",
+        "logged-out session write denied",
+        "logged-out session delete denied",
+        "logged-out session export denied",
+        "anonymous write denied",
+        "forged bearer write denied",
+        "expired session write denied",
+        "anonymous export denied",
+        "forged bearer export denied",
+        "expired session export denied",
+        "no delayed or out-of-band state changes",
+        "out-of-range item id rejected as input error",
+        "NUL byte in update rejected without side effect"
       ],
       "seeded_defect_case_ids": [
         "bob: unauthorized read denied without data",

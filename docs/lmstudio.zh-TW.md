@@ -24,7 +24,7 @@ ID 範例須以實際 `/v1/models` 為準。未設定驗證的同主機服務可
 
 雲端工作環境的 `127.0.0.1` 指向雲端主機，**不會自動連到個人電腦**。可在 LM Studio 同一主機執行 harness，或先建立受控 HTTPS／443 入口及核准的內網路由／VPN。實際路由、TLS 信任、身分與存取控制須分別驗收；目前沒有因新增 adapter 而部署任何網路。
 
-HTTP 只允許字面 `127.0.0.1` 或 `[::1]`、明確的 1024–65535 連接埠與精確 `/v1` 路徑；僅這種同主機連線不使用環境代理。`localhost`、縮寫／整數 IP、其他回環位址、私有網段 HTTP、公開 HTTP、userinfo、query、fragment、反斜線與編碼路徑均拒絕。遠端維持 HTTPS／443、原有代理及 CA 驗證；不允許關閉 TLS 驗證。請勿直接將無驗證的模型伺服器暴露到公網。
+HTTP 只允許字面 `127.0.0.1` 或 `[::1]`、明確的 1024–65535 連接埠與精確 `/v1` 路徑；僅這種同主機連線不使用環境代理。`localhost`、縮寫／整數 IP、其他回環位址、私有網段 HTTP、公開 HTTP、userinfo、query、fragment、反斜線與編碼路徑均拒絕。遠端維持 HTTPS／443、原有代理及 CA 驗證；不允許關閉 TLS 驗證。遠端主機名稱另須經審查列入 `security/model-roe.json` 的 `allowed_remote_hosts.lmstudio`（小寫完整主機名稱、最多 8 個、不接受萬用字元或 IP 範圍），否則在送出任何請求或金鑰前以 `CONFIGURATION` 拒絕。請勿直接將無驗證的模型伺服器暴露到公網。
 
 ## 執行與預算
 
@@ -70,14 +70,14 @@ Replace the example ID with the actual catalog ID. A same-host unauthenticated s
 
 Cloud 127.0.0.1 refers to the cloud host, not the user's computer. Run the harness alongside LM Studio, or provide controlled HTTPS:443 ingress and an approved internal route/VPN. Routing, TLS trust, identity, and access controls require separate acceptance; adding an adapter deploys no network.
 
-HTTP permits only literal127.0.0.1 or [::1], explicit port1024–65535, exact /v1. Only this same-host path bypasses environmental proxies. localhost, shortened/integer IPs, other loopback addresses, private/public HTTP, userinfo/query/fragment/backslash/encoded paths reject. Remote HTTPS preserves port443/proxy/CA verification, with no TLS-disable option. Do not expose an unauthenticated server publicly.
+HTTP permits only literal 127.0.0.1 or [::1], explicit port 1024–65535, exact /v1. Only this same-host path bypasses environmental proxies. localhost, shortened/integer IPs, other loopback addresses, private/public HTTP, userinfo/query/fragment/backslash/encoded paths reject. Remote HTTPS preserves port 443/proxy/CA verification, with no TLS-disable option. Do not expose an unauthenticated server publicly. A remote host must additionally be listed (lowercase full host name, at most eight, no wildcards or IP ranges) in `allowed_remote_hosts.lmstudio` of `security/model-roe.json`; otherwise the adapter is refused as CONFIGURATION before any request or key is sent.
 
 ## Commands and budget
 
-The shared commands above perform a fixed synthetic ACK, two local cases, a Gemini/Bedrock/LM Studio batch, and offline comparison. Three providers × two cases × one round reserves six calls/6,144 output tokens; two rounds exceeds8,192 and rejects. Additional batches must preserve identical settings and complete results, never cherry-pick successful answers. Caps remain16 calls/8,192 tokens/130 seconds per batch,30 seconds per call, no retry. Each call's model-list GET and chat POST share that deadline; discovery repeats before every inference. GET is not a separate inference reservation; at most two HTTP requests accompany each inference.
+The shared commands above perform a fixed synthetic ACK, two local cases, a Gemini/Bedrock/LM Studio batch, and offline comparison. Three providers × two cases × one round reserves six calls/6,144 output tokens; two rounds exceeds 8,192 and rejects. Additional batches must preserve identical settings and complete results, never cherry-pick successful answers. Caps remain 16 calls/8,192 tokens/130 seconds per batch, 30 seconds per call, no retry. Each call's model-list GET and chat POST share that deadline; discovery repeats before every inference. GET is not a separate inference reservation; at most two HTTP requests accompany each inference.
 
 ## Contract and live acceptance
 
-Only text, separate system/user roles, and JSON schema are supported—no images/audio/video/tools. Omni naming does not establish multimodal support. Requests use temperature0, stream=false, n=1 and bounded max_tokens. Response model must exactly match configured ID. Unsupported schema, missing/changed models, truncation, tools/refusal, invalid usage, or fabricated evidence remain failures without fallback.
+Only text, separate system/user roles, and JSON schema are supported—no images/audio/video/tools. Omni naming does not establish multimodal support. Requests use temperature 0, stream=false, n=1 and bounded max_tokens. Response model must exactly match configured ID. Unsupported schema, missing/changed models, truncation, tools/refusal, invalid usage, or fabricated evidence remain failures without fallback.
 
 Live sequence: route/TLS or loopback, catalog/exact ID, ACK, single-model positive/negative cases, matched three-provider batch, compatible repeated batches, cancellation/cleanup. Record server/model version, reported usage, errors, and cleanup. Unanimity does not prove safety, independence, or bias reduction. Cross-batch reports remain unsigned/unverified and serving-version consistency unknown. The user will provide actual endpoint/settings at that acceptance stage.

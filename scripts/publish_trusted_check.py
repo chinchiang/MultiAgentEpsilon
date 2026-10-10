@@ -17,7 +17,8 @@ ROOT = Path(__file__).resolve().parents[1]
 if __name__ == "__main__":
     sys.path.insert(0, str(ROOT))
 from security_harness.results import write_json
-from security_harness.trusted_publisher import Denied, installation_client, need, publish, strict_json, validate_settings
+from security_harness.trusted_publisher import (Denied, installation_client, need, open_config, publish, strict_json,
+                                               validate_settings)
 
 MAX_CACHED_BLOBS = 20000
 
@@ -35,30 +36,6 @@ def read_config(path, live, owner_uid=0):
             # 服務帳號不可重寫自身信任政策。 / The service account must not be able to rewrite its own trust policy.
             need(not info.st_mode & 0o022 and info.st_uid == owner_uid, "CONFIG_WRITABLE")
         return stream.read(1024**2 + 1)
-
-
-def open_config(path, owner_uid):
-    """逐層開啟可信目錄 descriptor；僅保護檔案擁有者，無法防止可寫上層目錄或中途符號連結的替換。
-
-Walk trusted directory descriptors; a file's owner alone cannot protect it
-    from replacement through a writable parent or an intermediate symlink."""
-    need(".." not in path.parts, "CONFIG_PARENT")
-    directory = os.open("/", os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
-    try:
-        for part in path.parts[1:-1]:
-            try:
-                next_directory = os.open(part, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=directory)
-            except OSError:
-                raise Denied("CONFIG_PARENT") from None
-            os.close(directory)
-            directory = next_directory
-            info = os.fstat(directory)
-            # root 擁有的 sticky 目錄可保護其 root 子目錄。 / Root-owned sticky directories (e.g. /tmp) protect root-owned children.
-            sticky_root = info.st_uid == 0 and info.st_mode & stat.S_ISVTX
-            need(info.st_uid in (0, owner_uid) and (not info.st_mode & 0o022 or sticky_root), "CONFIG_PARENT")
-        return os.open(path.name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=directory)
-    finally:
-        os.close(directory)
 
 
 def load_state(path):
@@ -105,17 +82,44 @@ def revoke(client):
         pass  # 盡力撤銷；權杖本身仍會在一小時內到期。 / Best effort; the token still expires within an hour.
 
 
+LOCK_WAIT_SECONDS = 60
+
+
+def acquire_lock(fd, wait=LOCK_WAIT_SECONDS, clock=time.monotonic, sleep=time.sleep):
+    """有限等待共用鎖；所有 PR 實例共用一把鎖，彼此排隊而不是立即失敗。
+
+Wait a bounded time for the shared lock, so PR instances queue instead of failing at once."""
+    deadline = clock() + wait
+    while True:
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            return
+        except BlockingIOError:
+            if clock() >= deadline:
+                raise Denied("LOCK_BUSY") from None
+            sleep(0.5)
+
+
 def main():
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--settings", type=Path, required=True)
-    parser.add_argument("--gate-policy", type=Path, required=True)
-    parser.add_argument("--private-key", type=Path)
-    parser.add_argument("--pr", type=int)
-    parser.add_argument("--run-id", type=int)
-    parser.add_argument("--lock-file", type=Path)
-    parser.add_argument("--state-file", type=Path)
-    parser.add_argument("--validate-config", action="store_true")
-    parser.add_argument("--output", type=Path)
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--settings", type=Path, required=True,
+                        help='root 持有的發布器設定 / root-owned publisher settings')
+    parser.add_argument("--gate-policy", type=Path, required=True,
+                        help='已核准 evaluator 的政策副本 / policy copy from the approved evaluator')
+    parser.add_argument("--private-key", type=Path,
+                        help='App 私鑰（systemd credential 副本）/ App private key (systemd credential copy)')
+    parser.add_argument("--pr", type=int,
+                        help='要核對的 PR 編號 / pull request to reconcile')
+    parser.add_argument("--run-id", type=int,
+                        help='指定 workflow run；省略時選最新可信 run / specific workflow run; defaults to the latest trusted run')
+    parser.add_argument("--lock-file", type=Path,
+                        help='所有實例共用的鎖檔 / lock file shared by all instances')
+    parser.add_argument("--state-file", type=Path,
+                        help='此 PR 的快取與退避狀態 / cache and backoff state for this PR')
+    parser.add_argument("--validate-config", action="store_true",
+                        help='只驗證設定，不連線 GitHub / validate settings only; no GitHub access')
+    parser.add_argument("--output", type=Path,
+                        help='結果 JSON 路徑 / result JSON path')
     args = parser.parse_args()
     result = {"decision": "BLOCK", "code": "NOT_STARTED", "deployed": False}
     lock_fd = None
@@ -140,7 +144,7 @@ def main():
                 need(external is not None and not external.resolve().is_relative_to(ROOT.resolve()), "EXTERNAL_STATE_REQUIRED")
             lock_fd = os.open(args.lock_file, os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, 0o600)
             need(stat.S_ISREG(os.fstat(lock_fd).st_mode), "LOCK_FILE")
-            fcntl.flock(lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            acquire_lock(lock_fd)
             state = load_state(args.state_file)
             if state.get("backoff_until", 0) > time.time():
                 result.update(code="THROTTLED_BACKOFF")

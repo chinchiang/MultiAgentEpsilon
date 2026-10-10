@@ -60,7 +60,7 @@ def test_cancellation_retains_incomplete_gates(tmp_path, monkeypatch):
     def interrupt(audit):
         raise KeyboardInterrupt()
     monkeypatch.setattr(bootstrap, "install", interrupt)
-    assert bootstrap.main() == 1
+    assert bootstrap.main([]) == 1
     assert report(tmp_path)["errors"][0]["error_type"] == "KeyboardInterrupt"
 
 
@@ -87,7 +87,7 @@ def test_bootstrap_known_vulnerability_blocks_before_installation(tmp_path, monk
     def forbidden(*args, **kwargs):
         raise AssertionError('installation must not start')
     monkeypatch.setattr(bootstrap.subprocess, 'run', forbidden)
-    assert bootstrap.main() == 1
+    assert bootstrap.main([]) == 1
     data = report(tmp_path)
     assert data['decision'] == 'BLOCK' and data['stage'] == 'G1'
     assert data['records'][0]['gate'] == 'G1' and data['records'][0]['findings'] == 1
@@ -103,8 +103,21 @@ def test_bootstrap_partial_query_keeps_error_and_findings_without_installing(tmp
     def incomplete(*args):
         raise DependencyError('incomplete query', partial)
     monkeypatch.setattr(bootstrap, 'dependency_scan', incomplete)
-    assert bootstrap.main() == 1
+    assert bootstrap.main([]) == 1
     data = report(tmp_path)
     assert data['records'][0]['execution'] == 'ERROR' and data['records'][0]['findings'] == 1
     assert data['records'][0]['sca']['queries'][0]['error_type'] == 'TimeoutError'
     assert not (tmp_path / '.venv').exists()
+
+
+def test_ci_provenance_is_built_once_for_writer_and_self_check():
+    from scripts import check_publishable_evidence, write_ci_provenance
+    root = Path(__file__).resolve().parents[1]
+    environ = {"GITHUB_REPOSITORY": "owner/repo", "GITHUB_REPOSITORY_ID": "10", "GITHUB_RUN_ID": "20",
+               "GITHUB_RUN_ATTEMPT": "1", "GITHUB_EVENT_NAME": "pull_request_target",
+               "GITHUB_WORKFLOW_REF": "owner/repo/.github/workflows/security.yml@refs/heads/main",
+               "GITHUB_WORKFLOW_SHA": "a" * 40, "PR_NUMBER": "7"}
+    value = write_ci_provenance.provenance(root, root, environ)
+    assert value["base_sha"] == value["candidate_sha"] and len(value["base_sha"]) == 40
+    assert value["pr_number"] == 7 and value["run_id"] == 20
+    assert check_publishable_evidence.ci_provenance is write_ci_provenance.provenance

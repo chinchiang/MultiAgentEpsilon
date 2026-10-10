@@ -12,7 +12,7 @@ import pytest
 
 from security_harness.llm import benchmark as bench, benchmark_runner as runner, benchmark_score as score
 from security_harness.llm import lifecycle as life
-from security_harness.llm.gateway import Gateway, ModelError, Reply
+from security_harness.llm.gateway import Gateway, ModelError
 from security_harness.llm.adapters import BedrockAdapter
 from security_harness.llm.transport import strict_json
 from security_harness.lifecycle import prepare_run
@@ -112,12 +112,12 @@ def test_round_substitution_and_untrusted_labels_rejected(tmp_path,mutation):
     elif mutation=='token-reuse': d['plan'][4]['review_id']=d['plan'][0]['review_id']
     elif mutation=='raw-diagnostic': d['checks'][0]['diagnostic']='secret-response-body'
     else: d['calls'][0]['model_sha256']='0'*64
-    with pytest.raises(ValueError): score.summarize(d)
+    with pytest.raises(ValueError, match='^(?:call\\ binding\\ mismatch|incomplete\\ or\\ duplicate\\ review\\ plan|invalid\\ case\\ binding|model\\ changed\\ across\\ calls|unknown\\ diagnostic)$'): score.summarize(d)
 
 
 @pytest.mark.parametrize('rounds,tokens',[(True,512),(0,512),(5,512),(4,1024)])
 def test_repetition_caps_reject_before_io(rounds,tokens):
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match='^(?:invalid\\ gateway\\ limit|invalid\\ or\\ over\\-budget\\ review\\ plan)$'):
         runner.initial_report(['mock-review-a','mock-review-b'],['B01','B02'],str(uuid.uuid4()),tokens,rounds)
 
 
@@ -191,3 +191,10 @@ def test_changed_case_catalog_spends_no_calls(tmp_path, monkeypatch):
 @pytest.mark.parametrize('code', ['TIMEOUT', 'SUPERVISOR_FAILED', 'WORKER_FAILED', 'PROVIDER_INCOMPLETE'])
 def test_supervisor_stop_reasons_are_known_categories(code):
     assert score.error_categories([{'status': 'ERROR', 'code': code}]) == {code: 1}
+
+
+def test_live_plan_warns_when_worst_case_exceeds_the_run_cap():
+    from scripts.model_review import deadline_warning
+    assert deadline_warning(3, 90) is None
+    message = deadline_warning(8, 130)
+    assert '240' in message and '130' in message and 'INCOMPLETE' in message

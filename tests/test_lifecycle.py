@@ -119,3 +119,51 @@ def test_janitor_keeps_latest_pointer_on_the_newer_run(tmp_path, monkeypatch):
     assert sweep_stale(tmp_path) == [stale.data['run_id']]
     assert json.loads((stale.output / 'report.json').read_text())['execution'] == 'CANCELLED'
     assert (tmp_path / 'artifacts/latest.txt').read_text().strip() == newer.data['run_id']
+
+
+def test_required_gates_follow_the_trusted_policy(tmp_path):
+    import json as _json
+    from security_harness.results import DEFAULT_GATES, required_gate_kinds
+    root = Path(__file__).resolve().parents[1]
+    policy = _json.loads((root / "security/policy.json").read_text())
+    assert required_gate_kinds(root) == tuple((g, policy["gate_contracts"][g]["kind"]) for g in policy["required_gates"])
+    assert required_gate_kinds(root) == DEFAULT_GATES  # 備援必須與目前政策一致。 / The fallback must match today's policy.
+    assert required_gate_kinds(tmp_path) == DEFAULT_GATES
+
+
+def test_missing_gate_at_finish_turns_an_earlier_allow_into_block(tmp_path):
+    from security_harness.audit import AuditRun
+    audit = AuditRun(tmp_path, "security")
+    audit.data.update(decision="ALLOW", reasons=[])
+    assert audit.finish((("G1", "scan"),)) == 1
+    assert audit.data["decision"] == "BLOCK" and audit.data["records"][0]["execution"] == "NOT_RUN"
+    assert (tmp_path / "artifacts/latest.txt").read_text() == audit.data["run_id"] + "\n"
+    assert not list((tmp_path / "artifacts").glob(".pointer-*"))
+
+
+def test_failure_is_persisted_immediately(tmp_path):
+    import json as _json
+    from security_harness.audit import AuditRun
+    audit = AuditRun(tmp_path, "security")
+    audit.fail(RuntimeError("secret text must not be stored"))
+    saved = _json.loads((audit.output / "report.json").read_text())
+    assert saved["execution"] == "ERROR" and saved["errors"] == [{"stage": "initialization", "error_type": "RuntimeError"}]
+    assert "secret text" not in (audit.output / "report.json").read_text()
+
+
+@pytest.mark.parametrize("run_id", ["-" * 36, "a" * 33, "A" * 32, "../" + "a" * 29, "a" * 8 + "-" * 28, None])
+def test_run_identity_accepts_only_hex_or_canonical_uuid(run_id):
+    from security_harness.isolation import cleanup_run
+    from security_harness.lifecycle import run_directory, valid_run_id
+    assert not valid_run_id(run_id)
+    with pytest.raises((ValueError, TypeError), match='^invalid\\ run\\ identity$'):
+        run_directory(Path("/tmp"), run_id)
+    with pytest.raises((ValueError, TypeError), match='^invalid\\ isolation\\ run\\ ID$'):
+        cleanup_run(run_id)
+
+
+def test_generated_run_identities_remain_valid():
+    import secrets
+    import uuid
+    from security_harness.lifecycle import valid_run_id
+    assert valid_run_id(str(uuid.uuid4())) and valid_run_id(secrets.token_hex(16))

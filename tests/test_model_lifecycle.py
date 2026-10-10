@@ -249,7 +249,7 @@ def test_cleanup_failure_blocks_and_preserves_recovery_inventory(tmp_path, monke
     def failure(_):
         raise RuntimeError('sensitive CLI diagnostics')
     monkeypatch.setattr(life, 'stop_registered', failure)
-    with pytest.raises(RuntimeError):
+    with pytest.raises(RuntimeError, match='^stale\\ run\\ cleanup\\ incomplete$'):
         sweep_stale(tmp_path)
     data = json.loads(path.read_text())
     assert data['status'] == 'ERROR' and data['code'] == 'CLEANUP_FAILED'
@@ -345,7 +345,7 @@ def test_worker_wait_timeout_still_finalizes_evidence(tmp_path, monkeypatch):
 @pytest.mark.parametrize('deadline', [0, -1, True, float('nan'), float('inf'), 131])
 def test_invalid_supervisor_deadline_never_launches(tmp_path, deadline):
     report = initial_report(['mock'], str(uuid.uuid4()))
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match='^invalid\\ model\\ supervisor\\ deadline$'):
         life.supervise(tmp_path, report, ['must-not-execute'], deadline)
     assert not (tmp_path / '.state').exists()
 

@@ -1,4 +1,3 @@
-import json
 import pytest
 from security_harness.github_readonly import ReadOnlyGitHub
 from security_harness.trusted_publisher import Denied

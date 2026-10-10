@@ -7,7 +7,7 @@ from . import candidate_git
 from .limits import LIMITS, ResourceLimit
 
 ROOT_GENERATED = {".git", ".venv", ".tools", ".state", "artifacts", ".pytest_cache"}
-CACHES = {"__pycache__", ".pytest_cache"}
+CACHES = {"__pycache__", ".pytest_cache", ".ruff_cache"}
 
 
 def excluded(relative: Path) -> bool:

@@ -37,8 +37,10 @@
 | `USAGE_SCHEMA`、`STOP_REASON` | 用量型別或完成原因不符合契約 |
 | `REVIEW_SCHEMA`、`EVIDENCE_MISMATCH` | 盲測回答格式不符，或引用與指定原始碼行不一致 |
 | `HTTP_CONTENT_TYPE` | HTTP 內容類型或編碼不符既有傳輸契約 |
+| `THINKING_CONFIGURATION`、`OUTPUT_CONFIGURATION` | 供應商拒絕思考或結構化輸出設定 |
+| `MODEL_IDENTITY` | 模型清單或回應回報的模型識別值與設定不符 |
 
-拒答、截斷、工具要求、逾時等繼續使用 `REFUSED`、`TRUNCATED`、`TOOL_REQUEST`、`DEADLINE`。只有供應商明確回報截斷時才使用截斷分類。無法確認原因時保留一般失敗，不猜測或補造診斷。這些分類不放寬任何接受條件，也不會重新讀取已丟棄的歷史失敗原文。
+拒答、截斷、工具要求、逾時等繼續使用 `REFUSED`、`TRUNCATED`、`TOOL_REQUEST`、`DEADLINE`；單次 HTTP 讀寫逾時另記為 `IO_TIMEOUT`，與整次呼叫期限區分。只有供應商明確回報截斷時才使用截斷分類。無法確認原因時保留一般失敗，不猜測或補造診斷。這些分類不放寬任何接受條件，也不會重新讀取已丟棄的歷史失敗原文。
 
 ## 統計與判讀
 
@@ -101,7 +103,7 @@ The offline command reserves 4,096 output tokens for eight requests; the live pa
 
 Each round randomizes request order; rounds run sequentially. Providers receive the same opaque ID for a case/round, with a fresh ID next round. Prompts reveal no round, case ID, oracle, previous answer, or conversation history. Plan/request/round bindings reject swaps, duplicate rounds, reused IDs, and model-identity changes. Reported serving-version drift within a run is rejected. Identity HMACs use a random per-run key to prevent recovering account-bearing ARNs; they cannot verify serving-version equality across separate runs. Unexecuted canceled rounds remain in denominators.
 
-Diagnostics use fixed codes, never parser messages, raw failed output, field paths, or provider errors. Valid structured opinions remain untrusted review evidence. Categories are JSON_SYNTAX/JSON_ENCODING; JSON_DUPLICATE_KEY/JSON_NONFINITE; MISSING_FIELD/ENVELOPE_SCHEMA; UNEXPECTED_CONTENT/EMPTY_TEXT; USAGE_SCHEMA/STOP_REASON; REVIEW_SCHEMA/EVIDENCE_MISMATCH; HTTP_CONTENT_TYPE; configuration-specific THINKING_CONFIGURATION/OUTPUT_CONFIGURATION; and LM Studio MODEL_IDENTITY. REFUSED/TRUNCATED/TOOL_REQUEST/DEADLINE remain distinct. Only an explicit provider truncation signal is labeled truncation. Unknown failures are not guessed or reconstructed from discarded historical text.
+Diagnostics use fixed codes, never parser messages, raw failed output, field paths, or provider errors. Valid structured opinions remain untrusted review evidence. Categories are JSON_SYNTAX/JSON_ENCODING; JSON_DUPLICATE_KEY/JSON_NONFINITE; MISSING_FIELD/ENVELOPE_SCHEMA; UNEXPECTED_CONTENT/EMPTY_TEXT; USAGE_SCHEMA/STOP_REASON; REVIEW_SCHEMA/EVIDENCE_MISMATCH; HTTP_CONTENT_TYPE; configuration-specific THINKING_CONFIGURATION/OUTPUT_CONFIGURATION; and LM Studio MODEL_IDENTITY. REFUSED/TRUNCATED/TOOL_REQUEST/DEADLINE remain distinct; a single HTTP I/O timeout is recorded as IO_TIMEOUT, apart from the call deadline. Only an explicit provider truncation signal is labeled truncation. Unknown failures are not guessed or reconstructed from discarded historical text.
 
 Aggregate counts before calculating ratios. Planned means case-round observations, not distinct cases. Valid-response rate includes valid ABSTAIN; coverage excludes it. Failures/unrun cases remain in all-positive miss rate and coverage denominators. Pairwise disagreement shows both comparable and planned counts; two failures do not mean agreement. Per-case/provider stability is unknown if any round is incomplete or abstains; unanimous wrong answers remain wrong. Usage is a reported subtotal, absent values and monetary cost stay unknown, and cancellation does not guarantee remote billing stops.
 

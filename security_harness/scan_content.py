@@ -30,7 +30,8 @@ Trusted, digest-keyed review of binary blobs. Keyed by content, not path, so one
         return frozenset()
     data = json.loads(path.read_text())
     entries = data.get("entries") if isinstance(data, dict) else None
-    if (data.get("schema_version") != 1 or not isinstance(entries, list) or
+    if (not isinstance(data, dict) or type(data.get("schema_version")) is not int or data["schema_version"] != 1
+            or not isinstance(entries, list) or
             any(not isinstance(e, dict) or set(e) != {"sha256", "reason"} or
                 not re.fullmatch(r"[0-9a-f]{64}", str(e["sha256"])) or
                 not isinstance(e["reason"], str) or not e["reason"].strip() for e in entries) or

@@ -13,6 +13,7 @@ from dataclasses import asdict
 from .benchmark import (CASES_PATH, ORACLE_PATH, CWES, PROVIDERS, load_cases, case_digest, review_request,
                         request_digest, validate_review, bounded_text, parse_review)
 from .lifecycle import REPORT_LIMIT
+from ..results import read_regular
 from .gateway import digest, ModelError, Limits
 from .transport import strict_json
 
@@ -200,6 +201,8 @@ def _summarize_validated(report):
             'input_tokens_reported': sum(c.get('input_tokens') or 0 for c in calls) if any(c.get('input_tokens') is not None for c in calls) else None,
             'output_tokens_reported': sum(c.get('output_tokens') or 0 for c in calls) if any(c.get('output_tokens') is not None for c in calls) else None,
             'usage_complete': bool(calls) and all(c.get('input_tokens') is not None and c.get('output_tokens') is not None for c in calls),
+            'output_budget_unverified_calls': sum(c.get('status') == 'SUCCESS' and not c.get('output_budget_verified')
+                                                  for c in calls),
             'elapsed_ms_reported': sum(c.get('elapsed_ms') or 0 for c in calls),
             'monetary_cost': None}
     pairs = []
@@ -239,7 +242,7 @@ def _summarize_validated(report):
 
 def error_categories(checks):
     labels = []
-    allowed = ModelError.CODES | {'DEADLINE', 'CANCELLED', 'BUDGET_EXHAUSTED', 'ROUTING_DENIED', 'INPUT_LIMIT',
+    allowed = ModelError.CODES | {'DEADLINE', 'IO_TIMEOUT', 'CANCELLED', 'BUDGET_EXHAUSTED', 'ROUTING_DENIED', 'INPUT_LIMIT',
                                   'TIMEOUT', 'SUPERVISOR_FAILED', 'WORKER_FAILED', 'PROVIDER_INCOMPLETE'}
     for check in checks:
         if check['status'] == 'SUCCESS':
@@ -270,7 +273,8 @@ def summarize_repeated(report):
         rounds.append({'round_index': number, 'analysis': _summarize_validated(part)})
     metrics = {}
     additive = ('tp', 'tn', 'fp', 'fn', 'abstained', 'unavailable', 'matched_findings',
-                'reported_findings', 'planned', 'classified', 'calls_recorded', 'elapsed_ms_reported')
+                'reported_findings', 'planned', 'classified', 'calls_recorded', 'elapsed_ms_reported',
+                'output_budget_unverified_calls')
     truth = reference()
     positives = sum(truth[c]['verdict'] == 'VULNERABLE' for c in report['case_ids']) * report['rounds']
     findings = sum(len(truth[c]['findings']) for c in report['case_ids']) * report['rounds']
@@ -312,10 +316,19 @@ def summarize_repeated(report):
             'limits': f"{len(report['case_ids'])} synthetic cases, {report['rounds']} planned rounds; repeated observations are not independent samples."}
 
 
+def adjudication_directory(report_path, create=False):
+    """註記目錄不可為符號連結，避免寫入或讀取報告目錄以外的檔案。 / The notes directory must not be a symlink, so
+    notes are never written or read outside the report directory."""
+    directory = report_path.parent / 'adjudications'
+    if directory.is_symlink() or (directory.exists() and not directory.is_dir()):
+        raise ValueError('invalid adjudication directory')
+    if create:
+        directory.mkdir(mode=0o700, exist_ok=True)
+    return directory
+
+
 def add_adjudication(report_path, case_id, decision, reviewer, reason):
-    raw = report_path.read_bytes()
-    if len(raw) > REPORT_LIMIT:
-        raise ValueError('report too large')
+    raw = read_regular(report_path, REPORT_LIMIT)
     report = strict_json(raw)
     if report.get('analysis') != summarize(report):
         raise ValueError('stored analysis does not match the recomputed reference analysis')
@@ -330,9 +343,8 @@ def add_adjudication(report_path, case_id, decision, reviewer, reason):
              'created_at': datetime.now(timezone.utc).isoformat(),
              'identity_verified': False, 'advisory_only': True, 'security_gate_effect': 'NONE',
              'round_scope': 'ALL_PLANNED_ROUNDS'}
-    path = report_path.parent / 'adjudications' / (entry['note_id'] + '.json')
-    path.parent.mkdir(exist_ok=True)
-    with path.open('x') as handle:
+    path = adjudication_directory(report_path, create=True) / (entry['note_id'] + '.json')
+    with path.open('x', encoding='utf-8') as handle:
         json.dump(entry, handle, ensure_ascii=False, indent=2)
     return path
 
@@ -347,19 +359,14 @@ def read_adjudications(report_path):
     """只讀取有限額、精確綁定報告的註記；自報身分仍未驗證。
 
 Consume only bounded, exact-report notes; asserted identity stays unverified."""
-    raw = report_path.read_bytes()
-    if len(raw) > REPORT_LIMIT:
-        raise ValueError('report too large')
-    report = strict_json(raw)
+    report = strict_json(read_regular(report_path, REPORT_LIMIT))
     summarize(report)
-    paths = sorted((report_path.parent / 'adjudications').glob('*.json'))
+    paths = sorted(adjudication_directory(report_path).glob('*.json'))
     if len(paths) > 100:
         raise ValueError('too many adjudication notes')
     notes = []
     for path in paths:
-        if path.is_symlink() or path.stat().st_size > 16384:
-            raise ValueError('invalid adjudication file')
-        note = strict_json(path.read_bytes())
+        note = strict_json(read_regular(path, 16384))
         if (not note_matches_report(note, report_path) or note.get('identity_verified') is not False or
                 note.get('case_id') not in report['case_ids'] or note.get('schema_version') != 1 or
                 note.get('decision') not in ('REFERENCE_CONFIRMED', 'REFERENCE_CHALLENGED', 'NEEDS_MORE_EVIDENCE') or

@@ -2,6 +2,7 @@
 """安裝前先執行 G1；驗證掃描器並鎖定二進位 wheels，不使用模型憑證。
 
 G1 before install; verified scanner; pinned binary wheels; no model credentials."""
+import argparse
 import hashlib
 import io
 import json
@@ -90,7 +91,8 @@ def install(audit):
     print("Bootstrap complete; wheel-only environment and scanner verified")
 
 
-def main():
+def main(argv=None):
+    argparse.ArgumentParser(description=__doc__).parse_args(argv)
     audit = AuditRun(ROOT, "bootstrap")
     try:
         install(audit)

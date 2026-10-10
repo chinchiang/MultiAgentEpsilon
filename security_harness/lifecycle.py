@@ -10,18 +10,21 @@ import subprocess
 import sys
 import time
 from pathlib import Path
-from .results import write_json
+from .results import required_gate_kinds, write_json
 
 SOURCE_ROOT = Path(__file__).resolve().parents[1]
 
 
 def group_alive(pid):
+    """程序群組是否仍有非殭屍成員；模型與安全 supervisor 共用。 / Whether a process group still has a non-zombie
+    member; shared by the model and security supervisors."""
     for path in Path('/proc').glob('[0-9]*/stat'):
         try:
             fields = path.read_text().rsplit(')', 1)[1].split()
             if int(fields[2]) == pid and fields[0] != 'Z':
                 return True
-        except (FileNotFoundError, ProcessLookupError):
+        except (FileNotFoundError, ProcessLookupError, PermissionError, IndexError, ValueError):
+            # 程序在列舉時消失，或 /proc 受 hidepid 限制。 / The process vanished mid-scan, or /proc is restricted.
             continue
     return False
 
@@ -31,14 +34,22 @@ def identity(pid):
     return raw.rsplit(')', 1)[1].split()[19]
 
 
+# 32 位十六進位或標準 UUID；與發布器使用的格式一致。 / 32 hex digits or a canonical UUID, as the publisher expects.
+RUN_ID = re.compile(r'[0-9a-f]{32}|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}')
+
+
+def valid_run_id(run_id):
+    return type(run_id) is str and RUN_ID.fullmatch(run_id) is not None
+
+
 def run_directory(root, run_id):
-    if not re.fullmatch(r'[a-f0-9-]{32,36}', run_id):
+    if not valid_run_id(run_id):
         raise ValueError('invalid run identity')
     return root / '.state' / 'runs' / run_id
 
 
 def temporary_directory(run_id):
-    if not re.fullmatch(r'[a-f0-9-]{32,36}', run_id):
+    if not valid_run_id(run_id):
         raise ValueError('invalid run identity')
     # PostgreSQL Unix socket 路徑須低於 Linux 的 108 位元組上限。 / Keep PostgreSQL Unix socket paths below Linux's 108-byte limit.
     return Path('/tmp') / f'epsilon-run-{os.getuid()}-{run_id}'
@@ -166,7 +177,7 @@ def sweep_stale(root):
                                                'process_group_terminated': True, 'error_type': None,
                                                'boot_changed': not same_boot})
                     # 回收舊執行不可覆寫較新執行的索引。 / A reaped old run must not displace the index of a newer run.
-                    audit.finish((('G1', 'scan'), ('G2', 'scan'), ('AUTH', 'test')), update_pointer=False)
+                    audit.finish(required_gate_kinds(root), update_pointer=False)
                 cleaned.append(work.name)
         except Exception as exc:
             # 繼續回收其他執行；每個失敗均回報，但不保存原文。 / Keep reaping the remaining runs; report every failure, without its text.
@@ -184,6 +195,7 @@ def supervise(root, audit, command, max_seconds):
     reason = None
     cleanup_error = None
     group_terminated = False
+    supervisor_error = None
     deadline = time.monotonic() + max_seconds
     try:
         for signum in (signal.SIGTERM, signal.SIGINT):
@@ -206,8 +218,9 @@ def supervise(root, audit, command, max_seconds):
                 reason = 'TIMEOUT'
                 break
             time.sleep(0.05)
-    except Exception:
+    except Exception as exc:
         reason = 'ERROR'
+        supervisor_error = type(exc).__name__
     finally:
         if process is not None:
             try:
@@ -241,10 +254,14 @@ def supervise(root, audit, command, max_seconds):
                              'run_directory_removed': not work.exists(), 'process_group_terminated': group_terminated}
     if cancelled and reason is None:
         reason = 'CANCELLED'
+    if supervisor_error:
+        # 保留監督程序例外型別，不保存例外文字。 / Keep the supervisor's exception type, never its text.
+        audit.data['errors'].append({'stage': 'supervisor', 'error_type': supervisor_error})
     if reason:
         stage = audit.data['stage']
-        if stage in ('G1', 'G2', 'AUTH') and not any(r['gate'] == stage for r in audit.data['records']):
-            audit.add(stage, reason, 'test' if stage == 'AUTH' else 'scan', 0, 0, 'supervisor stopped run')
+        kinds = dict(required_gate_kinds(root))
+        if stage in kinds and not any(r['gate'] == stage for r in audit.data['records']):
+            audit.add(stage, reason, kinds[stage], 0, 0, 'supervisor stopped run')
         audit.data.update(execution=reason, decision='BLOCK', reasons=['supervisor ' + reason.lower()])
     elif not finalized:
         # 只有完成清理交接後才能發布 worker 判定。 / Only the cleanup-gated handoff may publish a worker decision.
@@ -252,4 +269,4 @@ def supervise(root, audit, command, max_seconds):
     if cleanup_error:
         audit.data.update(execution='ERROR', decision='BLOCK', reasons=['cleanup incomplete'])
     audit.data['total_seconds'] = round(time.monotonic() - (deadline - max_seconds), 3)
-    return audit.finish((('G1', 'scan'), ('G2', 'scan'), ('AUTH', 'test')))
+    return audit.finish(required_gate_kinds(root))

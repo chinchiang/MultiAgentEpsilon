@@ -10,7 +10,7 @@ import pytest
 from security_harness.llm.gateway import Gateway, Request
 from security_harness.llm.lmstudio import LMStudioAdapter, LMStudioHTTP, endpoint
 from security_harness.llm.transport import validate_url
-from security_harness.llm.benchmark import load_cases, review_request, make_plan
+from security_harness.llm.benchmark import load_cases, review_request
 
 MODEL = 'nvidia/nemotron-3-nano-omni'
 BASE = 'http://127.0.0.1:1234/v1'
@@ -179,7 +179,7 @@ def test_three_family_plan_fits_budget_only_when_batched():
     providers = ['gemini', 'bedrock', 'lmstudio']
     r = initial_report(providers, ['B13', 'B14'], 'synthetic-run', 1024)
     assert len(r['plan']) == 6 and r['limits']['reserved_output_tokens'] == 6144
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match='^invalid\\ gateway\\ limit$'):
         initial_report(providers, ['B13', 'B14'], 'synthetic-run', 1024, 2)
 
 
@@ -218,7 +218,7 @@ def test_five_provider_smoke_keeps_existing_deadline_cap():
 
 def test_local_adapter_full_review_scoring_and_cleanup(tmp_path, monkeypatch):
     from tests.test_model_benchmark import collected
-    from scripts import model_smoke
+    from security_harness.llm import config as model_config
     from security_harness.llm.benchmark_score import reference
     wire = []
     class Stream(httpx.AsyncByteStream):
@@ -243,7 +243,7 @@ def test_local_adapter_full_review_scoring_and_cleanup(tmp_path, monkeypatch):
     def configured(provider, work, http):
         assert provider == 'lmstudio'
         return LMStudioAdapter(MODEL, BASE, http=LMStudioHTTP(BASE, transport=httpx.MockTransport(handle)))
-    monkeypatch.setattr(model_smoke, 'configured_adapter', configured)
+    monkeypatch.setattr(model_config, 'configured_adapter', configured)
     report, path = collected(tmp_path, providers=['lmstudio'], case_ids=['B13', 'B14'])
     assert report['status'] == 'COMPLETE' and report['cleanup']['completed'] is True
     assert report['analysis']['provider_metrics']['lmstudio']['tp'] == 1

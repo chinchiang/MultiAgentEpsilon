@@ -32,7 +32,7 @@ def test_generated_root_does_not_change_subject(tmp_path):
 
 def test_symlink_directory_is_rejected(tmp_path):
     (tmp_path / "source").symlink_to(tmp_path.parent, target_is_directory=True)
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match='^non\\-regular\\ input\\ requires\\ explicit\\ review$'):
         subject_digest(tmp_path)
 
 
@@ -87,7 +87,7 @@ def test_unreadable_directory_blocks_inventory_digest_and_scan(tmp_path, monkeyp
         monkeypatch.setattr(os, "scandir", scandir)
     try:
         for operation in (input_files, subject_digest, run):
-            with pytest.raises(PermissionError):
+            with pytest.raises(PermissionError, match='^synthetic\\ inaccessible\\ directory$'):
                 operation(tmp_path)
     finally:
         hidden.chmod(0o700)
@@ -103,8 +103,18 @@ def test_file_swapped_for_symlink_after_inventory_is_not_followed(tmp_path):
     paths = input_files(root)
     (root / "app.py").unlink()
     (root / "app.py").symlink_to(outside)  # 在列清冊與讀取之間被替換。 / swapped between inventory and read
-    with pytest.raises(OSError):
+    with pytest.raises(OSError, match='Too many levels of symbolic links'):
         read_regular(paths[0], 1024)
     with pytest.raises(ValueError, match="read limit"):
         (root / "big.py").write_bytes(b"x" * 2048)
         read_regular(root / "big.py", 1024)
+
+
+def test_tool_caches_are_never_scanned_or_hashed(tmp_path):
+    # 靜態檢查快取是二進位生成物；不可讓 G2 失敗或改變 subject。 / Static-check caches are generated binaries;
+    # they must neither fail G2 nor change the subject digest.
+    from security_harness.inputs import input_files
+    (tmp_path / "app.py").write_text("x = 1\n")
+    (tmp_path / ".ruff_cache/0.16.9").mkdir(parents=True)
+    (tmp_path / ".ruff_cache/0.16.9/123").write_bytes(b"\x00\x01binary")
+    assert [p.name for p in input_files(tmp_path)] == ["app.py"]

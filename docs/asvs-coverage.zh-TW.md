@@ -12,9 +12,9 @@
 |---|---|---|---|
 | 1.2.4／第一級：資料庫查詢注入防護 | B01、B02、B05、B06；CWE-89 | `tests/test_model_benchmark.py::test_sql_reference_has_executable_counterexample`：記憶體 SQLite 的正常查詢與注入反例 | 部分涵蓋；未驗證其他資料庫、查詢語言、預存程序及正式應用的所有查詢入口 |
 | 1.2.5／第一級：作業系統命令注入防護 | B03、B04；CWE-78 | `tests/test_model_benchmark.py::test_command_reference_tracks_shell_boundary_without_executing_payload`：攔截呼叫，核對命令字串與參數陣列 | 部分涵蓋；未執行攻擊命令，未涵蓋不同命令列程式的選項注入及作業系統差異 |
-| 8.2.2／第一級：物件層級存取控制 | B07、B08 及 AUTH 32 案例；CWE-639 | `tests/test_review_boundaries.py::test_document_unauthorized_reads_are_observable`：允許擁有者讀取，驗證未登入、同租戶其他使用者、同使用者識別值但不同租戶的讀取 | 部分涵蓋；身分資料視為可信。AUTH 另涵蓋合成 fixture 的登入、更新／刪除及過期工作階段。未涵蓋正式身分提供者、角色繼承及完整業務政策 |
+| 8.2.2／第一級：物件層級存取控制 | B07、B08 及 AUTH 44 案例；CWE-639 | `tests/test_review_boundaries.py::test_document_unauthorized_reads_are_observable`：允許擁有者讀取，驗證未登入、同租戶其他使用者、同使用者識別值但不同租戶的讀取 | 部分涵蓋；身分資料視為可信。AUTH 另涵蓋合成 fixture 的登入、更新／刪除及過期工作階段。未涵蓋正式身分提供者、角色繼承及完整業務政策 |
 | 5.3.2／第一級：檔案路徑來源及驗證 | B09、B10、B13、B14；CWE-22 | `tests/test_review_boundaries.py::test_file_escape_reads_actual_temporary_sentinel`：實際讀取暫存檔，驗證上層目錄、絕對路徑、相同前綴的相鄰目錄及符號連結 | 部分涵蓋；限 Linux、HTTP 層已解碼一次、目錄樹在呼叫期間不變。未涵蓋競爭條件、Windows、遠端檔案引入及寫入 |
-| 1.3.6／第二級：伺服器端請求偽造防護 | B11、B12、B15、B16；CWE-918 | `tests/test_review_boundaries.py::test_ssrf_untrusted_destinations_never_leave_mock_transport` 及 `test_ssrf_redirects_cannot_reach_second_mock_destination`：觀察模擬 HTTP 請求與重新導向鏈 | 部分涵蓋；以固定目的地代碼控制通訊協定、網域、路徑及連接埠，拒絕重新導向。未驗證正式 DNS、DNS 重新綁定、出口政策、代理伺服器及實際內網 |
+| 1.3.6／第二級：伺服器端請求偽造防護 | B11、B12、B15、B16；CWE-918 | `tests/test_review_boundaries.py::test_ssrf_untrusted_destinations_never_leave_mock_transport` 及 `test_ssrf_redirects_cannot_reach_second_mock_destination`：觀察模擬 HTTP 請求與重新導向鏈 | 部分涵蓋；以固定目的地的程式碼控制通訊協定、網域、路徑及連接埠，拒絕重新導向。未驗證正式 DNS、DNS 重新綁定、出口政策、代理伺服器及實際內網 |
 
 B07／B09／B11 必須重現資料或請求越界；B08／B10／B12 必須拒絕相同攻擊，且正常操作仍成功。這些回歸由持續整合流程的完整測試集執行。SSRF 使用 `httpx.MockTransport`，不存取任何真實內網或雲端中繼資料服務；路徑測試僅使用測試建立的暫存資料。
 
@@ -44,7 +44,7 @@ Partial coverage means executable evidence for a specific scenario with requirem
 |---|---|---|---|
 | 1.2.4 / L1, database injection | B01/B02/B05/B06; CWE-89 | SQLite normal and injection counterexamples in `test_sql_reference_has_executable_counterexample` | Other databases, query languages, stored procedures, all product entry points |
 | 1.2.5 / L1, OS command injection | B03/B04; CWE-78 | Intercepted command-string versus argument-array calls in `test_command_reference_tracks_shell_boundary_without_executing_payload` | No attack command execution, option injection, or OS-wide coverage |
-| 8.2.2 / L1, object access | B07/B08 and 32 AUTH cases; CWE-639 | Owner success and anonymous/other-owner/other-tenant denial in `test_document_unauthorized_reads_are_observable`; fixture login, update/delete, expiration | Identity inputs are trusted; no real identity provider, role inheritance, full business policy |
+| 8.2.2 / L1, object access | B07/B08 and 44 AUTH cases; CWE-639 | Owner success and anonymous/other-owner/other-tenant denial in `test_document_unauthorized_reads_are_observable`; fixture login, update/delete, expiration | Identity inputs are trusted; no real identity provider, role inheritance, full business policy |
 | 5.3.2 / L1, path origin/validation | B09/B10/B13/B14; CWE-22 | Temporary sentinel reads, traversal, absolute paths, sibling prefixes, symlinks in `test_file_escape_reads_actual_temporary_sentinel` | Linux, one HTTP decoding step, stable directory tree; races, Windows, remote inclusion, writes untested |
 | 1.3.6 / L2, SSRF | B11/B12/B15/B16; CWE-918 | MockTransport destination and redirect observations in the SSRF boundary tests | Fixed scheme/host/path/port and redirect rejection; no real DNS/rebinding, egress/proxy, or internal-network acceptance |
 

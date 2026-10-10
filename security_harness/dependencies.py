@@ -13,7 +13,7 @@ import re
 import urllib.request
 from datetime import datetime, timezone
 
-from .preflight import NoRedirect, parse_lock
+from .preflight import NoRedirect, canonical, parse_lock
 from .results import digest_file
 
 ENDPOINT = 'https://api.osv.dev/v1/query'
@@ -93,17 +93,25 @@ def findings_for(record, response):
         raise DependencyError('invalid advisory list')
     findings, seen = [], set()
     for item in vulnerabilities:
-        if not isinstance(item, dict) or item.get('withdrawn'):
+        if not isinstance(item, dict):
             raise DependencyError('invalid advisory')
         advisory = identifier(item.get('id'))
         if advisory in seen:
             raise DependencyError('duplicate advisory')
         seen.add(advisory)
+        withdrawn = item.get('withdrawn')
+        if withdrawn is not None:
+            # 已撤回公告不是現存弱點，但格式仍須正確。 / A withdrawn advisory is not a live finding, but must still be well formed.
+            if not isinstance(withdrawn, str) or not withdrawn:
+                raise DependencyError('invalid withdrawn timestamp')
+            continue
         affected = item.get('affected')
+        # OSV 保留 PyPI 原始大小寫與分隔符號，須依 PEP 503 比對。 / OSV keeps published PyPI spelling; compare by PEP 503 name.
         if (not isinstance(affected, list) or not affected or
                 not any(isinstance(a, dict) and isinstance(a.get('package'), dict)
                         and a['package'].get('ecosystem') == 'PyPI'
-                        and a['package'].get('name') == record['name'] for a in affected)):
+                        and isinstance(a['package'].get('name'), str)
+                        and canonical(a['package']['name']) == record['name'] for a in affected)):
             raise DependencyError('advisory package mismatch')
         aliases = item.get('aliases', [])
         if not isinstance(aliases, list) or len(aliases) > 100:

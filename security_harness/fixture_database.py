@@ -12,8 +12,12 @@ from psycopg import sql
 def connect(dsn, schema):
     if not re.fullmatch(r"epsilon_[a-f0-9]{16}", schema):
         raise ValueError("invalid fixture schema")
-    conn = psycopg.connect(dsn, row_factory=dict_row, connect_timeout=3)
-    conn.execute(sql.SQL("SET search_path TO {}, pg_catalog").format(sql.Identifier(schema)))
+    # 候選角色可鎖定 items；oracle 查詢須在短時間內失敗而非等到整體逾時。 / The candidate role can lock items;
+    # oracle queries must fail fast instead of waiting for the overall timeout.
+    conn = psycopg.connect(dsn, row_factory=dict_row, connect_timeout=3,
+                           options="-c statement_timeout=5000 -c lock_timeout=2000")
+    # pg_catalog 優先，候選 schema 不能遮蔽內建函式或運算子。 / pg_catalog first: the fixture schema cannot shadow built-ins.
+    conn.execute(sql.SQL("SET search_path TO pg_catalog, {}").format(sql.Identifier(schema)))
     return conn
 
 
@@ -26,9 +30,12 @@ def seed(dsn: str) -> tuple[str, dict[str, str]]:
     passwords = {name: secrets.token_urlsafe(24) for name in ("alice", "bob", "carol", "admin")}
     with connect(dsn, schema) as conn:
         conn.execute(sql.SQL("CREATE SCHEMA {}").format(sql.Identifier(schema)))
-        conn.execute("CREATE TABLE users (id text PRIMARY KEY, tenant text NOT NULL, role text NOT NULL, salt text NOT NULL, password_hash text NOT NULL)")
-        conn.execute("CREATE TABLE items (id integer PRIMARY KEY, tenant text NOT NULL, owner text NOT NULL REFERENCES users(id), value text NOT NULL)")
-        conn.execute("CREATE TABLE sessions (token_hash text PRIMARY KEY, user_id text NOT NULL REFERENCES users(id), expires_at timestamptz NOT NULL)")
+        # pg_catalog 位於搜尋路徑首位，建立物件須明確指定 schema。 / pg_catalog leads the search path, so creation names the schema.
+        for table, columns in (
+                ("users", "id text PRIMARY KEY, tenant text NOT NULL, role text NOT NULL, salt text NOT NULL, password_hash text NOT NULL"),
+                ("items", "id integer PRIMARY KEY, tenant text NOT NULL, owner text NOT NULL REFERENCES users(id), value text NOT NULL"),
+                ("sessions", "token_hash text PRIMARY KEY, user_id text NOT NULL REFERENCES users(id), expires_at timestamptz NOT NULL")):
+            conn.execute(sql.SQL("CREATE TABLE {} (" + columns + ")").format(sql.Identifier(schema, table)))
         for name, password in passwords.items():
             salt = secrets.token_hex(16)
             conn.execute("INSERT INTO users VALUES (%s,%s,%s,%s,%s)",

@@ -8,3 +8,13 @@ requires-python = ">=3.12,<3.13"
 testpaths = ["tests"]
 addopts = "-ra --strict-markers --tb=short"
 markers = ["integration: 需要隔離 PostgreSQL 測試環境 / requires the isolated PostgreSQL fixture"]
+# 任何新警告（含棄用）都使測試失敗。 / Any new warning, including deprecations, fails the run.
+filterwarnings = ["error"]
+
+[tool.ruff]
+target-version = "py312"
+extend-exclude = [".venv", ".tools", ".state", "artifacts"]
+
+[tool.ruff.lint]
+# pyflakes 與語法錯誤；不強制排版風格。 / Pyflakes and syntax errors; formatting style is not enforced.
+select = ["F", "E9"]
