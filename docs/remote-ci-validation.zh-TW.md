@@ -6,7 +6,7 @@
 
 驗收日期：2026-10-04（Asia/Taipei）。原始執行索引與 SHA 見 [remote-ci-evidence.json](remote-ci-evidence.json)。
 
-> **歷史紀錄。** 本文保留 2026-10-04 首版 main 的遠端驗收原貌。之後 main 已由規則集 24512048 保護，授權案例與 workflow 也已改版；現況以 [里程碑狀態](milestone-status.zh-TW.md) 開頭的「目前狀態」為準。
+> **歷史紀錄。** 本文保留 2026-10-04 首版 main 的遠端驗收原貌。之後 main 已由規則集 24512048 保護，授權案例與 workflow 也已改版；現況以 [里程碑狀態](milestone-status.zh-TW.md) 開頭的現況說明為準。
 
 ## 已實際驗證
 
@@ -35,7 +35,7 @@ gh api --method POST repos/chinchiang/MultiAgentEpsilon/rulesets \
   --input docs/github-main-ruleset.json
 ```
 
-這份具體規則要求：main 只能經 PR、至少一位 code owner 審查、推送新 commit 後舊審查失效、最近推送須另獲核准、討論已解決、`security-pilot` 檢查來自 GitHub Actions app 15368 且基線最新，並禁止刪除、force push，沒有 bypass actor。`.github/CODEOWNERS` 指定 repository owner；檔案本身並不啟用審查要求。
+這份具體規則要求：main 只能經 PR、至少一位 code owner 審查、推送新 commit 後舊審查失效、最近推送須另獲核准、討論已解決、`security-pilot` 檢查（當時的名稱；目前範本為 `trusted-security-pilot`）來自 GitHub Actions app 15368 且基線最新，並禁止刪除、force push，沒有 bypass actor。`.github/CODEOWNERS` 指定 repository owner；檔案本身並不啟用審查要求。
 
 套用後必須讀回 branch／ruleset，並以普通開發者角色驗證直接 push、缺審查與失敗 CI 的合併嘗試會被拒絕。當前未取得該角色的測試路徑，也未實作這些繞過驗收，因此不宣稱不可繞過。
 

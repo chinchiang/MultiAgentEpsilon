@@ -101,16 +101,25 @@ Wait a bounded time for the shared lock, so PR instances queue instead of failin
 
 
 def main():
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--settings", type=Path, required=True)
-    parser.add_argument("--gate-policy", type=Path, required=True)
-    parser.add_argument("--private-key", type=Path)
-    parser.add_argument("--pr", type=int)
-    parser.add_argument("--run-id", type=int)
-    parser.add_argument("--lock-file", type=Path)
-    parser.add_argument("--state-file", type=Path)
-    parser.add_argument("--validate-config", action="store_true")
-    parser.add_argument("--output", type=Path)
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--settings", type=Path, required=True,
+                        help='root 持有的發布器設定 / root-owned publisher settings')
+    parser.add_argument("--gate-policy", type=Path, required=True,
+                        help='已核准 evaluator 的政策副本 / policy copy from the approved evaluator')
+    parser.add_argument("--private-key", type=Path,
+                        help='App 私鑰（systemd credential 副本）/ App private key (systemd credential copy)')
+    parser.add_argument("--pr", type=int,
+                        help='要核對的 PR 編號 / pull request to reconcile')
+    parser.add_argument("--run-id", type=int,
+                        help='指定 workflow run；省略時選最新可信 run / specific workflow run; defaults to the latest trusted run')
+    parser.add_argument("--lock-file", type=Path,
+                        help='所有實例共用的鎖檔 / lock file shared by all instances')
+    parser.add_argument("--state-file", type=Path,
+                        help='此 PR 的快取與退避狀態 / cache and backoff state for this PR')
+    parser.add_argument("--validate-config", action="store_true",
+                        help='只驗證設定，不連線 GitHub / validate settings only; no GitHub access')
+    parser.add_argument("--output", type=Path,
+                        help='結果 JSON 路徑 / result JSON path')
     args = parser.parse_args()
     result = {"decision": "BLOCK", "code": "NOT_STARTED", "deployed": False}
     lock_fd = None

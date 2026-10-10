@@ -14,11 +14,15 @@ from security_harness.llm.benchmark_score import add_adjudication, read_adjudica
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--report', type=Path, required=True)
-    parser.add_argument('--case')
-    parser.add_argument('--decision', choices=('REFERENCE_CONFIRMED', 'REFERENCE_CHALLENGED', 'NEEDS_MORE_EVIDENCE'))
+    parser.add_argument('--report', type=Path, required=True,
+                        help='盲測報告 report.json / blind-review report.json')
+    parser.add_argument('--case',
+                        help='案例 ID / case ID')
+    parser.add_argument('--decision', choices=('REFERENCE_CONFIRMED', 'REFERENCE_CHALLENGED', 'NEEDS_MORE_EVIDENCE'),
+                        help='人工判讀結果 / human adjudication outcome')
     parser.add_argument('--reviewer', help='自報本機審查者標籤，身分未驗證 / asserted local reviewer label; identity is not authenticated')
-    parser.add_argument('--reason')
+    parser.add_argument('--reason',
+                        help='裁決理由（合成、無個資）/ adjudication reason (synthetic, no personal data)')
     parser.add_argument('--list-notes', action='store_true', help='驗證精確報告綁定並列出未簽章註記 / validate exact-report binding and list unsigned notes')
     args = parser.parse_args()
     try:

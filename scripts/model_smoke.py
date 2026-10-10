@@ -109,9 +109,11 @@ def require_model_roe(parser, providers, planned_calls):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--provider", choices=("mock", "gemini", "bedrock", "glm", "lmstudio"), action="append")
+    parser.add_argument("--provider", choices=("mock", "gemini", "bedrock", "glm", "lmstudio"), action="append",
+                        help='可重複指定；真實供應商需 --live / repeatable; live providers need --live')
     parser.add_argument("--live", action="store_true", help="允許選定供應商執行固定合成測試 / permit selected live providers for the fixed synthetic fixture")
-    parser.add_argument("--output", type=Path)
+    parser.add_argument("--output", type=Path,
+                        help='另存報告的路徑 / extra copy of the report')
     args = parser.parse_args()
     providers = args.provider or ["mock"]
     if len(providers) != len(set(providers)):

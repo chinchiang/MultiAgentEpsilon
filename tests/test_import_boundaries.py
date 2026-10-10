@@ -120,3 +120,17 @@ def test_ci_provenance_outside_actions_fails_with_a_message(tmp_path):
     result = subprocess.run([sys.executable, '-I', str(ROOT / 'scripts/write_ci_provenance.py')],
                             cwd=tmp_path, env=env, capture_output=True, text=True, timeout=20)
     assert result.returncode == 2 and 'GITHUB_REPOSITORY' in result.stderr and 'Traceback' not in result.stderr
+
+
+def test_every_cli_argument_has_bilingual_help():
+    import ast
+    import re
+    missing = []
+    for path in sorted((ROOT / 'scripts').glob('*.py')):
+        for node in ast.walk(ast.parse(path.read_text())):
+            if isinstance(node, ast.Call) and getattr(node.func, 'attr', '') == 'add_argument':
+                text = next((k.value.value for k in node.keywords if k.arg == 'help'
+                             and isinstance(k.value, ast.Constant)), '')
+                if not (re.search('[一-鿿]', text) and re.search('[A-Za-z]{3,}', text)):
+                    missing.append(f'{path.name}:{node.lineno}')
+    assert missing == []

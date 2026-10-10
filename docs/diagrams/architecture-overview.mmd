@@ -1,9 +1,9 @@
 flowchart TB
-    Source["候選原碼／PR head<br/>Candidate source as data"] --> Run
+    Source["候選原始碼／PR head<br/>Candidate source as data"] --> Run
     Trust["受信任基準／政策／RoE<br/>Trusted baseline / policy / RoE"] --> Run
     subgraph Evaluator["可信評估端 / Trusted evaluator"]
         Run["supervisor／限額 worker<br/>Registered, bounded execution"] --> Scan["G1：來源／SBOM／OSV；G2：機密<br/>Provenance / SCA / secret scanning"]
-        Scan --> Oracle["AUTH：32 案例與完整副作用<br/>External oracle / full-state checks"]
+        Scan --> Oracle["AUTH：44 案例、完整副作用與延遲變動<br/>44 cases / full state / delayed writes"]
         Oracle --> Decision["確定性判定／故障即阻擋<br/>Deterministic ALLOW / BLOCK"]
         Decision --> Report["摘要綁定與清理證據<br/>Bound report and cleanup"]
     end

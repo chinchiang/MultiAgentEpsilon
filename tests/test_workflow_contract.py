@@ -113,6 +113,7 @@ def test_publisher_step_names_match_the_workflow():
 
 def test_static_checks_pin_rules_for_trusted_and_candidate_trees():
     evaluator = job('trusted-security-pilot')
-    assert evaluator.count('ruff check --isolated --select F,E9') == 2
-    assert 'ruff check --isolated --select F,E9 --target-version py312 ../candidate' in evaluator
+    # 快取不可留在受掃描的樹中。 / No cache may be left inside a scanned tree.
+    assert evaluator.count('ruff check --no-cache --isolated --select F,E9') == 2
+    assert 'ruff check --no-cache --isolated --select F,E9 --target-version py312 ../candidate' in evaluator
     assert evaluator.index('Static checks') < evaluator.index('Evaluate candidate through external oracle')

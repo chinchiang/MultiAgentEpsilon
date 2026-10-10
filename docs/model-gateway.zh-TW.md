@@ -73,7 +73,7 @@ janitor 只處理已死亡的 owner；先停止 worker，再重新盤點 AWS 子
 
 新增 29 項離線生命週期回歸涵蓋 parent SIGTERM／SIGINT／SIGKILL、worker SIGKILL、忽略 SIGTERM 的 CLI 子程序、登記前中斷、成功待清理時中斷、清理途中取消、缺失／損壞／重複 key 證據、清理重試、PID／boot 身分保護及並行 janitor。既有 CI 的 always 清理步驟會執行相同 janitor；主機中斷需在恢復後、保留原 workspace 的環境執行。若整個 workspace／登記遺失，就無法由本地 janitor 重建證據；已送到供應商的遠端推論也不能保證停止或不計費。直接呼叫未綁定 run directory 的 adapter 不具有此 runner 的孤兒回收契約。
 
-已加入 [固定合成案例的盲測與裁決框架](blind-review.zh-TW.md)，保存獨立意見、分歧及帶分母的品質指標。ACK smoke 預設不保留回答文字；盲測會保存經 schema 驗證的結構化 finding／reason，供人工判讀。後續仍需 GLM 真實推論驗收、Claude 失敗回應的後續觀測、兩個真實家族的重複實驗與裁決身分驗證，再擴充 SCA／SBOM／G3、完整 G5 與 G6。不得用多數模型同意替代確定性 oracle 或獨立合併核准。
+已加入 [固定合成案例的盲測與裁決框架](blind-review.zh-TW.md)，保存獨立意見、分歧及帶分母的品質指標。ACK smoke 預設不保留回答文字；盲測會保存經 schema 驗證的結構化 finding／reason，供人工判讀。後續仍需 GLM 真實推論驗收、Claude 失敗回應的後續觀測、兩個真實家族的重複實驗與裁決身分驗證，再擴充安裝映像與其他生態系的 SBOM／SCA（鎖定檔 SBOM 與 OSV 查詢已於 2026-10-08 實作）、G3、完整 G5 與 G6。不得用多數模型同意替代確定性 oracle 或獨立合併核准。
 
 
 ## 2026-10-05 Bedrock 真實串接修正
@@ -82,7 +82,7 @@ janitor 只處理已死亡的 owner；先停止 worker，再重新盤點 AWS 子
 
 測試命令現在按照真正的 `--cli-input-json` 檔案參數讀取，驗證可重新定位及禁止寫入；另加入啟動失敗、封存失敗的描述元清理回歸。取消、期限及孤兒回收仍沿用既有監督程序。
 
-目前設定的 Claude 模型拒絕固定溫度參數。Bedrock 介面因此只傳送輸出詞元上限，取樣採模型預設值；Gemini 與 GLM 的既有設定不變。不同供應商的取樣設定並不相同，不能將一次配對測試視為控制所有變因的偏誤實驗。
+目前設定的 Claude 模型拒絕固定溫度參數。Bedrock 介面因此只傳送輸出詞元上限，取樣採模型預設值；Gemini、GLM 與 LM Studio 使用溫度 0。不同供應商的取樣設定並不相同，不能將一次配對測試視為控制所有變因的偏誤實驗。
 
 若使用者已透過安全環境設定提供 AWS 暫時憑證，而繼承的 `AWS_PROFILE` 指向不存在的設定檔，可只在單次命令移除 `AWS_PROFILE`／`AWS_DEFAULT_PROFILE`。必須先使用相同選擇方式執行 `sts get-caller-identity`，核對目標帳號及角色；單一登入角色可能是權限集名稱加上 AWS 保留前綴與識別後綴。不得因此切換至未核對的其他身分，也不改寫原有設定檔。若有受管理的 AWS 身分，仍優先按照執行環境的身分清單選擇，不套用此方式。
 
@@ -92,13 +92,13 @@ janitor 只處理已死亡的 owner；先停止 worker，再重新盤點 AWS 子
 
 盲測的 Gemini／Bedrock 現在使用原生 JSON schema；Gemini 3 Flash 審查使用 LOW 思考程度，思考詞元納入回報輸出用量。固定 ACK 仍為純文字。本機嚴格驗證、截斷阻擋與既有預算不變，詳見[設定、限制與真實驗收](structured-output.zh-TW.md)。
 
-目前可執行的介接器為 mock、Gemini、Bedrock、GLM 與 LM Studio；設定入口為 `.env.example` 與對應環境變數，不讀取模型清單 JSON。GLM 真實連線依使用者指示暫停，離線協定測試持續保留。每次送出呼叫前會將預留次數與詞元上限同步寫入磁碟；程序遭 SIGKILL 時可保留 IN_FLIGHT 紀錄，但無法據此推算遠端實際費用或保證遠端推論已取消。
+目前可執行的介接器為 mock、Gemini、Bedrock、GLM 與 LM Studio；設定一律讀取程序環境變數，`.env.example` 只是參考清單、程式不會載入；設定與目的地授權集中在 `security_harness/llm/config.py`。GLM 與 LM Studio 的遠端主機必須列在 `security/model-roe.json` 的 `allowed_remote_hosts`，否則以 `CONFIGURATION` 拒絕，API 金鑰不會送出；只有 LM Studio 的字面 loopback HTTP 不需列入。GLM 真實連線依使用者指示暫停，離線協定測試持續保留。每次送出呼叫前會將預留次數與詞元上限同步寫入磁碟；程序遭 SIGKILL 時可保留 IN_FLIGHT 紀錄，但無法據此推算遠端實際費用或保證遠端推論已取消。
 
 環境重建後可執行 `python -I scripts/install_aws_cli.py`，安裝官方 PGP 簽章已驗證並固定封存雜湊的 AWS CLI 2.37.10。模型指令使用 `AWS_CLI_PATH="$PWD/.tools/aws-bin/aws"`；SSO profile 與非機密設定另存於忽略的 `.state/bedrock/config`，以 `AWS_CONFIG_FILE` 指定。臨時憑證到期仍須經安全環境更新，不會從聊天或測試報告載入。
 
 ## LM Studio 地端文字模型
 
-新增 `--provider lmstudio`，設定 `LMSTUDIO_BASE_URL`、`LMSTUDIO_MODEL_ID` 及選用的 `LMSTUDIO_API_KEY`。只對字面 loopback 位址開放 HTTP，其餘維持 HTTPS／443；先查核 `/v1/models` 的精確 ID，再傳送文字與 JSON schema。完整設定、網路界線及待完成真實驗收見 [LM Studio 文件](lmstudio.zh-TW.md)。固定 ACK 的整輪期限為 `min(130, 30 × 供應商數 + 10)` 秒；新增供應商不會提高 130 秒上限。
+新增 `--provider lmstudio`，設定 `LMSTUDIO_BASE_URL`、`LMSTUDIO_MODEL_ID` 及選用的 `LMSTUDIO_API_KEY`。只對字面 loopback 位址開放 HTTP，其餘維持 HTTPS／443；先查核 `/v1/models` 的精確 ID，再傳送文字與 JSON schema。完整設定、網路界線及待完成真實驗收見 [LM Studio 文件](lmstudio.zh-TW.md)。固定 ACK 的整輪期限為 `min(130, 30 × 供應商數 + 10)` 秒；新增供應商不會提高 130 秒上限。盲測計畫若最壞情況超過整輪上限，`model_review.py` 會在送出付費呼叫前提醒結果可能為 INCOMPLETE。逐次證據另記錄 `output_budget_verified`（供應商是否回報輸出用量），單次 HTTP 逾時記為 `IO_TIMEOUT`。
 
 <a id="en"></a>
 
@@ -143,6 +143,8 @@ October 5 added registered supervisor/worker/AWS processes with PID/start ticks/
 Janitor stops worker then rescans AWS groups, takes flock, verifies process identity, retries cleanup failures, and marks orphaned runs CANCELLED without upgrading old success. Corrupt reports become minimal failures without raw errors. Losing the whole workspace requires platform recovery; remote billing and unregistered direct-adapter processes are outside these guarantees.
 
 AWS CLI 2.37.9 did not accept piped /dev/stdin JSON as expected; seekable sealed memfd corrected the actual CLI path. Some Claude models rejected temperature, so Bedrock retains model-default sampling while Gemini/GLM/LM Studio use zero. This difference is recorded, not hidden. If explicitly supplied temporary credentials are shadowed by an invalid inherited AWS_PROFILE, remove the profile only for a validated command after STS confirms the intended account/role through that same chain; managed identity remains preferable. Historical Bedrock ACK reported 63 input/19 output with cleanup. Metadata-query denial neither proves nor disproves inference permission.
+
+Settings always come from the process environment; `.env.example` is a reference list the scripts never load. Configuration and destination authorization live in `security_harness/llm/config.py`: remote GLM and LM Studio hosts must appear in the model RoE's `allowed_remote_hosts`, otherwise the call is refused as CONFIGURATION before any key is sent; only LM Studio's literal loopback HTTP needs no entry. Live review plans whose worst case exceeds the run cap print a warning before paid calls. Call evidence records `output_budget_verified`, and single HTTP I/O timeouts are recorded as IO_TIMEOUT.
 
 Blind reviews, repeated observations, human identity, and model-family comparisons have separate acceptance requirements. New LM Studio code has offline/loopback-fixture coverage; real Nemotron weights/server/schema behavior are still pending. GLM live remains paused; no arbitrary model registry or automatic model download was added.
 

@@ -12,6 +12,9 @@ ROOT = Path(__file__).resolve().parents[1]
 if __name__ == '__main__':
     sys.path.insert(0, str(ROOT))
 from security_harness import candidate_git
+# 臺灣慣用語規則：中文段落與圖表不得使用這些中國大陸用語。 / Taiwan terminology: these mainland-Chinese terms
+# are refused in Chinese prose and diagrams.
+MAINLAND_TERMS = ('軟件', '信息', '數據庫', '服務器', '默認', '用戶', '文件夾', '服務端', '網絡', '視頻', '原碼')
 START = '<!-- repository-tree:start -->'
 END = '<!-- repository-tree:end -->'
 
@@ -41,6 +44,16 @@ def repository_tree(paths):
     return '```text\n' + '\n'.join(lines) + '\n```'
 
 
+def mermaid_labels(text):
+    """Mermaid 節點與連線標籤的各行文字。 / Each line of Mermaid node and edge labels."""
+    labels = re.findall(r'(?:\[|\{|\|)"([^"]*)"(?:\]|\}|\|)', text)
+    return [part for label in labels for part in label.split('<br/>') if part.strip()]
+
+
+def terminology_errors(name, text):
+    return [f'{name}: mainland term / 非臺灣慣用語 {term}' for term in MAINLAND_TERMS if term in text]
+
+
 def validate(paths, root=ROOT):
     errors = []
     markdown = [root / p for p in paths if p.endswith('.md')]
@@ -49,6 +62,7 @@ def validate(paths, root=ROOT):
         for anchor in ('zh-tw', 'en'):
             if text.count(f'<a id="{anchor}"></a>') != 1:
                 errors.append(f'{path.relative_to(root)}: language anchor / 語言入口 {anchor}')
+        errors.extend(terminology_errors(path.name, text.split('<a id="en"></a>', 1)[0]))
         if '<a id="en"></a>' in text:
             zh, en = text.split('<a id="en"></a>', 1)
             if not re.search('[\u4e00-\u9fff]', zh) or not re.search('[A-Za-z]{3,}', en):
@@ -77,10 +91,17 @@ def validate(paths, root=ROOT):
             if not svg.is_file():
                 errors.append(f'{name}: missing SVG / 缺少 SVG')
                 continue
+            source = path.read_text()
+            errors.extend(terminology_errors(name, source))
             try:
                 element = ET.fromstring(svg.read_text())
                 if any(e.tag.rsplit('}', 1)[-1] in ('script', 'foreignObject') for e in element.iter()):
                     errors.append(f'{name}: active SVG content / SVG 含主動內容')
+                # 換行可能拆開文字，因此忽略空白後比對。 / Wrapping can split text, so compare without whitespace.
+                rendered = re.sub(r'\s+', '', ''.join(element.itertext()))
+                stale = [label for label in mermaid_labels(source) if re.sub(r'\s+', '', label) not in rendered]
+                if stale:
+                    errors.append(f'{name}: SVG not regenerated / SVG 未重新產生 ({len(stale)} labels)')
             except ET.ParseError:
                 errors.append(f'{name}: invalid SVG / SVG 格式錯誤')
         if path.suffix == '.py':

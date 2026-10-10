@@ -103,11 +103,15 @@ def prepare(root, output, evaluator_sha, app_id=None, installation_id=None):
 
 
 def main():
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--evaluator-sha", required=True)
-    parser.add_argument("--app-id", type=int)
-    parser.add_argument("--installation-id", type=int)
-    parser.add_argument("--output-dir", type=Path, required=True)
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--evaluator-sha", required=True,
+                        help='已核准並合併的 evaluator 完整 commit SHA / approved, merged evaluator commit SHA')
+    parser.add_argument("--app-id", type=int,
+                        help='專用 GitHub App ID，未建立時省略 / dedicated GitHub App ID; omit until registered')
+    parser.add_argument("--installation-id", type=int,
+                        help='App 安裝 ID，未建立時省略 / App installation ID; omit until installed')
+    parser.add_argument("--output-dir", type=Path, required=True,
+                        help='儲存庫外的新輸出目錄，不可覆寫 / new output directory outside the repository; never overwritten')
     args = parser.parse_args()
     try:
         result = prepare(ROOT, args.output_dir, args.evaluator_sha, args.app_id, args.installation_id)

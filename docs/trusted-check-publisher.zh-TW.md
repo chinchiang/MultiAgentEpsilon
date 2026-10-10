@@ -47,7 +47,7 @@ python3.12 -I scripts/prepare_publisher_deployment.py \
 | `/etc/epsilon-publisher/github-app.pem` | App 私鑰；**root 持有、0600**，放在程式 checkout 之外。unit 以 systemd `LoadCredential` 提供服務一份私有唯讀副本，服務帳號無法讀取或替換原檔 |
 | `/var/lib/epsilon-publisher` | 執行鎖、固定格式結果與每個 PR 的狀態檔（已驗證 blob 摘要快取、上次發布結果、節流退避期限）；服務帳號持有，0700 |
 
-範本 repository ID 是 1403706385、workflow ID 是 374309318；部署前讀回確認。填入真正 App ID、Installation ID、已核准 `evaluator_sha`、該 evaluator 的 worktree manifest digest，以及 gate policy 原檔 SHA-256。reviewers 須與 `security/trust-policy.json` 的 `baseline_reviewers` 一致（範本為 chinchiang、CatGrocery、d98922036ntu）；PR 作者、該 run 的觸發者及 PR 中任一 commit 的作者／提交者一律不計（rerun 請由非核准者執行），且只採計具寫入權限者；minimum_regression_tests 設為核准基準的完整測試數；範本值即為本版基準的完整測試數，CI 的證據自我檢查也以它為下限，測試被刪減會直接失敗。
+範本 repository ID 是 1403706385、workflow ID 是 374309318；部署前讀回確認。填入真正 App ID、Installation ID、已核准 `evaluator_sha`、該 evaluator 的 worktree manifest digest，以及 gate policy 原檔 SHA-256。reviewers 須與 `security/trust-policy.json` 的 `baseline_reviewers` 一致（範本為 chinchiang、CatGrocery、d98922036ntu）；PR 作者、該 run 的觸發者及 PR 中任一 commit 的作者／提交者一律不計（rerun 請由非核准者執行），且只採計具寫入權限者；minimum_regression_tests 設為核准基準的完整測試數；範本值即為本版基準的完整測試數，CI 的證據自我檢查也以它為下限，測試被刪減會直接失敗；JUnit 中每項測試的 classname／name 必須非空且唯一，重複項目不能灌高數量。發布器另要求評估 job 的文件、候選文件與靜態檢查步驟，以及獨立的 `trusted-mutation-tests` job 與最終關卡步驟都成功。
 
 新增可信審查者須同步 `.github/CODEOWNERS`、`security/trust-policy.json` 與發布器範本，並由原主分支的既有可信審查者核准這項清單變更。候選 PR 內新增的名字不能核准自己的加入；清單合併後才適用於後續基準變更。部署管理者也須採用已核准版本重新準備外部 `publisher.json` 與基準 pins，候選或已合併的設定都不會自動覆寫正式主機的政策。
 
@@ -95,7 +95,7 @@ systemctl daemon-reload
 systemctl enable --now epsilon-publisher@<驗收-PR-編號>.timer
 ```
 
-同一儲存庫的所有實例共用執行鎖。每次完成後等待 120 秒；每個 PR 需啟用對應 timer。已驗證的 blob 摘要以內容位址快取在狀態檔，每個週期約 20 次 API 請求，遠低於安裝權杖的速率上限。程式限制 300 次 API 請求與 API 階段 240 秒；unit 限制總執行 300 秒、256 MiB 記憶體及 64 個工作項目。來源核對限 200 個檔案、單檔 1 MiB、總計 20 MiB；超限保持失敗，不能縮減清冊後放行。
+同一儲存庫的所有實例共用執行鎖，最多排隊 60 秒，逾時回報 `LOCK_BUSY`（不發布檢查），timer 另以 `RandomizedDelaySec` 錯開啟動。每次完成後等待 120 秒；每個 PR 需啟用對應 timer。服務以 `/usr/bin/python3` 執行且只接受 Python 3.12（例如 Ubuntu 24.04）。已驗證的 blob 摘要以內容位址快取在狀態檔，每個週期約 20 次 API 請求，遠低於安裝權杖的速率上限。程式限制 600 次 API 請求與 API 階段 240 秒；unit 限制總執行 300 秒、256 MiB 記憶體及 64 個工作項目。來源核對限 500 個檔案（冷快取時每檔一次 blob 請求，測試確保儲存庫檔案數保有一倍餘裕）、單檔 1 MiB、總計 20 MiB；超限保持失敗，不能縮減清冊後放行。
 
 此版是**一次性發布程式與輪詢範本**，沒有 webhook 接收器、所有 PR 自動發現或高可用監控。Checks 成功狀態沒有原生期限，輪詢有延遲；GitHub 或服務中斷也可能無法撤銷既有綠燈。必須保留原生審查與既有必要檢查，驗證撤銷行為並監控服務及過期結果；不得把範本或本地回歸當成即時、不可繞過的正式驗收。
 
@@ -151,7 +151,7 @@ After secure transfer, run sha256sum -c SHA256SUMS. Root installs code under /op
 | /etc/epsilon-publisher/github-app.pem | Root-owned 0600 outside checkout; systemd LoadCredential supplies a private read-only copy, original inaccessible to service |
 | /var/lib/epsilon-publisher | Service-owned 0700 lock/results/per-PR state, verified blob cache, last result, backoff deadline |
 
-Read back repository ID 1403706385/workflow ID 374309318 before deployment. Set real App/installation IDs, approved evaluator SHA/worktree manifest digest, and exact gate-policy SHA-256. Reviewers match baseline_reviewers (chinchiang, CatGrocery, d98922036ntu); exclude PR author, original/rerun actors, every PR commit author/committer, and non-writers. Rerun as a non-approver. minimum_regression_tests must equal the approved complete baseline; CI self-check uses it to reject deleted coverage. JUnit identities must also be nonempty/unique; duplicate records cannot inflate this minimum.
+Read back repository ID 1403706385/workflow ID 374309318 before deployment. Set real App/installation IDs, approved evaluator SHA/worktree manifest digest, and exact gate-policy SHA-256. Reviewers match baseline_reviewers (chinchiang, CatGrocery, d98922036ntu); exclude PR author, original/rerun actors, every PR commit author/committer, and non-writers. Rerun as a non-approver. minimum_regression_tests must equal the approved complete baseline; CI self-check uses it to reject deleted coverage. JUnit identities must also be nonempty/unique; duplicate records cannot inflate this minimum. The publisher also requires the evaluator's documentation, candidate-documentation and static-check steps, the separate trusted-mutation-tests job, and the final gate step to succeed.
 
 Reviewer additions must synchronize CODEOWNERS, trust-policy, and publisher template and be approved by an existing base reviewer. New candidate names cannot approve their own admission. Deployment administrators explicitly regenerate external policy/pins from approved code; merged files never overwrite host configuration automatically. Missing settings return SETTINGS_INCOMPLETE before token/check creation. A changed main SHA blocks until an explicitly reviewed/accepted pin update.
 
@@ -187,7 +187,7 @@ systemctl daemon-reload
 systemctl enable --now epsilon-publisher@<acceptance-PR-number>.timer
 ```
 
-All instances share a repository lock. Each PR needs its own timer, waiting 120 seconds after completion. Content-addressed verified blob caching reduces ordinary cycles to roughly 20 requests. Hard bounds: 300 API calls, 240-second API phase; unit 300 seconds/256 MiB/64 tasks; source inventory 200 files, 1 MiB/file, 20 MiB total. Exceeding limits fails; never shrink the inventory to pass.
+All instances share a repository lock and queue for at most 60 seconds, then report LOCK_BUSY without publishing; timers add RandomizedDelaySec jitter. Each PR needs its own timer, waiting 120 seconds after completion. The service runs `/usr/bin/python3` and accepts Python 3.12 only (for example Ubuntu 24.04). Content-addressed verified blob caching reduces ordinary cycles to roughly 20 requests. Hard bounds: 600 API calls, 240-second API phase; unit 300 seconds/256 MiB/64 tasks; source inventory 500 files (a cold cache costs one blob request per file; a test keeps the repository at no more than half that), 1 MiB/file, 20 MiB total. Exceeding limits fails; never shrink the inventory to pass.
 
 This is a one-shot publisher plus polling template, without webhook reception, PR auto-discovery, or high availability. Successful Checks have no native expiry; polling/outages delay revocation. Retain native reviews/existing required checks, monitor stale status/service health, and test revocation. Local regressions/templates do not prove instantaneous non-bypassable enforcement.
 

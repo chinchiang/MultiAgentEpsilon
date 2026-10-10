@@ -108,3 +108,13 @@ def test_file_swapped_for_symlink_after_inventory_is_not_followed(tmp_path):
     with pytest.raises(ValueError, match="read limit"):
         (root / "big.py").write_bytes(b"x" * 2048)
         read_regular(root / "big.py", 1024)
+
+
+def test_tool_caches_are_never_scanned_or_hashed(tmp_path):
+    # 靜態檢查快取是二進位生成物；不可讓 G2 失敗或改變 subject。 / Static-check caches are generated binaries;
+    # they must neither fail G2 nor change the subject digest.
+    from security_harness.inputs import input_files
+    (tmp_path / "app.py").write_text("x = 1\n")
+    (tmp_path / ".ruff_cache/0.16.9").mkdir(parents=True)
+    (tmp_path / ".ruff_cache/0.16.9/123").write_bytes(b"\x00\x01binary")
+    assert [p.name for p in input_files(tmp_path)] == ["app.py"]

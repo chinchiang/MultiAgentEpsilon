@@ -28,7 +28,7 @@ Gemini 回報輸入 1,896、輸出 1,151（包含回報的思考詞元）；Clau
 
 ## 2026-10-08 新版目錄驗收
 
-更新 AWS 臨時憑證後，STS 確認指定帳號與角色有效。新版 `synthetic-review-v2` 已移除逐案 CWE 提示；第一批 `66d86091-639e-4b25-b74f-94c2d6c0358f` 的 Gemini 四次有效，Claude 四次遭 `OUTPUT_CONFIGURATION` 拒絕，報告維持 INCOMPLETE 且清理完成。Bedrock 官方支援清單只列陣列 `minItems=0/1`；移除 `maxItems` 後，Claude 單案 B10（`2fcffea2-53a1-4c02-8697-04009d240950`）成功。本機三項 finding 上限與嚴格證據驗證維持不變。
+更新 AWS 臨時憑證後，STS 確認指定帳號與角色有效。當時的 `synthetic-review-v2`（現行為 v3）已移除逐案 CWE 提示；第一批 `66d86091-639e-4b25-b74f-94c2d6c0358f` 的 Gemini 四次有效，Claude 四次遭 `OUTPUT_CONFIGURATION` 拒絕，報告維持 INCOMPLETE 且清理完成。Bedrock 官方支援清單只列陣列 `minItems=0/1`；移除 `maxItems` 後，Claude 單案 B10（`2fcffea2-53a1-4c02-8697-04009d240950`）成功。本機三項 finding 上限與嚴格證據驗證維持不變。
 
 修正後重新執行同一批 B09～B12，報告 `edf879a8-390d-4bc0-bcfb-0234325871c3` 為 COMPLETE，八個回應全部有效。Gemini 與 Claude Sonnet 各有兩個真陽性、兩個真陰性，零誤報／漏報，兩個弱點行號全部命中；四組配對均可比較且無分歧，程序群組與暫存目錄清理完成。每次預留 1,024 個輸出詞元，整批八次／8,192 個，期限 130 秒。
 

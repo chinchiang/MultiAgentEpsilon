@@ -2,11 +2,11 @@ flowchart TB
     Start["啟動安全測試／先保留 BLOCK 證據<br/>Start run / early blocking evidence"] --> Parent["登記擁有者與群組／握手後執行<br/>Durable registration before worker release"]
     Parent --> Config["核對 RoE／政策／來源摘要<br/>Validate scope, policy and source digests"]
     Config --> G1["G1：PyPI／鎖定檔 SBOM／OSV<br/>Pinned provenance and exact-version SCA"]
-    G1 --> G2["G2：Gitleaks／工作樹與自身 HEAD 歷史<br/>Bounded archives and commit/tag metadata"]
+    G1 --> G2["G2：Gitleaks／工作樹與自身 HEAD 歷史<br/>Gitleaks / worktree and own HEAD history"]
     G2 --> Ready{"掃描完整且零 findings？<br/>Complete and clean scans?"}
-    Ready -->|"是 / Yes"| Runtime["核對映像／lock，啟動無網路 app／DB<br/>Pinned runtime and isolated containers"]
+    Ready -->|"是 / Yes"| Runtime["啟動無網路 app／DB，評估前核對隔離設定<br/>Isolated containers verified before evaluation"]
     Ready -->|"否 / No"| Skip["AUTH 不執行，保留缺口<br/>NOT_RUN with failure evidence"]
-    Runtime --> Auth["外部 oracle：32 案例／完整回應與 DB 狀態<br/>32 exact authorization and side-effect checks"]
+    Runtime --> Auth["外部 oracle：44 案例／完整回應與 DB 狀態<br/>44 exact authorization and side-effect checks"]
     Auth --> Pending["重查摘要／等待清理<br/>Recheck digests / AWAITING_CLEANUP"]
     Skip --> Pending
     Config -->|"錯誤 / Error"| Error["保留錯誤／BLOCK<br/>Fail closed with evidence"]

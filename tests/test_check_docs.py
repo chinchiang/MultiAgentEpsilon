@@ -68,3 +68,21 @@ def test_candidate_mode_ignores_untracked_files_and_cannot_update_tree(tmp_path,
     assert check_docs.main(["--root", str(root)]) == 0
     with pytest.raises(SystemExit):
         check_docs.main(["--root", str(root), "--update-tree"])
+
+
+def test_mainland_terms_in_chinese_prose_are_reported(tmp_path):
+    root = repo(tmp_path, base_files(**{"guide.md": BILINGUAL.replace("內容", "服務端的默認設定")}))
+    found = errors(root)
+    assert any("服務端" in e for e in found) and any("默認" in e for e in found)
+
+
+def test_english_half_may_quote_terms_without_failing(tmp_path):
+    root = repo(tmp_path, base_files(**{"guide.md": BILINGUAL + "Glossary: avoid 服務端.\n"}))
+    assert errors(root) == []
+
+
+def test_stale_svg_labels_are_reported(tmp_path):
+    svg = '<svg xmlns="http://www.w3.org/2000/svg"><text>舊標籤</text><text>Old label</text></svg>'
+    root = repo(tmp_path, base_files(**{"docs/d.mmd": 'flowchart TB\n    A["新標籤<br/>New label"]\n',
+                                         "docs/d.svg": svg}))
+    assert any("SVG not regenerated" in e for e in errors(root))

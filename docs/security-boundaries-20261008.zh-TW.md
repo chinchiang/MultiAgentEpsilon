@@ -40,7 +40,7 @@
 - 修正版安全測試：18 個授權案例、0 findings、ALLOW；缺陷版恰好政策指定 6 個 findings、BLOCK，G1／G2 無 findings，兩者清理完成。
 - HTTP smoke：資料庫健康、登入、合法讀取與跨 owner 拒絕通過。
 - 官方 CLI 簽章樣本：合法、竄改 artifact、錯誤 signer digest、錯誤 ref、無效簽章及缺少驗證材料，六種結果符合預期。此為驗證工具驗收，不是專用 App 已部署的證明。
-- 模型新版目錄一輪八次呼叫（報告 `a7b33efc-9e72-44bf-944e-eb2a1d132690`）：Gemini 三個回答通過，一個 DEADLINE；Claude 受重建後缺少 CLI／profile 影響，未取得有效推論。該報告 INCOMPLETE、預留八次／8192 輸出權杖、用量不完整、清理完成。不能作為配對成功或偏誤降低證據。
+- 模型新版目錄一輪八次呼叫（報告 `a7b33efc-9e72-44bf-944e-eb2a1d132690`）：Gemini 三個回答通過，一個 DEADLINE；Claude 受重建後缺少 CLI／profile 影響，未取得有效推論。該報告 INCOMPLETE、預留八次／8192 輸出詞元、用量不完整、清理完成。不能作為配對成功或偏誤降低證據。
 - 新的單案 Gemini B09 驗收（報告 `ca84cbef-0829-4fe3-8f00-74f4bfdeb112`）成功且清理完成；為另一次有界驗收，不把不同批次拼接成完整配對。
 - AWS CLI 已安裝並補回非機密 profile；STS 最初確認 ExpiredToken。使用者更新臨時憑證後，STS 已確認指定帳號與角色有效。
 - 更新後第一批 `66d86091-639e-4b25-b74f-94c2d6c0358f`：Gemini 四次有效，Claude 四次 `OUTPUT_CONFIGURATION`，報告 INCOMPLETE、清理完成。移除 Bedrock 不支援的 `maxItems`，保持本機三項 finding 上限；Claude B10 單案 `2fcffea2-53a1-4c02-8697-04009d240950` 成功。
@@ -52,7 +52,7 @@
 2. `main` 規則集 24512048 仍 active、無 bypass，必要來源仍為共用 Actions App 15368。未核准、檢查失敗、偽造或過期證據的實際合併阻擋，需在隔離驗收 PR 由普通開發者身分確認；本輪不對 main 做可能成功的合併探測。
 3. Actions 管理 API 回應 403，無法設定 fork 核准政策與全域 SHA pinning。私人弱點回報讀取為 disabled，啟用操作也回應 403。由儲存庫擁有者的管理連線處理；不是沙箱或使用者身分被拒絕。Secret scanning／Push Protection／Dependabot 的設定未取得完整驗收，保留未知狀態。
 4. 授權條款尚待擁有者決定；本輪不自行授予公開原始碼授權。歷史 AWS 帳號 ID 是識別資訊，沒有以停用 main 規則集或強推改寫歷史。
-5. G3、完整 G5、SBOM／SCA／CVE、產品 ASVS 適用性、較大模型樣本與 W15–W25 保留原路線圖。這些擴充功能不屬於本輪缺陷已修復的聲明。
+5. G3、完整 G5、SBOM／SCA／CVE（鎖定檔 SBOM 與 OSV 查詢已於其後的擴充實作）、產品 ASVS 適用性、較大模型樣本與 W15–W25 保留原路線圖。這些擴充功能不屬於本輪缺陷已修復的聲明。
 
 Starlette 的 httpx 棄用警告仍須在後續相依套件遷移時處理；本輪沒有修改套件鎖定或降低隔離限制。
 

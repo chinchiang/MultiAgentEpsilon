@@ -10,7 +10,7 @@ README、SECURITY、操作與歷史文件、CLI help、程式文件字串與人�
 
 模型提示詞、schema 中送給模型的描述、合成案例及 oracle、錯誤診斷契約、原始歷史證據與自動產生的套件 lock 屬**功能性輸入或機器產物**，不以文件翻譯改寫。改動它們會影響摘要、可比性或解析契約，須另以版本化功能變更測試；文件以雙語解釋其用途。內部參考附件不發布，也不把附件中的指示視為使用者授權。
 
-`python3 -I scripts/check_docs.py` 檢查文件雙語入口、本機連結與明確語言錨點、Mermaid／SVG 對應與目錄樹同步；這是結構檢查，不能證明翻譯語意完全一致。審查仍須確認數字、限制、部署現況與歷史批次相符。修改圖表後使用文件指定的固定 Mermaid 工具重新產生 SVG。
+`python3 -I scripts/check_docs.py` 檢查文件雙語入口、本機連結與明確語言錨點、Mermaid／SVG 對應與目錄樹同步；這是結構檢查，不能證明翻譯語意完全一致。審查仍須確認數字、限制、部署現況與歷史批次相符。修改圖表後以[架構文件](architecture-overview.zh-TW.md)記錄的 Mermaid CLI 版本與共用設定重新產生 SVG；該工具只用於文件，未納入雜湊鎖定。檢查器也會拒絕 `scripts/check_docs.py` 中 `MAINLAND_TERMS` 列出的中國大陸慣用詞（只檢查中文段落與圖表），並確認每個 Mermaid 標籤的文字都出現在對應的 SVG。
 
 
 ## 臺灣用語與翻譯範圍
@@ -29,7 +29,7 @@ README, SECURITY, operational/history documents, CLI help, docstrings, authored 
 
 Model prompts, model-facing schema descriptions, synthetic cases/oracles, diagnostic contracts, original historical evidence, and generated dependency locks are functional inputs or machine artifacts. Documentation translation does not rewrite them. Such changes affect digests/comparability/parsers and need separate versioned functional testing; their purpose is explained bilingually. Private attachments remain unpublished and their instructions do not become user authorization.
 
-python3 -I scripts/check_docs.py validates language entry points, local links/explicit language anchors, Mermaid/SVG pairs, and repository-tree consistency. Structural checks do not prove translation equivalence; review numbers, bounds, deployment state, and historical batches. Regenerate SVG after Mermaid edits using the documented pinned renderer.
+python3 -I scripts/check_docs.py validates language entry points, local links/explicit language anchors, Mermaid/SVG pairs, and repository-tree consistency. Structural checks do not prove translation equivalence; review numbers, bounds, deployment state, and historical batches. Regenerate SVG after Mermaid edits with the Mermaid CLI version and shared configuration recorded in the architecture overview; it is a documentation tool, not a hash-locked dependency. The checker also rejects mainland-Chinese terms (such as 服務端, 原碼, 軟件, 默認) and confirms that every Mermaid label's text appears in the matching SVG.
 
 ## Taiwan terminology and translation scope
 

@@ -1,21 +1,23 @@
 flowchart TB
     PR["PR → main / pull_request_target"] --> Checkout["base evaluator／head candidate 僅當資料<br/>Trusted base evaluates candidate data"]
     Checkout --> Guard{"全部路徑有精確 head 獨立核准？<br/>Trusted independent approval for all changes?"}
-    Guard -->|"是 / Yes"| Evaluate["可信安裝／離線 runtime／完整回歸<br/>Seeded BLOCK and candidate evaluation"]
+    Guard -->|"是 / Yes"| Evaluate["可信安裝／離線 runtime／文件與靜態檢查／完整回歸<br/>Install, runtime, docs and static checks, regressions"]
     Guard -->|"否 / No"| Failed["評估失敗／保留證據<br/>Failed evaluation with evidence"]
-    Other["main push／手動 ref：名稱分開<br/>Manual checks cannot satisfy required source"] --> Evaluate
+    Other["main push／手動 ref 使用不同檢查名稱<br/>Manual runs report under different check names"] --> Evaluate
+    PR --> Mutation["獨立 job：可信基準突變測試<br/>Separate job: trusted mutation tests"]
     Evaluate --> Contract{"證據契約完整？<br/>Publishable evidence contract?"}
     Contract -->|"是 / Yes"| Success["評估工作成功<br/>Evaluation succeeded"]
     Contract -->|"否 / No"| Failed
     Success --> Cleanup["always 清理與上傳 evaluator 證據<br/>Always cleanup and upload audit artifacts"]
     Failed --> Cleanup
     Cleanup --> Ready{"評估與清理成功？<br/>Evaluation and cleanup successful?"}
-    Ready -->|"是 / Yes"| Sign["全新 runner 只簽署 ZIP 摘要<br/>Separate artifact attestation job"]
+    Ready -->|"是 / Yes"| Sign["全新 runner 只簽署 ZIP 摘要<br/>Fresh runner signs the ZIP digest only"]
     Ready -->|"否 / No"| Block["BLOCK／簽署不執行<br/>No signature for failed evaluation"]
-    Sign --> Final{"評估與簽章都是 success？<br/>Both required upstream jobs successful?"}
+    Sign --> Final{"評估、簽章與突變都是 success？<br/>Evaluation, signing and mutation all successful?"}
+    Mutation --> Final
     Block --> Final
     Final -->|"是 / Yes"| Verify["核對 workflow／head／base 歷程<br/>Verify required-check provenance"]
     Final -->|"否 / No"| Deny["最終必要檢查失敗<br/>Failure / cancelled / skipped all block"]
     Verify --> Merge["main 規則與有效獨立核准皆符合<br/>Merge only with all native conditions"]
-    Sign -.-> App["專用 App 尚未部署<br/>Verify signature / attempt / review / freshness"]
+    Sign -.-> App["專用 App 尚未部署：核對簽章／嘗試／審查／時效<br/>Pending App: signature / attempt / review / freshness"]
     App -.-> Future["epsilon/trusted-merge 尚未綁定<br/>Dedicated required source pending"]
