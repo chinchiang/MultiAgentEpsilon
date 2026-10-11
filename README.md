@@ -27,9 +27,9 @@ MultiAgentEpsilon/
 │   └── llm/             模型 gateway、adapter、盲審與評分
 ├── tests/               契約、缺陷變體與隔離回歸
 ├── requirements.lock    固定版本與套件雜湊
-├── requirements-test.lock 測試工具（Hypothesis、ruff）的版本與雜湊
+├── requirements-test.lock 測試工具（Hypothesis、ruff 與相依的 sortedcontainers）的版本與雜湊
 ├── requirements.in      套件宣告
-├── pyproject.toml       Python 與 pytest 設定
+├── pyproject.toml       Python、pytest 與 ruff 設定
 └── SECURITY.md          資安回報及處理範圍
 ```
 
@@ -50,7 +50,7 @@ python3 -I scripts/dev_db.py start
 .venv/bin/python -I scripts/run_security.py
 ```
 
-沒有 Docker 或 PostgreSQL 時，可先以 `.venv/bin/python -m pytest -m "not integration"` 執行離線子集；完整驗收仍須包含整合測試。靜態檢查為 `.venv/bin/ruff check .`，pytest 會把任何警告視為失敗。
+沒有 Docker 或 PostgreSQL 時，可先以 `.venv/bin/python -m pytest -m "not integration"` 執行離線子集；完整驗收仍須包含整合測試。靜態檢查為 `.venv/bin/ruff check .`，文件檢查為 `python3 -I scripts/check_docs.py`，pytest 會把任何警告視為失敗。
 
 CI runner 以一般使用者（非 root）執行。若本機或容器內以 root 執行，pytest 標頭會顯示警告；root 可讀取權限為 000 的目錄，權限相關測試會走不同分支。推送前請以一般使用者再跑一次，例如 `runuser -u <使用者> -- .venv/bin/python -m pytest -m "not integration" --basetemp=<該使用者可寫目錄>`（checkout 與 `.venv` 須對該使用者可讀）。2026-10-10 main 曾因此失敗一次。
 
@@ -88,7 +88,7 @@ python3 -I scripts/dev_db.py stop
 
 模型 runner 也由 supervisor 管理，成功結果需待清理完成才發布；SIGKILL 後使用 `scripts/cleanup_runs.py` 回收登記的 worker／AWS 程序群組。正式證據位於 `artifacts/<run-id>/report.json`，模型結果仍僅供參考。
 
-G2 與 subject digest 共用輸入清冊：生成物名稱只在 repository 根目錄排除，巢狀同名來源仍納入；Python／pytest 快取另行排除，任何已追蹤的保留生成路徑會拒絕執行。來源 symlink、不可讀目錄、輸入超限及雜湊時檔案變動會拒絕。Gitleaks 的掃描快照重新命名並映射回原路徑，避免工具的隱含目錄排除縮減範圍，且不接受候選的 inline allow 註解。Git 歷史以候選 repository 自己的 HEAD 可達的全部 blobs 為範圍，且為必要條件：淺層 clone、沒有 `.git`、沒有 commit，或位於外層 repo 中的子目錄都會阻擋。對候選的 git 呼叫停用 fsmonitor、hooks 與 transport，候選的 `.git/config` 不能讓 host 執行程式。gzip／zip／tar 依限額展開，容器本身的註解、檔名與 extra 欄位也一併掃描；不支援、損壞、加密、超限，或含有未列出成員位元組的內容會阻擋。二進位檔預設阻擋；需先把內容的 SHA-256 經審查加入 evaluator 端受保護的 `security/binary-allowlist.json`，之後仍以 ASCII／UTF-16LE 可讀字串掃描內嵌機密，內容一改就需重新審查。排除的依賴／暫存內容與其他 refs 不宣稱已掃描。
+G2 與 subject digest 共用輸入清冊：生成物名稱只在 儲存庫根目錄排除，巢狀同名來源仍納入；Python／pytest 快取另行排除，任何已追蹤的保留生成路徑會拒絕執行。來源 symlink、不可讀目錄、輸入超限及雜湊時檔案變動會拒絕。Gitleaks 的掃描快照重新命名並映射回原路徑，避免工具的隱含目錄排除縮減範圍，且不接受候選的 inline allow 註解。Git 歷史以候選儲存庫 自己的 HEAD 可達的全部 blobs 為範圍，且為必要條件：淺層 clone、沒有 `.git`、沒有 commit，或位於外層儲存庫 中的子目錄都會阻擋。對候選的 git 呼叫停用 fsmonitor、hooks 與 transport，候選的 `.git/config` 不能讓 host 執行程式。gzip／zip／tar 依限額展開，容器本身的註解、檔名與 extra 欄位也一併掃描；不支援、損壞、加密、超限，或含有未列出成員位元組的內容會阻擋。二進位檔預設阻擋；需先把內容的 SHA-256 經審查加入 evaluator 端受保護的 `security/binary-allowlist.json`，之後仍以 ASCII／UTF-16LE 可讀字串掃描內嵌機密，內容一改就需重新審查。排除的依賴／暫存內容與其他 refs 不宣稱已掃描。
 
 ## CI 啟用界線
 
@@ -98,7 +98,7 @@ G2 與 subject digest 共用輸入清冊：生成物名稱只在 repository 根�
 
 **main 規則集 24512048 已啟用並讀回確認。** 必要檢查仍使用共用 GitHub Actions App 15368；名稱與 App ID 無法唯一識別可信 workflow：有推送權限者可以用自己的 workflow，回訪的 fork 貢獻者也能以 `on: pull_request` 產生同名綠燈。`pull_request_target` 執行的是 PR **base 分支**上的 workflow，同一路徑在其他分支的修改版本有相同 workflow ID。專用 App 綁定前，審查者在核准或合併前應執行 `python3 -I scripts/verify_required_check.py --pr <編號>`：它以 GitHub 的 run 中繼資料確認 PR head 上每一個 `trusted-security-pilot` 都來自可信 workflow 路徑的 `pull_request_target` run，run 的 head 分支與此 PR 相同，且沒有任何（含已關閉）共用同一 head、卻開到其他分支的 PR；任一條件不符即 BLOCK。[專用 App 發布程式與部署範本](docs/trusted-check-publisher.zh-TW.md)已準備，App 與服務尚未部署。基準遷移程序見 [操作文件](docs/trusted-execution.zh-TW.md)，先前遠端基線見 [驗收紀錄](docs/remote-ci-validation.zh-TW.md)。
 
-正式 main `f1a640f` 已合併 PR #21（[2026-10-10 稽核修正](docs/audit-20261010.zh-TW.md)）與 PR #22，合併後的 [CI 執行 38098147162](https://github.com/chinchiang/MultiAgentEpsilon/actions/runs/38098147162) 成功；該基準為 1149 項測試，修正版 44 個案例／0 項缺陷為 ALLOW，指定缺陷版恰好 9 項缺陷為 BLOCK，並完成突變測試、清理與簽章。專用 GitHub App 部署與真實 LM Studio 驗收仍待完成。
+正式 main `9508a7c`（2026-10-11 UTC）已合併 PR #21（[2026-10-10 稽核修正](docs/audit-20261010.zh-TW.md)）至 PR #24（含受控基準遷移與文件），合併後的 [CI 執行 38106362078](https://github.com/chinchiang/MultiAgentEpsilon/actions/runs/38106362078) 成功；該基準為 1150 項測試，修正版 44 個案例／0 項缺陷為 ALLOW，指定缺陷版恰好 9 項缺陷為 BLOCK，並完成突變測試、清理與簽章。專用 GitHub App 部署與真實 LM Studio 驗收仍待完成。
 
 ## 離線突變與性質測試
 
@@ -171,7 +171,7 @@ python3 -I scripts/dev_db.py start
 python3 -I scripts/dev_db.py stop
 ```
 
-Without Docker or PostgreSQL, `.venv/bin/python -m pytest -m "not integration"` runs the offline subset; full acceptance still includes integration tests. Static checks run with `.venv/bin/ruff check .`, and pytest treats every warning as an error.
+Without Docker or PostgreSQL, `.venv/bin/python -m pytest -m "not integration"` runs the offline subset; full acceptance still includes integration tests. Static checks run with `.venv/bin/ruff check .`, documentation checks with `python3 -I scripts/check_docs.py`, and pytest treats every warning as an error.
 
 The CI runner is an ordinary non-root user. When run as root locally or in a container, the pytest header prints a warning: root can read mode-000 directories, so permission-dependent tests take other branches. Before pushing, rerun as an ordinary user, for example `runuser -u <user> -- .venv/bin/python -m pytest -m "not integration" --basetemp=<a directory that user can write>` (the checkout and `.venv` must be readable by that user). Main failed once for this reason on October 10.
 
@@ -202,13 +202,13 @@ gzip/ZIP/tar expansion is bounded and also scans comments, names, extra fields, 
 
 ## CI and merge boundaries
 
-`pull_request_target` executes the base evaluator, installation, and tests. Candidate checkout is data; only scoped fixture Python reaches a networkless container. Evaluator permissions are read-only for contents, PRs, and Actions; no model/deployment keys are supplied. A fresh signing job holds OIDC/attestation write permissions. The final `trusted-security-pilot` succeeds only after evaluation and signing succeed. Manual runs use distinct names and cannot replace the formal required check. CI validates its evidence with the publisher's contract before upload.
+`pull_request_target` executes the base evaluator, installation, and tests. Candidate checkout is data; only scoped fixture Python reaches a networkless container. Evaluator permissions are read-only for contents, PRs, and Actions; no model/deployment keys are supplied. A fresh signing job holds OIDC/attestation write permissions. The final `trusted-security-pilot` succeeds only after evaluation, signing and the separate trusted mutation job all succeed. Manual runs use distinct names and cannot replace the formal required check. CI validates its evidence with the publisher's contract before upload.
 
 Every path, including fixture and documentation, requires an independent, write-capable trusted reviewer approving the current head. Live GitHub checks reject stale/dismissed/self approvals and contributors to the PR commits. A baseline update is evaluated by the old baseline; only after legitimate merging does it become the next baseline.
 
 Ruleset 24512048 is active without bypass, but the shared Actions App 15368 and a check name do not uniquely identify a trusted workflow. Until the dedicated App is deployed, run `python3 -I scripts/verify_required_check.py --pr <number>` before approval/merge. It validates every same-named check's event, workflow, head repository/branch, whole-run success, and absence of another-base or retargeted PR sharing that head, including closed PRs. See the [publisher guide](docs/trusted-check-publisher.zh-TW.md#en). App deployment and developer-role denial acceptance remain pending.
 
-Reviewed main `f1a640f` merged PR #21 (the [October 10 audit](docs/audit-20261010.zh-TW.md#en)) and PR #22; post-merge [run 38098147162](https://github.com/chinchiang/MultiAgentEpsilon/actions/runs/38098147162) succeeded with the 1149-test baseline: the fixed target allowed 44 cases with zero findings, the seeded target was blocked with exactly nine, and mutation tests, cleanup and signatures were verified. Dedicated GitHub App deployment and real LM Studio acceptance remain pending.
+Reviewed main `9508a7c` (October 11) merged PRs #21 (the [October 10 audit](docs/audit-20261010.zh-TW.md#en)) through #24 (controlled baseline migration and documentation); post-merge [run 38106362078](https://github.com/chinchiang/MultiAgentEpsilon/actions/runs/38106362078) succeeded with the 1150-test baseline: the fixed target allowed 44 cases with zero findings, the seeded target was blocked with exactly nine, and mutation tests, cleanup and signatures were verified. Dedicated GitHub App deployment and real LM Studio acceptance remain pending.
 
 ## Offline mutation and property tests
 

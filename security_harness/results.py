@@ -64,7 +64,7 @@ def digest_file(path: Path) -> str:
 
 
 def subject_digest(root: Path) -> str:
-    """綁定完整輸入工作樹，包含文件與未追蹤原碼；明確排除生成環境、狀態與執行證據。內容摘要不代表簽署者身分或不可變儲存。
+    """綁定完整輸入工作樹，包含文件與未追蹤原始碼；明確排除生成環境、狀態與執行證據。內容摘要不代表簽署者身分或不可變儲存。
 
 Bind the complete input worktree, including docs and untracked source files.
 

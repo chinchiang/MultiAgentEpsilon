@@ -28,7 +28,7 @@
 .venv/bin/python -m pytest tests/test_model_benchmark.py
 ```
 
-runner 預設 512 output tokens／次，可明確選擇 1024；每批最多 16 次呼叫且合計預留不超過 8192 output tokens。每次請求期限 30 秒，HTTP I/O 上限亦為 30 秒；整輪期限為 `min(130, 20 × 呼叫數 + 10)` 秒，整輪期限可先於最後一次請求期限到達。不同預算或案例子集屬於不同實驗，不能悄悄合併為同一個可比結果。不重試或自動增加付費供應商。Bedrock／GLM 仍需要各自的可用身分、模型及連線。
+runner 預設 512 輸出詞元／次，可明確選擇 1024；每批最多 16 次呼叫且合計預留不超過 8192 輸出詞元。每次請求期限 30 秒，HTTP I/O 上限亦為 30 秒；整輪期限為 `min(130, 20 × 呼叫數 + 10)` 秒，整輪期限可先於最後一次請求期限到達。不同預算或案例子集屬於不同實驗，不能悄悄合併為同一個可比結果。不重試或自動增加付費供應商。Bedrock／GLM 仍需要各自的可用身分、模型及連線。
 
 沿用模型 supervisor、登記後才執行的 worker／AWS CLI 與 `scripts/cleanup_runs.py`。正式報告為 `artifacts/<run-id>/report.json`，`operation` 為 `model-smoke`、`task` 為 `blind-review`。中斷仍保留完整預定案例清單；未取得可用回答的案例不會消失。若 catalog／oracle 或預期計畫不一致，評分失敗，不能發布 COMPLETE。
 
@@ -59,9 +59,9 @@ runner 預設 512 output tokens／次，可明確選擇 1024；每批最多 16 �
 | positive_miss_rate_all | (全部正例－tp)／全部正例，包含未判讀與工具失敗造成的缺口 |
 | finding_precision／finding_recall_all | 以 CWE＋根因行號比對 reference；分類正確但定位錯誤不算 finding 命中 |
 | pairwise disagreement | 只比較雙方有效且非 ABSTAIN 的 verdict＋CWE／行號集合，同時顯示可比較數與預定數 |
-| usage／elapsed | 供應商已回報的 token 小計與耗時；缺 usage 為未知，`usage_complete` 為 false，金額成本為 null |
+| usage／elapsed | 供應商已回報的 詞元小計與耗時；缺 usage 為未知，`usage_complete` 為 false，金額成本為 null |
 
-這裡沒有把 token 換算成確切帳單；尚需模型價格、hidden reasoning／cache 計費及供應商帳單核對。取消後遠端工作也可能繼續產生費用。
+這裡沒有把詞元換算成確切帳單；尚需模型價格、hidden reasoning／cache 計費及供應商帳單核對。取消後遠端工作也可能繼續產生費用。
 
 ## 裁決流程
 
@@ -88,10 +88,10 @@ runner 預設 512 output tokens／次，可明確選擇 1024；每批最多 16 �
 
 | 輪次 | 參數 | 實際結果 |
 |---|---|---|
-| 首輪 | 6 次、512 output tokens／次、HTTP I/O 10 秒 | 1 個有效回答、2 個逾時、3 個截斷；INCOMPLETE，未將失敗視為 CLEAN |
-| 調整後 | 6 次、1024 output tokens／次、HTTP I/O 30 秒；整輪 130 秒上限 | 6 個有效回答、tp=3／tn=3／fp=0／fn=0，3 個根因位置均命中；清理完成 |
+| 首輪 | 6 次、512 輸出詞元／次、HTTP I/O 10 秒 | 1 個有效回答、2 個逾時、3 個截斷；INCOMPLETE，未將失敗視為 CLEAN |
+| 調整後 | 6 次、1024 輸出詞元／次、HTTP I/O 30 秒；整輪 130 秒上限 | 6 個有效回答、tp=3／tn=3／fp=0／fn=0，3 個根因位置均命中；清理完成 |
 
-第二輪 API 回報輸入 2134、輸出 716 tokens；首輪有未取得 usage 的請求，不能宣稱這些數字是兩輪的完整計費量。兩輪共 12 次實際模型請求，無自動重試；兩份結果均保留於本地 artifacts。這是一次參數調整後的有限驗證，不是不同模型間的統計比較。六案均因 SINGLE_REVIEWER 保持待審；沒有自動建立任何人工裁決。
+第二輪 API 回報輸入 2134、輸出 716 詞元；首輪有未取得 usage 的請求，不能宣稱這些數字是兩輪的完整計費量。兩輪共 12 次實際模型請求，無自動重試；兩份結果均保留於本地 artifacts。這是一次參數調整後的有限驗證，不是不同模型間的統計比較。六案均因 SINGLE_REVIEWER 保持待審；沒有自動建立任何人工裁決。
 
 
 ## 2026-10-05 Gemini／Claude 有限配對驗收
@@ -106,7 +106,7 @@ Gemini 回報輸入 1,708、輸出 463 個詞元；Claude 三個有效回應小�
 
 本輪案例目錄升為 `synthetic-review-v2`：所有案例移除指定 CWE 類別的提示，兩個供應商仍收到同一份內容與不透明識別值。舊版結果只作歷史記錄，不與新版指標直接混算。人工註記工具會顯示供應商與參考答案，屬揭盲後裁決；其身分未驗證，不是獨立盲審，也不會更動安全閘門。
 
-結構化輸出依供應商支援的 JSON schema 子集設定：Gemini 使用來源行號上下限及 `maxItems=3`；Bedrock 使用允許行號的列舉值，不傳送它不支援的數值上下限、字串長度或 `maxItems` 關鍵字。兩者的提示均要求最多三項 findings 與簡短理由；三項上限、非空、400 字元上限、不可見字元、精確引用與 verdict 一致性仍由本機嚴格驗證。格式合法不代表證據正確。
+結構化輸出依供應商支援的 JSON schema 子集設定：Gemini 與 LM Studio 使用來源行號上下限及 `maxItems=3`；Bedrock 使用允許行號的列舉值，不傳送它不支援的數值上下限、字串長度或 `maxItems` 關鍵字。兩者的提示均要求最多三項 findings 與簡短理由；三項上限、非空、400 字元上限、不可見字元、精確引用與 verdict 一致性仍由本機嚴格驗證。格式合法不代表證據正確。
 
 可用 `python -I scripts/review_adjudicate.py --report <report.json> --list-notes` 讀取註記；消費端會重新驗證報告與精確摘要綁定，舊報告的註記不能套用至新版，身分仍標示未驗證。離線回歸包含 GLM 協定的盲審、評分與清理全路徑，不會連線到內網端點。
 
@@ -178,4 +178,4 @@ B01/B02/B07/B08 Gemini/Claude pairing used eight calls with 1,024 output tokens 
 
 A separate B08 Claude diagnostic returned a correct valid response; it did not overwrite or splice into the failed batch. Only block/usage types were recorded, not the original failed body, so its exact cause cannot be reconstructed. No traversal/SSRF or full twelve-case live acceptance happened in that batch; B09–B12 were tested later. Reports now describe actual selected case counts rather than a fixed six-case/two-weakness scope, without rewriting historical artifacts.
 
-Catalog v2 removed per-case CWE hints for both providers; v1 metrics remain historical. Gemini schema uses line bounds/maxItems=3; Bedrock uses allowed-line enums and omits unsupported numeric/string/array bounds. Both request concise reasons and at most three findings; local validation enforces all bounds, safe characters, exact quotes, and consistency regardless of native schema support. Format compliance is not evidence correctness.
+Catalog v2 removed per-case CWE hints for both providers; v1 metrics remain historical. Gemini/LM Studio schemas use line bounds/maxItems=3; Bedrock uses allowed-line enums and omits unsupported numeric/string/array bounds. Both request concise reasons and at most three findings; local validation enforces all bounds, safe characters, exact quotes, and consistency regardless of native schema support. Format compliance is not evidence correctness.

@@ -10,13 +10,13 @@
 
 | 身分 | 租戶／角色 | 可以 | 不可以 |
 |---|---|---|---|
-| 匿名／偽造 token | 無 | 健康檢查、提交登入資料 | 讀寫資料、匯出 |
+| 匿名／偽造權杖 | 無 | 健康檢查、提交登入資料 | 讀寫資料、匯出 |
 | alice | t1／member | 讀寫刪除 item 1 | 讀寫刪除 bob／t2 資料、改 owner、管理匯出 |
 | bob | t1／member | 讀寫刪除 item 2 | 讀寫刪除 alice／t2 資料、管理匯出 |
 | carol | t2／member | 讀寫刪除 item 3 | 讀寫刪除 t1 資料 |
 | admin | t1／admin | 依委派讀寫刪除 t1 資料、匯出 t1 | 讀寫刪除或匯出 t2 資料 |
 
-登入憑證隨每次 schema 產生；session 使用隨機 opaque token，資料庫只存 token hash，15 分鐘到期，登出即刪除。這是 fixture 的最小認證，不是完整登入安全方案，尚未驗證 MFA、防暴力破解或生產等級 session 政策。HTTP 僅本機，沒有 TLS 合規聲明。
+登入憑證隨每次 schema 產生；session 使用隨機 opaque 權杖，資料庫只存權杖雜湊，15 分鐘到期，登出即刪除。這是 fixture 的最小認證，不是完整登入安全方案，尚未驗證 MFA、防暴力破解或生產等級 session 政策。HTTP 僅本機，沒有 TLS 合規聲明。
 
 受測操作為讀取、更新、刪除及租戶匯出，尚未提供建立等完整產品 CRUD。更新採單一具 tenant／owner／role 條件的 SQL，避免先查後寫的授權窗口。測試包含 44 個案例（含刪除、過期與已登出工作階段、各端點的匿名／偽造身分、越界 ID 與 NUL 輸入，以及延遲副作用），會查 PostgreSQL 真實副作用；另有真實 HTTP 啟動／登入 smoke。可信 CI 在無網路容器中執行候選 fixture，由容器外的 oracle 經受限 HTTP bridge 與獨立資料庫查詢評分；本機開發另有在 loopback 執行真實 HTTP 的版本。兩者都屬灰箱，不能稱為完整純黑箱 DAST。
 

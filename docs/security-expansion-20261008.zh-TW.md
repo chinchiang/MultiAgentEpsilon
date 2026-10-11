@@ -10,7 +10,7 @@
 
 G1 在 PyPI 固定版本、SHA-256、來源與冷卻期查核之外，加入 OSV 精確版本查詢。每個鎖定套件都必須完成查詢；任何已回報漏洞均阻擋，包括沒有嚴重度的項目，不設自動忽略清單。OSV 沒有回報漏洞只表示當次資料庫查詢結果，不能證明套件安全。
 
-每批最多 128 個套件、4 個並行查詢，每次 20 秒、回應上限 1 MiB。固定 HTTPS 目的地、保持 TLS 驗證、不跟隨重新導向、不重試、不讀取候選提供的網址或安裝套件。回應包含分頁游標、重複 JSON key、錯誤套件、撤回或重複 advisory、回應過大及資料庫不可用時，均不能當成完整查詢。
+每批最多 128 個套件、4 個並行查詢，每次 20 秒、回應上限 1 MiB。固定 HTTPS 目的地、保持 TLS 驗證、不跟隨重新導向、不重試、不讀取候選提供的網址或安裝套件。回應包含分頁游標、重複 JSON key、錯誤套件、重複 advisory、回應過大及資料庫不可用時，均不能當成完整查詢；已撤回（withdrawn）的 advisory 則略過（格式仍須正確），不會單獨讓整個查詢失敗。
 
 `report.json` 的 G1 記錄保留精確套件／版本、查詢時間、每筆回應摘要、advisory ID／CVE 別名及完整性。失敗保留 ERROR 查詢與已取得的 findings，不能抹掉未完成的分母。決策器與發布器要求 G1 的 SBOM、套件清冊、查詢清冊及 findings 相符且未過期；缺少 SCA 的舊式 G1 記錄不能在新政策下放行。
 
@@ -66,9 +66,9 @@ AWS STS 經既有非機密設定選擇器確認回覆 ExpiredToken；已要求�
 
 候選 CI [37781203657](https://github.com/chinchiang/MultiAgentEpsilon/actions/runs/37781203657) 的評估工作完成 760 項回歸及正反例，但簽章工作因 GitHub 回覆「個人私人儲存庫不支援 artifact attestation」而失敗。這是失敗批次，不能列為完整 CI 成功或正式簽章驗收。當時連線修改可見度回覆 403；其後擁有者已恢復公開，完整重跑及簽章成功，未移除簽章要求。
 
-本輪進一步將原評估工作的顯示名稱改為 `trusted-security-evaluation`，新增無權杖、無 checkout、無寫入權限的最終工作 `trusted-security-pilot`，依賴評估與簽章兩個工作。最終工作使用 `always()`，只有兩項結果都是 success 才通過；failure／cancelled／skipped 都失敗。手動執行使用 `manual-security-completion`，不能冒充必要檢查。
+本輪進一步將原評估工作的顯示名稱改為 `trusted-security-evaluation`，新增無權杖、無 checkout、無寫入權限的最終工作 `trusted-security-pilot`，依賴評估與簽章兩個工作（2026-10-10 起另依賴獨立的突變測試 job）。最終工作使用 `always()`，只有各項結果都是 success 才通過；failure／cancelled／skipped 都失敗。手動執行使用 `manual-security-completion`，不能冒充必要檢查。
 
-發布器要求評估、簽章、最終關卡三個工作及指定步驟全部成功。過渡期來源驗證器也重新讀取整個 workflow 的最新狀態及 attempt，防止既有 main 的評估綠燈掩蓋簽章失敗。16 種上游結果組合以實際 shell 回歸，另有整體 workflow 失敗、簽章失敗、最終工作缺失／跳過及缺少必要步驟等反例。
+發布器要求評估、突變測試、簽章、最終關卡四個 job 及指定步驟全部成功。過渡期來源驗證器也重新讀取整個 workflow 的最新狀態及 attempt，防止既有 main 的評估綠燈掩蓋簽章失敗。16 種上游結果組合以實際 shell 回歸，另有整體 workflow 失敗、簽章失敗、最終工作缺失／跳過及缺少必要步驟等反例。
 
 此修改已經獨立核准並合併，現行 main 包含最終關卡。合併仍須核對整體工作流程與來源；失敗批次保留，成功證據來自之後的完整重跑。
 
@@ -80,7 +80,7 @@ This records the expansion later merged into main 438d7a4: 787 tests, fixed 32/0
 
 ## G1: locked-package SBOM and OSV
 
-CycloneDX 1.6 describes declared pinned Python lock contents and approved hashes, not installed runtime/image contents. OSV queries exact package versions at fixed HTTPS endpoints, up to 128 packages/four workers/20-second requests/1 MiB responses, with no redirects/retries/arbitrary URLs. Every advisory blocks regardless of missing severity. Partial pagination, duplicate/wrong packages, withdrawn or duplicate advisories, oversized/unavailable responses produce incomplete/error evidence.
+CycloneDX 1.6 describes declared pinned Python lock contents and approved hashes, not installed runtime/image contents. OSV queries exact package versions at fixed HTTPS endpoints, up to 128 packages/four workers/20-second requests/1 MiB responses, with no redirects/retries/arbitrary URLs. Every advisory blocks regardless of missing severity. Partial pagination, duplicate/wrong packages, duplicate advisories, oversized/unavailable responses produce incomplete/error evidence; withdrawn advisories are skipped (their format is still validated) rather than failing the whole query.
 
 G1 retains package/version/hash, query/advisory/CVE metadata, coverage, and partial-error evidence. Fresh SBOM/queries/provenance/findings must agree; old G1 evidence cannot pass. OSV is unsigned, not KEV/EPSS/behavioral analysis or other-ecosystem coverage. Package provenance verification remains part of G1.
 
@@ -106,4 +106,4 @@ The locked 23-package set returned zero advisories. A deliberately uninstalled u
 
 AWS STS returned ExpiredToken for v3 live acceptance, which remained pending. Historical candidate run 37781203657 had 760 passing tests but failed artifact signing because GitHub did not support that personal private repository's attestations; evaluation alone was not a complete pass. The owner later restored public visibility; full main run 37853277868 succeeded with verified signatures and 787 tests. Signatures were not removed to bypass platform eligibility.
 
-The final trusted-security-pilot job has no permissions/checkout and runs always, succeeding only if evaluation and signing both succeed. Manual runs use distinct names. Publisher validates all three jobs/steps, full workflow source, attempt, and signed artifact. All 16 upstream status combinations were tested in shell regressions. This final gate is merged, not merely a candidate proposal. Remaining work includes dedicated-App deployment/binding, actual developer-role negative acceptance, v3 live model samples, product applicability, broader languages/installed SBOMs, and operational governance.
+The final trusted-security-pilot job has no permissions/checkout and runs always, succeeding only if evaluation, signing and mutation all succeed. Manual runs use distinct names. Publisher validates all four jobs/steps (evaluation, mutation, signing, final gate), full workflow source, attempt, and signed artifact. All 16 upstream status combinations were tested in shell regressions. This final gate is merged, not merely a candidate proposal. Remaining work includes dedicated-App deployment/binding, actual developer-role negative acceptance, v3 live model samples, product applicability, broader languages/installed SBOMs, and operational governance.

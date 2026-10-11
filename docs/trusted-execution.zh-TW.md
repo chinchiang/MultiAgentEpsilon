@@ -11,7 +11,7 @@
 1. PR 工作流程由 `pull_request_target` 觸發，從 base SHA checkout evaluator。候選 head SHA checkout 到另一目錄，僅由可信工具讀取，不能在 runner 上直接執行候選 bootstrap、pytest、conftest、Dockerfile 或程式。
 2. 可信 bootstrap 安裝基準 lock 的 wheels；runtime 以固定 Python image digest、離線網路及 `--require-hashes` 建置。候選來源不能提供建置指令。runtime 記錄 image ID 及 lock／entrypoint／builder 的 hash；修改後須重建。
 3. AUTH 將限定的 Python fixture 來源複製成唯讀快照，容器使用非 root UID、唯讀 root filesystem、cap-drop、no-new-privileges、CPU／記憶體／PID 限制與 `--network=none`。
-4. 候選只能讀取合成 app 設定、使用唯讀掛載的 PostgreSQL Unix socket，及在容器的限額 tmpfs 建立 HTTP socket；沒有可寫的 host HTTP 目錄。它不取得 DB 管理員密碼、評分器、報告、GitHub token、模型憑證或 Docker socket。
+4. 候選只能讀取合成 app 設定、使用唯讀掛載的 PostgreSQL Unix socket，及在容器的限額 tmpfs 建立 HTTP socket；沒有可寫的 host HTTP 目錄。它不取得 DB 管理員密碼、評分器、報告、GitHub 權杖、模型憑證或 Docker socket。
 5. PostgreSQL 在另一個無網路容器中使用 SCRAM 認證；app 帳號僅有指定 schema/table 所需權限。host oracle 獨立建置資料與查詢完整 fixture 狀態。唯讀 runtime bridge 在候選容器內發送 HTTP，不跟隨重新導向，拒絕壓縮及超大回應；host 使用限時、限量 Docker exec 串流接收不可信回應，不連接候選控制的 host socket 路徑。bridge 不負責評分。
 6. AUTH 超時／取消後，父程序依唯一 run label 清除本次容器；普通結束亦在 finally 清除。錯誤及未完成 gate 保存為 BLOCK。來源或 evaluator 在執行期間持續變動也會 BLOCK。
 
@@ -19,10 +19,10 @@
 
 ## 案例、輸入與錯誤證據
 
-- `security/policy.json` 的 `gate_contracts` 指定 gate kind 與必要 case ID。AUTH 必須恰好涵蓋唯一集合；數量、findings 與逐案例結果須一致。schema 3 拒絕舊版（schema 1、2）證據及不同 run ID 的混用。G2 另須有候選 repository 本身的 HEAD 歷史（`history_required`）；沒有 `.git`、沒有 commit，或位於外層 repo 之中的子目錄都不能取得 ALLOW。
-- 掃描／subject 共用 `security_harness/inputs.py`。只在 repo 根目錄排除生成目錄；Python／pytest 快取為明列例外，已追蹤的保留生成路徑會拒絕。候選容器使用相同清冊的 fixture Python 子集，未納入來源不會掛載。
+- `security/policy.json` 的 `gate_contracts` 指定 gate kind 與必要 case ID。AUTH 必須恰好涵蓋唯一集合；數量、findings 與逐案例結果須一致。schema 3 拒絕舊版（schema 1、2）證據及不同 run ID 的混用。G2 另須有候選儲存庫 本身的 HEAD 歷史（`history_required`）；沒有 `.git`、沒有 commit，或位於外層儲存庫 之中的子目錄都不能取得 ALLOW。
+- 掃描／subject 共用 `security_harness/inputs.py`。只在 儲存庫根目錄排除生成目錄；Python／pytest 快取為明列例外，已追蹤的保留生成路徑會拒絕。候選容器使用相同清冊的 fixture Python 子集，未納入來源不會掛載。
 - Gitleaks 使用重新命名的快照，映射回原始檔名；原始 `.git` 等名字不能觸發工具的隱含略過，候選 inline allow 與 ignore file 不能自行抑制可信掃描。壓縮檔除了展開成員，也掃描容器本身的可讀字串（註解、檔名、extra 欄位、gzip 標頭）；zip 中不屬於任何列出成員的位元組、帶資料的目錄項目，以及 tar 結尾之後的非零資料一律阻擋。
-- 對候選 repository 的 git 呼叫一律經 `security_harness/candidate_git.py`：以命令列 `-c` 停用 fsmonitor、hooks 與任何 transport，清除繼承的 `GIT_*` 環境變數，不讀取系統／全域設定，並以明確的 `--git-dir` 指向候選自己的 `.git` 目錄（gitfile 或 symlink 拒絕）。候選的 `.git/config` 是資料，不能讓 host 執行程式。
+- 對候選儲存庫 的 git 呼叫一律經 `security_harness/candidate_git.py`：以命令列 `-c` 停用 fsmonitor、hooks 與任何 transport，清除繼承的 `GIT_*` 環境變數，不讀取系統／全域設定，並以明確的 `--git-dir` 指向候選自己的 `.git` 目錄（gitfile 或 symlink 拒絕）。候選的 `.git/config` 是資料，不能讓 host 執行程式。
 - Audit envelope 在設定解析之前寫出，subject／policy 尚不可得時保留 null。錯誤只記錄階段與例外型別。報告採原子替換，初始 RUNNING 報告一律 BLOCK；沒有成功完成的證據不得放行。
 - `artifacts/latest.txt` 僅索引 security run；其他入口各有 `<operation>-latest.txt`。本機 artifact 未簽章；CI 另以獨立工作簽署上傳 ZIP，保存 7 天，仍不是長期不可竄改證據庫。
 
@@ -37,7 +37,7 @@
 3. 重新執行可信工作流程。guard 即時查詢 GitHub PR 與 reviews，確認仍 open、base/head 相符、最後有效決定為 APPROVED 且 commit_id 相同；核准者必須具 write、maintain 或 admin 權限，PR 中任一 commit 的作者／提交者都不計入（GitHub 最多列出 250 個 PR commit，達上限即拒絕）。查詢失敗、撤回、CHANGES_REQUESTED、權限不足或 head 變動均不授權。
 4. 此輪依然由舊 evaluator／policy 執行。核准變更不代表新 evaluator 已自動證明正確；維護者需評估新增政策與測試的驗收證據。合併後的新 commit 才成為下一輪基準。
 
-`pull_request_target` 不會因 review submitted 自動重跑；審核後須 rerun 對應的 head run。**rerun 應由 PR 作者或其他非核准者執行：** 專用發布程式會把 run 的 actor／triggering actor 排除在核准者之外，若由核准者本人按下 rerun，其核准即不計入。CI 中的受保護變更守門員（`check_trusted_changes.py`）同樣排除 run 的 actor 與 triggering actor。**把 PR 轉為可審查（Ready for review）、推送或編輯 PR 也會觸發新的 run**；觸發者若是核准者，該 run 永遠無法採計其核准，因為重跑時 actor 不變。同一 head 上任一同名必要檢查失敗，規則集都會拒絕合併，因此這類 run 只能由另一位審查者核准後重跑，或換新 head 重新取得核准。建議由 PR 作者轉為可審查並負責重跑，審查者只送出核准（2026-10-11 PR #22、#23 均因此多跑一輪）。證據有效期為 `max_evidence_age_seconds`（3600 秒），超過後需再 rerun。禁止用 PR label、候選檔案或任意 CLI approval 字串取代 GitHub 的即時審核查驗。單人作者不能自行核准自己的 PR；需有合格的獨立 reviewer。
+`pull_request_target` 不會因 review submitted 自動重跑；審核後須 rerun 對應的 head run。**rerun 應由 PR 作者或其他非核准者執行：** 專用發布程式會把 run 的 actor／triggering actor 排除在核准者之外，若由核准者本人按下 rerun，其核准即不計入。CI 中的受保護變更守門員（`check_trusted_changes.py`）同樣排除 run 的 actor 與 triggering actor。**把 PR 轉為可審查（Ready for review）、推送或編輯 PR 也會觸發新的 run**；觸發者若是核准者，該 run 永遠無法採計其核准，因為重跑時 actor 不變。同一 head 上任一同名必要檢查失敗，規則集都會拒絕合併（2026-10-11 實測行為；`verify_required_check.py` 核對每筆同名檢查的來源，但只要求最新一筆成功，ALLOW 不代表沒有較早的失敗紀錄，合併前仍須在 PR 檢查頁確認），因此這類 run 只能由另一位審查者核准後重跑，或換新 head 重新取得核准。建議由 PR 作者轉為可審查並負責重跑，審查者只送出核准（2026-10-11 PR #22、#23 均因此多跑一輪）。證據有效期為 `max_evidence_age_seconds`（3600 秒），超過後需再 rerun。禁止用 PR label、候選檔案或任意 CLI approval 字串取代 GitHub 的即時審核查驗。單人作者不能自行核准自己的 PR；需有合格的獨立 reviewer。
 
 ## 基準自身失效時的受控遷移
 
@@ -65,7 +65,7 @@
 
 1. 確認獨立審查者具 write 權限（CatGrocery 已於 2026-10-07 讀回為 write）；以 `python3 -I scripts/audit_merge_protection.py` 讀回確認。
 2. 審查者審閱可信閘門 PR 的差異、遠端手動 run（`manual-security-evaluation`）的結果，以及 artifact 中 `audit/publishable-evidence.json` 為 PUBLISHABLE，並以審查者帳號核准目前 head。
-3. 使用現行 guard 的獨立核准流程，完整重跑正式 CI、核對簽章及必要檢查來源後正常合併。不要把歷史停用規則的遷移方式當成日常操作；若平台設定確實無法支援遷移，先另行設計並審查受控遷移程序。
+3. 使用現行 guard 的獨立核准流程，完整重跑正式 CI、核對簽章及必要檢查來源後正常合併。不要把歷史停用規則的遷移方式當成日常操作；若基準自身失效（例如 main 上的測試在 CI 必然失敗，導致任何 PR 都無法通過），才依前述[基準自身失效時的受控遷移](#基準自身失效時的受控遷移)程序處理，不得當成日常操作。
 4. 合併後，main 的 CODEOWNERS 包含三位審查者（與 `security/trust-policy.json` 一致），`pull_request_target` workflow 生效：之後的 PR 會在 head 上產生 `trusted-security-pilot`。專用 App 綁定前，每次核准或合併前以 `python3 -I scripts/verify_required_check.py --pr <編號>` 確認該檢查來自可信 workflow 的 `pull_request_target` run。
 5. 疊在其上的發布程式與多模型 PR 改以 main 為 base 後，依一般流程審查；它們會由已合併的新 evaluator 評估。
 
@@ -86,7 +86,7 @@ python3 -I scripts/dev_db.py start
 python3 -I scripts/dev_db.py stop
 ```
 
-隔離回歸會執行缺陷版、修正版，以及在候選匯入時嘗試寫入唯讀來源／入口、讀取 evaluator／Docker socket／token、建立 IP 出向連線的探測。必要結果為：完整 44 案例、缺陷版恰好政策 `seeded_defect_case_ids` 的 9 個 findings／BLOCK、修正版 0 findings／ALLOW。另有錯誤密碼登入、404 洩漏、匯出夾帶跨租戶資料、其他資料列被非法修改、admin 寫入條件越過租戶邊界、過期工作階段、跨租戶刪除、寫入端點較弱的工作階段檢查，以及回應後才排程的跨租戶寫入共九種變體，必須產生指定 AUTH findings；評估前也會核對兩個容器的網路、唯讀根目錄、權限、記憶體、程序數、使用者與映像；socket 改指向 host 測試端點必須失敗且端點不得收到連線。
+隔離回歸會執行缺陷版、修正版，以及在候選匯入時嘗試寫入唯讀來源／入口、讀取 evaluator／Docker socket／權杖、建立 IP 出向連線的探測。必要結果為：完整 44 案例、缺陷版恰好政策 `seeded_defect_case_ids` 的 9 個 findings／BLOCK、修正版 0 findings／ALLOW。另有錯誤密碼登入、404 洩漏、匯出夾帶跨租戶資料、其他資料列被非法修改、admin 寫入條件越過租戶邊界、過期工作階段、跨租戶刪除、寫入端點較弱的工作階段檢查，以及回應後才排程的跨租戶寫入共九種變體，必須產生指定 AUTH findings；評估前也會核對兩個容器的網路、唯讀根目錄、權限、記憶體、程序數、使用者與映像；socket 改指向 host 測試端點必須失敗且端點不得收到連線。
 
 候選 lock digest 必須等於已驗證 runtime lock digest；尚不支援任意候選依賴映像建置。受保護變更使用禁用 rename 折疊的 diff，同時判斷刪除與新增路徑。結果 schema 3 使用版本化逐檔 manifest，不能沿用 schema 2 的 gate 證據。
 
@@ -94,7 +94,7 @@ python3 -I scripts/dev_db.py stop
 
 G2 現在也掃描 HEAD 可達提交的訊息、作者與提交者中繼資料，以及所有標籤名稱與附註標籤內容；標籤指向但 HEAD 不可達的檔案歷史仍不在範圍。原始中繼資料不寫入證據，超過清冊或位元組限制時保持 BLOCK。Git manifest 只使用 Git 儲存的擁有者執行權限分類，避免 checkout umask 不同造成摘要誤差。
 
-Gitfile（linked worktree 或部分 submodule 使用的 `.git` 文字檔）會在檢查候選 repository 時提前拒絕；這是目前輸入格式限制，不是掃描完成或容器執行失敗。請使用一般 clone 的實體 `.git` 目錄，不接受可指向任意 host 路徑的 gitfile。跨開機清理先比較 boot ID，程序登記持久化前的子程序只能等待握手，不能執行候選工作。
+Gitfile（linked worktree 或部分 submodule 使用的 `.git` 文字檔）會在檢查候選儲存庫 時提前拒絕；這是目前輸入格式限制，不是掃描完成或容器執行失敗。請使用一般 clone 的實體 `.git` 目錄，不接受可指向任意 host 路徑的 gitfile。跨開機清理先比較 boot ID，程序登記持久化前的子程序只能等待握手，不能執行候選工作。
 
 <a id="en"></a>
 
@@ -132,7 +132,7 @@ Every path requires independent approval, including fixture Python, Markdown, co
 3. Rerun trusted CI. Live guard verifies open PR, matching base/head, latest effective APPROVED decision and commit ID, and write/maintain/admin permissions. Any PR commit author/committer is excluded; reaching GitHub's 250-commit listing cap rejects. Lookup failure, dismissal, CHANGES_REQUESTED, lost permissions, or changed head does not authorize.
 4. Evaluation still uses old evaluator/policy. Approval does not prove the new evaluator correct; review its candidate evidence. Only the merged commit becomes the next baseline.
 
-Review submission does not automatically trigger pull_request_target. Rerun the correct head as the author or another non-approver: publisher and the CI protected-change guard (`check_trusted_changes.py`) exclude both original actor and triggering actor. **Marking a PR ready for review, pushing or editing it also triggers a run**; if an approver triggered it, that run can never count their approval, because a rerun keeps the original actor. Any failing same-name required check on the head blocks the merge, so such a run needs another reviewer's approval and a rerun, or a new head with fresh approval. The author should mark PRs ready and rerun; reviewers only submit approvals (PRs #22 and #23 each needed an extra run on October 11). Evidence expires after 3,600 seconds and needs rerun. Labels, candidate files, arbitrary CLI approval strings, or self-approval cannot replace live independent review.
+Review submission does not automatically trigger pull_request_target. Rerun the correct head as the author or another non-approver: publisher and the CI protected-change guard (`check_trusted_changes.py`) exclude both original actor and triggering actor. **Marking a PR ready for review, pushing or editing it also triggers a run**; if an approver triggered it, that run can never count their approval, because a rerun keeps the original actor. Any failing same-name required check on the head blocks the merge (observed October 11; verify_required_check.py checks the origin of every same-name check but requires only the latest to succeed, so ALLOW does not rule out an earlier failure; confirm on the PR checks page before merging), so such a run needs another reviewer's approval and a rerun, or a new head with fresh approval. The author should mark PRs ready and rerun; reviewers only submit approvals (PRs #22 and #23 each needed an extra run on October 11). Evidence expires after 3,600 seconds and needs rerun. Labels, candidate files, arbitrary CLI approval strings, or self-approval cannot replace live independent review.
 
 ## Controlled migration when the baseline itself is broken
 
@@ -158,7 +158,7 @@ The old guard could not adopt this workflow normally; initial migration was expl
 
 The minimum rules template requires no deletion/force push/bypass, independent CODEOWNER review, stale-review dismissal, and strict trusted-security-pilot. Ruleset 24512048 was enabled before migration, when old jobs only produced security-pilot and CODEOWNERS contained only the author, preventing normal merges. On October 6 the owner temporarily disabled rules and merged #6/#7 without independent review, then restored enforcement after acceptance. This historical exception is not routine guidance.
 
-For subsequent updates: confirm independent write access (CatGrocery confirmed October 7), review diff/manual candidate run/PUBLISHABLE evidence, approve exact head, then use current guard, full formal CI, signature and source verification for normal merge. If platform constraints genuinely prevent migration, separately design/review a controlled migration instead of reusing historical disablement. CODEOWNERS/main workflow then apply to later PRs. Until dedicated App binding, run verify_required_check.py --pr <number> before approval/merge. Stacked PRs retargeted to main follow normal review and new evaluator rules.
+For subsequent updates: confirm independent write access (CatGrocery confirmed October 7), review diff/manual candidate run/PUBLISHABLE evidence, approve exact head, then use current guard, full formal CI, signature and source verification for normal merge. If the baseline itself breaks (for example a main test that always fails in CI so no PR can pass), use the controlled-migration procedure above instead of reusing historical disablement; it is never routine. CODEOWNERS/main workflow then apply to later PRs. Until dedicated App binding, run verify_required_check.py --pr <number> before approval/merge. Stacked PRs retargeted to main follow normal review and new evaluator rules.
 
 Shared Actions App ID plus check name does not uniquely identify YAML. pull_request_target uses base-branch workflow and run metadata omits base; alternate-base YAML can share workflow ID/path. Publisher/verifier require matching head repository/branch and reject any related PR (including closed ones) targeting another base or ever changing base. Closing a twin PR does not erase it. Implemented GitHub artifact attestation binds security.yml@refs/heads/main and evaluator SHA, with real main signature acceptance. An unforgeable automated required source still needs platform required-workflow support or a dedicated App validating repository/workflow/evaluator/event/candidate/attempt/full evidence. Ordinary GITHUB_TOKEN must not impersonate it. Dedicated source is not deployed; same-name forgery resistance is not claimed.
 

@@ -57,7 +57,7 @@
 
 完成前提：
 
-1. 目前 GitHub 連線需要可寫 repository Administration 的 integration 權限；repo 回傳使用者 admin=true 並不等於 integration 具有此 API 權限。
+1. 目前 GitHub 連線需要可寫儲存庫 Administration 的 integration 權限；repo 回傳使用者 admin=true 並不等於 integration 具有此 API 權限。
 2. 提供並授權一位非作者的 reviewer，以及普通 Write 身分（可由同一人兼任），更新 reviewer／CODEOWNERS 並完成獨立核准。
 3. 部署可信必要檢查來源：平台可用的 required workflow，或外部獨立 GitHub App 驗證 evaluator、candidate SHA、事件、run attempt 與完整證據。Actions app ID 15368 + 同名 check 不足以達成。
 4. 先完成可信基準導入與 check/head 綁定，再啟用保護；不得將尚未審查的 PR 自行合併來繞過此步。

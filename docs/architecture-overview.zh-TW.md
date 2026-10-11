@@ -4,7 +4,7 @@
 
 # 系統架構與流程（Architecture Overview）
 
-正式 main `f1a640f` 已合併 [2026-10-10 稽核修正](audit-20261010.zh-TW.md)（PR #21、#22）：AUTH 擴為 44 個案例、突變測試改為獨立 job，並新增靜態檢查；[run 38098147162](https://github.com/chinchiang/MultiAgentEpsilon/actions/runs/38098147162) 完成 1149 項測試、9 個指定缺陷的正反例、突變測試與簽章驗收。LM Studio 文字介接器、分批比較與雙語文件已合併，地端真實模型尚未驗收。系統為 Python 3.12 資安測試試點，由命令列、GitHub Actions、隔離容器與模型介接器組成；多模型採獨立盲審、循序呼叫與本機評分。
+正式 main `9508a7c` 已合併 [2026-10-10 稽核修正](audit-20261010.zh-TW.md)（PR #21 至 #24）：AUTH 擴為 44 個案例、突變測試改為獨立 job，並新增靜態檢查；[run 38106362078](https://github.com/chinchiang/MultiAgentEpsilon/actions/runs/38106362078) 完成 1150 項測試、9 個指定缺陷的正反例、突變測試與簽章驗收。LM Studio 文字介接器、分批比較與雙語文件已合併，地端真實模型尚未驗收。系統為 Python 3.12 資安測試試點，由命令列、GitHub Actions、隔離容器與模型介接器組成；多模型採獨立盲審、循序呼叫與本機評分。
 
 圖中的實線表示已實作的執行或資料關係；虛線表示暫停、復原或尚待部署的路徑，依節點標示判讀。圖表使用 Mermaid 原始檔，另提供可直接開啟與分享的 SVG。
 
@@ -75,7 +75,10 @@ PR 使用 `.github/workflows/security.yml` 的 `pull_request_target`：evaluator
 | RoE、輸入、摘要與政策 | [`scope.py`](../security_harness/scope.py)、[`inputs.py`](../security_harness/inputs.py)、[`results.py`](../security_harness/results.py)、[`roe.json`](../security/roe.json)、[`policy.json`](../security/policy.json) |
 | G1／G2 | [`preflight.py`](../security_harness/preflight.py)、[`dependencies.py`](../security_harness/dependencies.py)、[`secrets.py`](../security_harness/secrets.py)、[`scan_content.py`](../security_harness/scan_content.py)、[`candidate_git.py`](../security_harness/candidate_git.py) |
 | 隔離與外部 oracle | [`isolation.py`](../security_harness/isolation.py)、[`container_http.py`](../security_harness/container_http.py)、[`authorization.py`](../security_harness/authorization.py)、[`fixture_database.py`](../security_harness/fixture_database.py)、[`fixture_app/app.py`](../fixture_app/app.py) |
+| 突變與性質測試 | [`mutation_check.py`](../scripts/mutation_check.py)、[`mutation_worker.py`](../scripts/mutation_worker.py)、[`test_security_properties.py`](../tests/test_security_properties.py) |
+| 文件與合併保護檢查 | [`check_docs.py`](../scripts/check_docs.py)、[`audit_merge_protection.py`](../scripts/audit_merge_protection.py) |
 | 程序生命週期與回收 | [`lifecycle.py`](../security_harness/lifecycle.py)、[`limits.py`](../security_harness/limits.py)、[`cleanup_runs.py`](../scripts/cleanup_runs.py)；模型另用 [`llm/lifecycle.py`](../security_harness/llm/lifecycle.py) |
+| LM Studio、批次比較與遠端主機授權 | [`lmstudio.py`](../security_harness/llm/lmstudio.py)、[`comparison.py`](../security_harness/llm/comparison.py)、[`config.py`](../security_harness/llm/config.py) |
 | 模型 transport／adapter | [`gateway.py`](../security_harness/llm/gateway.py)、[`adapters.py`](../security_harness/llm/adapters.py)、[`transport.py`](../security_harness/llm/transport.py)、[`output_schema.py`](../security_harness/llm/output_schema.py) |
 | 盲審、評分與註記 | [`model_review.py`](../scripts/model_review.py)、[`benchmark.py`](../security_harness/llm/benchmark.py)、[`benchmark_runner.py`](../security_harness/llm/benchmark_runner.py)、[`benchmark_score.py`](../security_harness/llm/benchmark_score.py)、[`review_adjudicate.py`](../scripts/review_adjudicate.py) |
 | 可信審查與 CI 證據 | [`check_trusted_changes.py`](../scripts/check_trusted_changes.py)、[`verify_required_check.py`](../scripts/verify_required_check.py)、[`write_ci_provenance.py`](../scripts/write_ci_provenance.py)、[`check_publishable_evidence.py`](../scripts/check_publishable_evidence.py) |
@@ -278,13 +281,15 @@ MultiAgentEpsilon/
 ├── .tools/                    固定工具及 AWS CLI
 ├── .state/                    本機 runtime／DB 設定與執行狀態
 │   ├── wheels/                已核對雜湊的套件 wheels
+│   ├── hypothesis/            Hypothesis 性質測試的範例資料庫
 │   └── runs/<run-id>/          擁有者與程序群組回收清冊
 ├── artifacts/                 各次執行證據與索引
 │   ├── <run-id>/report.json    安全測試 schema 3 或模型 schema 2
 │   ├── <run-id>/adjudications/<note-id>.json  選擇性未簽章人工註記
 │   ├── pytest.xml             由 pytest 明確指定輸出
 │   └── latest.txt             security run 索引
-└── .pytest_cache/             pytest 快取
+├── .pytest_cache/             pytest 快取
+└── .ruff_cache/               ruff 快取（不掃描、不納入摘要）
 ```
 
 以上是按需產生的路徑，不表示服務已啟動或每個目錄都常駐。執行過程另有 `/tmp/epsilon-run-<uid>-<run-id>/`；完成後應回收。CI 的 `trusted/` 與 `candidate/` 是 runner 上兩個 checkout，不是本儲存庫內的固定子目錄；上傳 ZIP 另含 `trusted/artifacts/` 與 `audit/`。
@@ -305,13 +310,13 @@ mmdc --configFile docs/diagrams/mermaid-config.json \
 
 目前是有限的合成試點：尚未完成任意產品的 ASVS 適用性、G3、完整 G5／G6、其他生態系及安裝映像的 SBOM／SCA／CVE 與較大模型樣本。專用 App 的簽章驗證程式已實作，但正式服務與必要來源綁定仍缺外部資源。這些狀態詳見[覆蓋對照](asvs-coverage.zh-TW.md)、[模型輸出驗收](structured-output.zh-TW.md)與[發布器部署文件](trusted-check-publisher.zh-TW.md)。
 
-main 已包含評估與簽章共同成功的最終必要關卡；儲存庫已恢復公開並完成正式簽章驗收。先前私人儲存庫的簽章平台限制及修正歷史見[擴充紀錄](security-expansion-20261008.zh-TW.md)。
+main 已包含評估、簽章與獨立突變測試共同成功的最終必要關卡；儲存庫已恢復公開並完成正式簽章驗收。先前私人儲存庫的簽章平台限制及修正歷史見[擴充紀錄](security-expansion-20261008.zh-TW.md)。
 
 <a id="en"></a>
 
 # Architecture Overview and repository structure
 
-Reviewed main `f1a640f` includes the [October 10 audit](audit-20261010.zh-TW.md#en) (PRs #21 and #22): 44 AUTH cases, a separate mutation job and static checks. [run 38098147162](https://github.com/chinchiang/MultiAgentEpsilon/actions/runs/38098147162) passed 1149 tests, exactly nine seeded failures, mutation tests, cleanup and signatures. LM Studio text integration, cross-batch comparison and bilingual documentation are merged; real local-model acceptance is pending. The Python 3.12 pilot uses CLIs, Actions, isolated containers, and adapters. Models review independently, execute sequentially, and are scored locally.
+Reviewed main `9508a7c` includes the [October 10 audit](audit-20261010.zh-TW.md#en) (PRs #21 through #24): 44 AUTH cases, a separate mutation job and static checks. [run 38106362078](https://github.com/chinchiang/MultiAgentEpsilon/actions/runs/38106362078) passed 1150 tests, exactly nine seeded failures, mutation tests, cleanup and signatures. LM Studio text integration, cross-batch comparison and bilingual documentation are merged; real local-model acceptance is pending. The Python 3.12 pilot uses CLIs, Actions, isolated containers, and adapters. Models review independently, execute sequentially, and are scored locally.
 
 Solid arrows represent implemented execution/data paths; dashed arrows indicate paused, recovery, or undeployed paths as labeled. Editable Mermaid and standalone SVG are bilingual.
 
@@ -339,7 +344,7 @@ run_security.py and model_review.py are independent. Deterministic evaluation ne
 
 The entry point creates run ID/initial evidence. Supervisor registers owner/groups durably before handshake releases the worker. Trusted RoE/policy/tools define input inventory and digests. G1 verifies lock provenance/builds declared-lock SBOM/queries each OSV version; G2 runs real Gitleaks over worktree, candidate HEAD-reachable content, commit/tag metadata, and bounded archives. Only complete clean G1/G2 permit AUTH. Runtime verifies image/launcher/lock before copying limited fixture_app Python into isolation.
 
-Host oracle drives an in-container Docker-exec HTTP bridge and independently checks PostgreSQL for all 32 complete response/state contracts. Worker stays AWAITING_CLEANUP until parent verifies owned groups/containers/temp directories gone. Configuration errors, missing gates, stale/mismatched evidence, and cleanup failures block.
+Host oracle drives an in-container Docker-exec HTTP bridge and independently checks PostgreSQL for all 44 complete response/state contracts. Worker stays AWAITING_CLEANUP until parent verifies owned groups/containers/temp directories gone. Configuration errors, missing gates, stale/mismatched evidence, and cleanup failures block.
 
 App and DB use network=none and shared PostgreSQL Unix sockets. App is non-root/read-only/no capabilities with CPU/memory/PID/tmpfs limits and synthetic least-privilege DB access. Host oracle has independent trusted seed/connection; candidate cannot modify policy/evaluator/reports. dev_db.py's loopback development PostgreSQL is separate and not automatically permanent. Supervisor handles cancellation/timeouts; cleanup_runs.py handles dead owners using UID/boot ID/PID start time/inventory.
 
@@ -359,7 +364,7 @@ All responses undergo strict JSON/quotes/line/three-findings/verdict validation.
 
 [Mermaid](diagrams/ci-flow.mmd) · [SVG](diagrams/ci-flow.svg)
 
-pull_request_target loads evaluator/install/tests/policy/oracle from base SHA and treats head checkout as data. Every path needs trusted write-capable independent exact-head approval. Author/PR commit/run/triggering identities are excluded; writer change requests block. Complete regression, seeded negative, candidate evaluation and publishability checks precede evaluator-owned artifact upload. Fresh signing runner receives ZIP digest only, without candidate checkout/model/deployment secrets. Evaluation failure retains evidence/cleanup and skips signing; final required gate requires both jobs successful.
+pull_request_target loads evaluator/install/tests/policy/oracle from base SHA and treats head checkout as data. Every path needs trusted write-capable independent exact-head approval. Author/PR commit/run/triggering identities are excluded; writer change requests block. Complete regression, seeded negative, candidate evaluation and publishability checks precede evaluator-owned artifact upload. Fresh signing runner receives ZIP digest only, without candidate checkout/model/deployment secrets. Evaluation failure retains evidence/cleanup and skips signing; final required gate requires evaluation, signing and the separate mutation job all successful.
 
 Main push evaluates its own commit. Manual workflow uses chosen ref and distinct manual-security-evaluation/completion names, not formal acceptance. Until dedicated App deployment, verify_required_check.py checks workflow/event/head/branch/base timelines; any same-scope retargeting conservatively rejects. Historical PR #15/main run 37737568083 verified 704 tests, 18/0 ALLOW, 18/6 BLOCK, cleanup/ZIP/main signature/attempt; those claims apply only to that commit, not later revisions.
 

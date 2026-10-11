@@ -20,7 +20,9 @@ flowchart TB
     Source ~~~ Cases
     Report --> CI["正式 CI／最新 head 獨立核准<br/>Formal CI / independent exact-head approval"]
     CI --> Signed["獨立 runner 簽署 ZIP 摘要<br/>Separate artifact attestation job"]
-    Signed --> Final["評估與簽章全成功才放行<br/>Final check requires both jobs successful"]
+    CI --> Mutation["獨立 job：可信基準突變測試<br/>Separate trusted mutation job"]
+    Signed --> Final["評估、簽章與突變全成功才放行<br/>Evaluation, signing and mutation all successful"]
+    Mutation --> Final
     Final --> Rules["main 規則啟用／無 bypass<br/>Active rules; shared Actions source"]
     Signed -.-> Publisher["專用發布器程式已備妥，尚未部署<br/>Dedicated publisher prepared, not deployed"]
     Publisher -.->|"待綁定專用 App<br/>Dedicated source binding pending"| Rules
