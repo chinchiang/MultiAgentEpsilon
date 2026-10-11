@@ -52,6 +52,8 @@ python3 -I scripts/dev_db.py start
 
 沒有 Docker 或 PostgreSQL 時，可先以 `.venv/bin/python -m pytest -m "not integration"` 執行離線子集；完整驗收仍須包含整合測試。靜態檢查為 `.venv/bin/ruff check .`，pytest 會把任何警告視為失敗。
 
+CI runner 以一般使用者（非 root）執行。若本機或容器內以 root 執行，pytest 標頭會顯示警告；root 可讀取權限為 000 的目錄，權限相關測試會走不同分支。推送前請以一般使用者再跑一次，例如 `runuser -u <使用者> -- .venv/bin/python -m pytest -m "not integration" --basetemp=<該使用者可寫目錄>`（checkout 與 `.venv` 須對該使用者可讀）。2026-10-10 main 曾因此失敗一次。
+
 `bootstrap.py` 先核對 PyPI 套件、固定版本、所有 lock 雜湊、7 天冷卻期與 wheel 可用性；驗證 Gitleaks 官方 release checksum 及固定 binary digest，再跑 G2。成功後才下載與安裝 hash-verified wheels，禁用 source builds、額外 index 與隱含依賴解析。首版使用明確核准的 23 個套件；依賴更新需重新審查，不自動擴充 allowlist。
 
 `build_runtime.py` 以固定 digest 的 Python 映像及已核對 hash 的 wheels 離線建立容器 runtime。`run_security.py` 在無網路、非 root、唯讀根檔案系統的容器執行候選程式。HTTP socket 位於容器的限額 tmpfs，由容器內 bridge 連線，透過有時間／大小限制的 Docker exec 通道傳回不可信回應；host 不解析候選控制的 socket 路徑。可信評分器在容器外核對回應與資料庫副作用。候選 lock 必須與受測 runtime 一致；依賴變更須先更新可信基準並重建。詳見 [可信執行與合併保護](docs/trusted-execution.zh-TW.md)。
@@ -170,6 +172,8 @@ python3 -I scripts/dev_db.py stop
 ```
 
 Without Docker or PostgreSQL, `.venv/bin/python -m pytest -m "not integration"` runs the offline subset; full acceptance still includes integration tests. Static checks run with `.venv/bin/ruff check .`, and pytest treats every warning as an error.
+
+The CI runner is an ordinary non-root user. When run as root locally or in a container, the pytest header prints a warning: root can read mode-000 directories, so permission-dependent tests take other branches. Before pushing, rerun as an ordinary user, for example `runuser -u <user> -- .venv/bin/python -m pytest -m "not integration" --basetemp=<a directory that user can write>` (the checkout and `.venv` must be readable by that user). Main failed once for this reason on October 10.
 
 Bootstrap validates the approved 23-package inventory against PyPI identity, pinned versions, all lock hashes, a seven-day cooling period, and wheel availability. It verifies the scanner's release checksum and pinned binary digest, runs G2, and checks exact-version OSV results before installation. Only verified wheels are installed, with hashes required and source builds, extra indexes, and implicit dependency resolution disabled. Dependency updates require review.
 

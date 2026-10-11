@@ -121,3 +121,12 @@ def test_tool_caches_are_never_scanned_or_hashed(tmp_path):
     (tmp_path / ".ruff_cache/0.16.9").mkdir(parents=True)
     (tmp_path / ".ruff_cache/0.16.9/123").write_bytes(b"\x00\x01binary")
     assert [p.name for p in input_files(tmp_path)] == ["app.py"]
+
+
+def test_report_header_flags_root(monkeypatch):
+    # root 與非 root 的拒絕訊息不同；root 執行時必須明確提醒。 / Root and non-root denials differ, so a root run must say so.
+    from tests import conftest
+    monkeypatch.setattr(os, "geteuid", lambda: 0)
+    assert any("root" in line for line in conftest.pytest_report_header(None)[1:])
+    monkeypatch.setattr(os, "geteuid", lambda: 1001)
+    assert conftest.pytest_report_header(None) == ["uid: 1001"]

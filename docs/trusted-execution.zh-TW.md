@@ -39,6 +39,24 @@
 
 `pull_request_target` 不會因 review submitted 自動重跑；審核後須 rerun 對應的 head run。**rerun 應由 PR 作者或其他非核准者執行：** 專用發布程式會把 run 的 actor／triggering actor 排除在核准者之外，若由核准者本人按下 rerun，其核准即不計入。CI 中的受保護變更守門員（`check_trusted_changes.py`）同樣排除 run 的 actor 與 triggering actor。**把 PR 轉為可審查（Ready for review）、推送或編輯 PR 也會觸發新的 run**；觸發者若是核准者，該 run 永遠無法採計其核准，因為重跑時 actor 不變。同一 head 上任一同名必要檢查失敗，規則集都會拒絕合併，因此這類 run 只能由另一位審查者核准後重跑，或換新 head 重新取得核准。建議由 PR 作者轉為可審查並負責重跑，審查者只送出核准（2026-10-11 PR #22、#23 均因此多跑一輪）。證據有效期為 `max_evidence_age_seconds`（3600 秒），超過後需再 rerun。禁止用 PR label、候選檔案或任意 CLI approval 字串取代 GitHub 的即時審核查驗。單人作者不能自行核准自己的 PR；需有合格的獨立 reviewer。
 
+## 基準自身失效時的受控遷移
+
+正常的基準更新由舊基準判定。若**舊基準本身**有缺陷，使它在 CI 上必然失敗，任何 PR（包括修正 PR 與還原 PR）都無法通過必要檢查，就只能由擁有者暫時解除規則集。這是例外程序，不能用來繞過一般的失敗 PR。2026-10-11 PR #22 即依此處理（見[里程碑狀態](milestone-status.zh-TW.md)）。
+
+**啟動條件（須全部成立）：**
+- main 的 push run 失敗，失敗位置在 evaluator 自己的測試、guard 或 workflow，而不是候選程式。
+- 修正 PR 已取得獨立核准、guard 放行，但 CI 在**同一個**基準缺陷上失敗；日誌須能看出跑的是 base 版本的程式。
+- 任何不需解除規則集的做法都不可行。
+
+**步驟：**
+1. **修正 PR 保持最小**：只修正基準缺陷，附上能重現原失敗的本機證據，例如以 CI 相同的非 root 身分，修正前失敗、修正後通過。
+2. **獨立核准對準 head**：由 `security/trust-policy.json` 中的另一位審查者核准修正 PR 的目前 head；核准者不可是 CI 的觸發者。
+3. **記錄解除前狀態**：擁有者以具 Administration 讀取權限的權杖執行 `python3 -I scripts/audit_merge_protection.py --pr <編號>`，保存輸出作為恢復時的比對基準。
+4. **最短時間窗**：擁有者暫時停用規則集，只以 merge commit 合併這一個 PR，並指定 head SHA 為已核准的版本；時間窗內不合併其他 PR、不推送 main。
+5. **立即恢復並核對**：恢復規則集後重跑稽核，確認 `errors` 為空、規則集 active、bypass 名單為空，且設定與第 3 步一致。
+6. **新基準驗收**：合併後 main 的 push run 必須全部通過（評估、突變、簽章、`trusted-security-pilot`）；若仍失敗，回到第 1 步，不得延長解除時間。
+7. **留下紀錄**：在里程碑狀態記錄原因、失敗與通過的 run、核准者與 head、合併 commit、解除與恢復時間。
+
 ## 首次遷移與 GitHub 管理設定
 
 舊 main 的 guard 不支援此更新流程，且新 workflow 尚未成為預設分支內容。因此第一次採納此版本屬明確的基準遷移：維護者先審查 PR 與手動 workflow 驗證，再採納新基準；不能把舊 guard 的拒絕偽裝成成功。手動 workflow 的 evaluator 由執行者選定 ref，只能當選定版本的測試證據；因此 main 上的 workflow 手動執行時，檢查名稱固定為 `manual-security-evaluation`。注意 `workflow_dispatch` 使用所選 ref 的 YAML：具推送權限者可在自己的分支改掉 job 名稱再手動執行，仍能產生同名檢查。`verify_required_check.py` 會拒絕 `workflow_dispatch` 來源，所以審查者核准前仍須執行它。
@@ -115,6 +133,24 @@ Every path requires independent approval, including fixture Python, Markdown, co
 4. Evaluation still uses old evaluator/policy. Approval does not prove the new evaluator correct; review its candidate evidence. Only the merged commit becomes the next baseline.
 
 Review submission does not automatically trigger pull_request_target. Rerun the correct head as the author or another non-approver: publisher and the CI protected-change guard (`check_trusted_changes.py`) exclude both original actor and triggering actor. **Marking a PR ready for review, pushing or editing it also triggers a run**; if an approver triggered it, that run can never count their approval, because a rerun keeps the original actor. Any failing same-name required check on the head blocks the merge, so such a run needs another reviewer's approval and a rerun, or a new head with fresh approval. The author should mark PRs ready and rerun; reviewers only submit approvals (PRs #22 and #23 each needed an extra run on October 11). Evidence expires after 3,600 seconds and needs rerun. Labels, candidate files, arbitrary CLI approval strings, or self-approval cannot replace live independent review.
+
+## Controlled migration when the baseline itself is broken
+
+Ordinary baseline updates are judged by the old baseline. If **the old baseline itself** is defective so that it always fails in CI, no PR (including the fix or a revert) can pass the required check, and only the owner can temporarily lift the ruleset. This is an exception procedure, never a way around an ordinary failing PR. PR #22 was handled this way on October 11 (see [milestone status](milestone-status.zh-TW.md#en)).
+
+**Preconditions (all must hold):**
+- The main push run fails in the evaluator's own tests, guard or workflow, not in candidate code.
+- The fix PR has independent approval and passes the guard, but CI fails on **the same** baseline defect; the log must show base-version code running.
+- No option that keeps the ruleset enforced is available.
+
+**Steps:**
+1. **Keep the fix minimal**: fix only the baseline defect, with local evidence reproducing the original failure (for example, failing before and passing after the fix as the same non-root user CI uses).
+2. **Exact-head independent approval**: another reviewer from `security/trust-policy.json` approves the current head; the approver must not be the run's actor.
+3. **Snapshot before lifting**: the owner runs `python3 -I scripts/audit_merge_protection.py --pr <number>` with a token holding Administration read and keeps the output for comparison.
+4. **Shortest window**: the owner temporarily disables the ruleset and merges only this PR, as a merge commit pinned to the approved head SHA; no other merges or main pushes in the window.
+5. **Restore and verify immediately**: after restoring, rerun the audit and confirm `errors` is empty, the ruleset is active, the bypass list is empty, and settings match step 3.
+6. **Accept the new baseline**: the post-merge main push run must pass every job (evaluation, mutation, attestation, `trusted-security-pilot`); if not, return to step 1 instead of extending the window.
+7. **Record it**: add the reason, failing and passing runs, approver and head, merge commit, and lift/restore times to milestone status.
 
 ## Initial migration and GitHub administration
 
