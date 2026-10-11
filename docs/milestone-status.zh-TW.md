@@ -4,14 +4,16 @@
 
 # 第一個里程碑：實作狀態與驗收方式
 
-本文件記錄**現況與可辨識的歷史驗收**（2026-10-10）。正式 main `28be2e0` 已合併 PR #20，合併後的 [CI 執行 37911499955](https://github.com/chinchiang/MultiAgentEpsilon/actions/runs/37911499955) 成功：930 項測試，修正版 32 個案例／0 項缺陷為 ALLOW，指定缺陷版 32 個案例／9 項缺陷為 BLOCK，清理與真實簽章均通過。[2026-10-10 稽核修正](audit-20261010.zh-TW.md)把 AUTH 擴為 44 個案例、測試增為 1149 項，合併後才成為新基準。專用 GitHub App 部署與真實 LM Studio 驗收仍待完成。各批次的原始紀錄與當時數字保留於[里程碑歷史紀錄](milestone-history.zh-TW.md)。
+本文件記錄**現況與可辨識的歷史驗收**（2026-10-11）。正式 main `f1a640f` 已合併 PR #21（[2026-10-10 稽核修正](audit-20261010.zh-TW.md)）與 PR #22，合併後的 [CI 執行 38098147162](https://github.com/chinchiang/MultiAgentEpsilon/actions/runs/38098147162) 成功：1149 項測試，修正版 44 個案例／0 項缺陷為 ALLOW，指定缺陷版恰好 9 項缺陷為 BLOCK，突變測試、清理與真實簽章均通過。前一基準 `28be2e0`（PR #20，930 項測試）的紀錄保留於歷史。專用 GitHub App 部署與真實 LM Studio 驗收仍待完成。各批次的原始紀錄與當時數字保留於[里程碑歷史紀錄](milestone-history.zh-TW.md)。
 
 ## 遠端治理
 
 - main 由規則集 24512048 保護：沒有 bypass、須經 PR 與 code owner 核准、推送新 commit 後舊核准失效、最後推送須另獲核准、未歸屬變更需額外核准，必要檢查為 GitHub Actions App 15368 的 `trusted-security-pilot`。最新狀態以 `python3 -I scripts/audit_merge_protection.py --pr <編號>` 讀回為準。
-- 目前可信清單為 chinchiang、CatGrocery 與 d98922036ntu；CatGrocery 已接受協作邀請並具 write 權限（2026-10-07 讀回）。PR #14 已合併這項清單變更，三處設定一致；d98922036ntu 的 write 權限已於 2026-10-08 讀回確認。之後的 PR 依規則合併，不需再停用規則集；涉及受保護路徑的 PR，guard 另需具寫入權限、非作者、且未曾提交 PR 中任何 commit 的基準審查者核准。作者為 chinchiang 的 PR 在這項變更合併後可由 CatGrocery 或 d98922036ntu 獨立核准。
+- 目前可信清單為 chinchiang、CatGrocery 與 d98922036ntu；CatGrocery 已接受協作邀請並具 write 權限（2026-10-07 讀回）。PR #14 已合併這項清單變更，三處設定一致；d98922036ntu 的 write 權限已於 2026-10-08 讀回確認。之後的 PR 原則上依規則合併，不停用規則集（唯一例外見下方 2026-10-11 的受控基準遷移）；涉及受保護路徑的 PR，guard 另需具寫入權限、非作者、且未曾提交 PR 中任何 commit 的基準審查者核准。作者為 chinchiang 的 PR 在這項變更合併後可由 CatGrocery 或 d98922036ntu 獨立核准。
 - 首次基準遷移已於 2026-10-06 完成：擁有者暫時停用規則集，以 merge commit 合併 #6（`da567d8`）與 #7（`0ac31cb`）。文件 PR #10 也在規則集停用期間合併，沒有審查紀錄；之後規則集已恢復 active。
 - 必要檢查仍可由其他 workflow 以同名產生。`pull_request_target` 執行的是 PR **base 分支**上的 workflow，run 中繼資料不記錄 base；因此審查者在核准或合併前執行 `python3 -I scripts/verify_required_check.py --pr <編號>`，它要求檢查來自 `pull_request_target`、run 的 head 分支與此 PR 相同，且同一 SHA／head repository／分支沒有其他 base 或曾改 base 的 PR（含已關閉者）。專用 App 的 `epsilon/trusted-merge` 尚未建立、部署或綁定。
+- 第二次受控基準遷移（2026-10-11）：PR #21 合併後，main 上一項測試只接受 root 身分下的錯誤訊息，在非 root 的 runner 上必然失敗（[run 38095207581](https://github.com/chinchiang/MultiAgentEpsilon/actions/runs/38095207581)）。`pull_request_target` 以 base 上的測試判定，因此任何 PR（含修正 PR #22）都無法通過必要檢查。PR #22 已由 d98922036ntu 對 head `746c473` 獨立核准且 guard 放行，擁有者暫時解除規則集後合併為 `f1a640f`，隨即恢復；合併後 [CI 執行 38098147162](https://github.com/chinchiang/MultiAgentEpsilon/actions/runs/38098147162) 全部通過。
+- 2026-10-11 合併保護稽核：擁有者以具 Administration 讀取權限的權杖執行 `audit_merge_protection.py --pr 22`，無讀取錯誤。規則集 active、bypass 名單為空、禁止刪除與強推、須獨立審查、必要檢查存在且為 strict、base CODEOWNERS 含獨立審查者；可用的獨立審查者與非管理者開發者為 CatGrocery、d98922036ntu。未通過的一項是必要檢查仍綁定共用 Actions App，未綁定專用 App（`source_binding` 為 NOT_VERIFIED）。六項行為探測（直接推送、未核准政策修改、同名假檢查、換版後舊核准、撤回核准、合法核准）仍為 NOT_RUN，需由非管理者開發者實測。
 
 ### 遷移後的真實流程驗收（2026-10-06）
 
@@ -106,13 +108,17 @@ W 編號與 G0–G6 閘門編號都來自本地保留的原始規劃。依公開
 
 # Milestone status and acceptance
 
-Current reviewed main is `28be2e0` (2026-10-10), including PR #20. [Run 37911499955](https://github.com/chinchiang/MultiAgentEpsilon/actions/runs/37911499955) succeeded with 930 tests, fixed 32/0 and seeded 32/9 AUTH, cleanup and real signatures. The [October 10 audit](audit-20261010.zh-TW.md#en) expands AUTH to 44 cases and the suite to 1149 tests; it becomes the baseline after merge. Dedicated GitHub App deployment and real LM Studio acceptance remain pending. Original dated totals remain in [history](milestone-history.zh-TW.md#en).
+Current reviewed main is `f1a640f` (2026-10-11), including PR #21 (the [October 10 audit](audit-20261010.zh-TW.md#en)) and PR #22. Post-merge [run 38098147162](https://github.com/chinchiang/MultiAgentEpsilon/actions/runs/38098147162) succeeded with 1149 tests, fixed 44/0 ALLOW, seeded exactly 9 findings BLOCK, mutation tests, cleanup and real signatures. The previous `28be2e0` baseline (PR #20, 930 tests) remains in history. Dedicated GitHub App deployment and real LM Studio acceptance remain pending. Original dated totals remain in [history](milestone-history.zh-TW.md#en).
 
 ## Remote governance
 
-Main ruleset 24512048 is active/no bypass, with PR/CODEOWNER review, stale-approval dismissal, other-person last-push approval, additional approval for unattributed changes, and required trusted-security-pilot from shared Actions App 15368. Read current state with audit_merge_protection.py. Baseline reviewers are chinchiang, CatGrocery, d98922036ntu; CatGrocery write confirmed October 7, d98922036ntu October 8. PR #14 synchronized all three lists. Future PRs use normal rules, never disabling them; author/any-commit identities/run actors cannot count as independent reviewers.
+Main ruleset 24512048 is active/no bypass, with PR/CODEOWNER review, stale-approval dismissal, other-person last-push approval, additional approval for unattributed changes, and required trusted-security-pilot from shared Actions App 15368. Read current state with audit_merge_protection.py. Baseline reviewers are chinchiang, CatGrocery, d98922036ntu; CatGrocery write confirmed October 7, d98922036ntu October 8. PR #14 synchronized all three lists. Future PRs use normal rules without disabling them, except the controlled October 11 baseline migration below; author/any-commit identities/run actors cannot count as independent reviewers.
 
 Initial October 6 migration temporarily disabled rules and merged #6 da567d8 and #7 0ac31cb; #10 also merged without reviews in that interval. Enforcement was restored. Same-name checks can still originate from other workflows. Before approval/merge, verify_required_check.py --pr <number> binds pull_request_target, exact head repository/branch, and all related PR/base timelines including closed PRs. Dedicated epsilon/trusted-merge App/service/binding remain absent.
+
+Second controlled baseline migration (October 11): after PR #21 merged, one main test accepted only the root-only denial message and always failed on the non-root runner ([run 38095207581](https://github.com/chinchiang/MultiAgentEpsilon/actions/runs/38095207581)). Because `pull_request_target` judges with the base tests, no PR, including fix PR #22, could pass the required check. PR #22 had d98922036ntu's independent approval of head `746c473` and passed the guard; the owner temporarily lifted the ruleset, merged it as `f1a640f`, and restored enforcement. Post-merge [run 38098147162](https://github.com/chinchiang/MultiAgentEpsilon/actions/runs/38098147162) passed every job.
+
+October 11 merge-protection audit: the owner ran `audit_merge_protection.py --pr 22` with a token holding Administration read, with no read errors. The ruleset is active with an empty bypass list, deletion and force push are blocked, independent review is required, the required check is present and strict, and base CODEOWNERS include independent reviewers; CatGrocery and d98922036ntu are available independent reviewers and non-admin developers. The one failing item is that the required check is still bound to the shared Actions App rather than a dedicated App (`source_binding` NOT_VERIFIED). The six behavioral probes (direct push, unapproved policy change, forged same-name check, stale-head approval, dismissed approval, legitimate approval) remain NOT_RUN and need a non-admin developer.
 
 | Historical October 6 scenario | Run | Result |
 |---|---|---|
@@ -136,7 +142,7 @@ Publisher rechecks mutable same-head PRs/timelines immediately before green, ope
 
 Owner decisions/actions: whether to separately authorize rewriting historical AWS account identifiers (not API secrets; may already be cached); enable/verify Secret scanning, Push Protection, Dependabot and private reporting with capable administrative access; require approval for all outside-contributor fork workflows and enforce Actions SHA pinning; choose a source license; provision dedicated App/installation/key/controlled Linux host and perform developer-role source/merge denial acceptance. Never paste credentials, disable rules, force-push history, or treat connector 403 as an automatic-review denial. Current private-reporting enable attempt still returns 403.
 
-Deployment must use approved merged main and explicit regenerated evaluator/policy pins, not a candidate. Reviewed main `28be2e0` is the accepted source for preparing a new deployment bundle; this does not update existing deployment pins or deploy the service. Real LM Studio endpoint/model/schema acceptance and renewed AWS credentials for new v3 Gemini/Claude samples remain separate; GLM live stays paused.
+Deployment must use approved merged main and explicit regenerated evaluator/policy pins, not a candidate. Reviewed main `f1a640f` is the accepted source for preparing a new deployment bundle; this does not update existing deployment pins or deploy the service. Real LM Studio endpoint/model/schema acceptance and renewed AWS credentials for new v3 Gemini/Claude samples remain separate; GLM live stays paused.
 
 Known limits: the complete local flow supports Linux x86_64, Python 3.12 and Docker only (use WSL on Windows). The development oracle now uses real loopback HTTP instead of the deprecated TestClient, and pytest treats every warning as an error.
 

@@ -96,7 +96,7 @@ G2 與 subject digest 共用輸入清冊：生成物名稱只在 repository 根�
 
 **main 規則集 24512048 已啟用並讀回確認。** 必要檢查仍使用共用 GitHub Actions App 15368；名稱與 App ID 無法唯一識別可信 workflow：有推送權限者可以用自己的 workflow，回訪的 fork 貢獻者也能以 `on: pull_request` 產生同名綠燈。`pull_request_target` 執行的是 PR **base 分支**上的 workflow，同一路徑在其他分支的修改版本有相同 workflow ID。專用 App 綁定前，審查者在核准或合併前應執行 `python3 -I scripts/verify_required_check.py --pr <編號>`：它以 GitHub 的 run 中繼資料確認 PR head 上每一個 `trusted-security-pilot` 都來自可信 workflow 路徑的 `pull_request_target` run，run 的 head 分支與此 PR 相同，且沒有任何（含已關閉）共用同一 head、卻開到其他分支的 PR；任一條件不符即 BLOCK。[專用 App 發布程式與部署範本](docs/trusted-check-publisher.zh-TW.md)已準備，App 與服務尚未部署。基準遷移程序見 [操作文件](docs/trusted-execution.zh-TW.md)，先前遠端基線見 [驗收紀錄](docs/remote-ci-validation.zh-TW.md)。
 
-正式 main `28be2e0` 已合併 PR #20（離線突變與性質測試），合併後的 [CI 執行 37911499955](https://github.com/chinchiang/MultiAgentEpsilon/actions/runs/37911499955) 成功；該基準為 930 項測試，修正版 32 個案例／0 項缺陷為 ALLOW，指定缺陷版 32 個案例／9 項缺陷為 BLOCK，並完成清理與簽章。[2026-10-10 稽核修正](docs/audit-20261010.zh-TW.md)將 AUTH 擴為 44 個案例、測試增為 1149 項，須經獨立審查與合併後才成為新基準。專用 GitHub App 部署與真實 LM Studio 驗收仍待完成。
+正式 main `f1a640f` 已合併 PR #21（[2026-10-10 稽核修正](docs/audit-20261010.zh-TW.md)）與 PR #22，合併後的 [CI 執行 38098147162](https://github.com/chinchiang/MultiAgentEpsilon/actions/runs/38098147162) 成功；該基準為 1149 項測試，修正版 44 個案例／0 項缺陷為 ALLOW，指定缺陷版恰好 9 項缺陷為 BLOCK，並完成突變測試、清理與簽章。專用 GitHub App 部署與真實 LM Studio 驗收仍待完成。
 
 ## 離線突變與性質測試
 
@@ -204,7 +204,7 @@ Every path, including fixture and documentation, requires an independent, write-
 
 Ruleset 24512048 is active without bypass, but the shared Actions App 15368 and a check name do not uniquely identify a trusted workflow. Until the dedicated App is deployed, run `python3 -I scripts/verify_required_check.py --pr <number>` before approval/merge. It validates every same-named check's event, workflow, head repository/branch, whole-run success, and absence of another-base or retargeted PR sharing that head, including closed PRs. See the [publisher guide](docs/trusted-check-publisher.zh-TW.md#en). App deployment and developer-role denial acceptance remain pending.
 
-Reviewed main `28be2e0` merged PR #20 (offline mutation and property tests); post-merge [CI run 37911499955](https://github.com/chinchiang/MultiAgentEpsilon/actions/runs/37911499955) succeeded with the 930-test baseline: the fixed target allowed 32 cases with zero findings, the seeded target was blocked with exactly nine, and cleanup and signatures were verified. The [October 10 audit](docs/audit-20261010.zh-TW.md#en) expands AUTH to 44 cases and the suite to 1149 tests; it becomes the baseline only after independent review and merge. Dedicated GitHub App deployment and real LM Studio acceptance remain pending.
+Reviewed main `f1a640f` merged PR #21 (the [October 10 audit](docs/audit-20261010.zh-TW.md#en)) and PR #22; post-merge [run 38098147162](https://github.com/chinchiang/MultiAgentEpsilon/actions/runs/38098147162) succeeded with the 1149-test baseline: the fixed target allowed 44 cases with zero findings, the seeded target was blocked with exactly nine, and mutation tests, cleanup and signatures were verified. Dedicated GitHub App deployment and real LM Studio acceptance remain pending.
 
 ## Offline mutation and property tests
 

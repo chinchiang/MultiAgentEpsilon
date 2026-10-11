@@ -37,7 +37,7 @@
 3. 重新執行可信工作流程。guard 即時查詢 GitHub PR 與 reviews，確認仍 open、base/head 相符、最後有效決定為 APPROVED 且 commit_id 相同；核准者必須具 write、maintain 或 admin 權限，PR 中任一 commit 的作者／提交者都不計入（GitHub 最多列出 250 個 PR commit，達上限即拒絕）。查詢失敗、撤回、CHANGES_REQUESTED、權限不足或 head 變動均不授權。
 4. 此輪依然由舊 evaluator／policy 執行。核准變更不代表新 evaluator 已自動證明正確；維護者需評估新增政策與測試的驗收證據。合併後的新 commit 才成為下一輪基準。
 
-`pull_request_target` 不會因 review submitted 自動重跑；審核後須 rerun 對應的 head run。**rerun 應由 PR 作者或其他非核准者執行：** 專用發布程式會把 run 的 actor／triggering actor 排除在核准者之外，若由核准者本人按下 rerun，其核准即不計入。證據有效期為 `max_evidence_age_seconds`（3600 秒），超過後需再 rerun。禁止用 PR label、候選檔案或任意 CLI approval 字串取代 GitHub 的即時審核查驗。單人作者不能自行核准自己的 PR；需有合格的獨立 reviewer。
+`pull_request_target` 不會因 review submitted 自動重跑；審核後須 rerun 對應的 head run。**rerun 應由 PR 作者或其他非核准者執行：** 專用發布程式會把 run 的 actor／triggering actor 排除在核准者之外，若由核准者本人按下 rerun，其核准即不計入。CI 中的受保護變更守門員（`check_trusted_changes.py`）同樣排除 run 的 actor 與 triggering actor。**把 PR 轉為可審查（Ready for review）、推送或編輯 PR 也會觸發新的 run**；觸發者若是核准者，該 run 永遠無法採計其核准，因為重跑時 actor 不變。同一 head 上任一同名必要檢查失敗，規則集都會拒絕合併，因此這類 run 只能由另一位審查者核准後重跑，或換新 head 重新取得核准。建議由 PR 作者轉為可審查並負責重跑，審查者只送出核准（2026-10-11 PR #22、#23 均因此多跑一輪）。證據有效期為 `max_evidence_age_seconds`（3600 秒），超過後需再 rerun。禁止用 PR label、候選檔案或任意 CLI approval 字串取代 GitHub 的即時審核查驗。單人作者不能自行核准自己的 PR；需有合格的獨立 reviewer。
 
 ## 首次遷移與 GitHub 管理設定
 
@@ -114,7 +114,7 @@ Every path requires independent approval, including fixture Python, Markdown, co
 3. Rerun trusted CI. Live guard verifies open PR, matching base/head, latest effective APPROVED decision and commit ID, and write/maintain/admin permissions. Any PR commit author/committer is excluded; reaching GitHub's 250-commit listing cap rejects. Lookup failure, dismissal, CHANGES_REQUESTED, lost permissions, or changed head does not authorize.
 4. Evaluation still uses old evaluator/policy. Approval does not prove the new evaluator correct; review its candidate evidence. Only the merged commit becomes the next baseline.
 
-Review submission does not automatically trigger pull_request_target. Rerun the correct head as the author or another non-approver: publisher excludes both original actor and triggering actor. Evidence expires after 3,600 seconds and needs rerun. Labels, candidate files, arbitrary CLI approval strings, or self-approval cannot replace live independent review.
+Review submission does not automatically trigger pull_request_target. Rerun the correct head as the author or another non-approver: publisher and the CI protected-change guard (`check_trusted_changes.py`) exclude both original actor and triggering actor. **Marking a PR ready for review, pushing or editing it also triggers a run**; if an approver triggered it, that run can never count their approval, because a rerun keeps the original actor. Any failing same-name required check on the head blocks the merge, so such a run needs another reviewer's approval and a rerun, or a new head with fresh approval. The author should mark PRs ready and rerun; reviewers only submit approvals (PRs #22 and #23 each needed an extra run on October 11). Evidence expires after 3,600 seconds and needs rerun. Labels, candidate files, arbitrary CLI approval strings, or self-approval cannot replace live independent review.
 
 ## Initial migration and GitHub administration
 

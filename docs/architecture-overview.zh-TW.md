@@ -4,7 +4,7 @@
 
 # 系統架構與流程（Architecture Overview）
 
-正式 main `28be2e0` 已合併 PR #20，完成 930 項測試、32 個 AUTH 案例及 9 個指定缺陷的正反例與簽章驗收（[run 37911499955](https://github.com/chinchiang/MultiAgentEpsilon/actions/runs/37911499955)），離線突變與性質測試已在 main。[2026-10-10 稽核修正](audit-20261010.zh-TW.md)將 AUTH 擴為 44 個案例、突變測試改為獨立 job，並新增靜態檢查，須經獨立審查。LM Studio 文字介接器、分批比較與雙語文件已合併，地端真實模型尚未驗收。系統為 Python 3.12 資安測試試點，由命令列、GitHub Actions、隔離容器與模型介接器組成；多模型採獨立盲審、循序呼叫與本機評分。
+正式 main `f1a640f` 已合併 [2026-10-10 稽核修正](audit-20261010.zh-TW.md)（PR #21、#22）：AUTH 擴為 44 個案例、突變測試改為獨立 job，並新增靜態檢查；[run 38098147162](https://github.com/chinchiang/MultiAgentEpsilon/actions/runs/38098147162) 完成 1149 項測試、9 個指定缺陷的正反例、突變測試與簽章驗收。LM Studio 文字介接器、分批比較與雙語文件已合併，地端真實模型尚未驗收。系統為 Python 3.12 資安測試試點，由命令列、GitHub Actions、隔離容器與模型介接器組成；多模型採獨立盲審、循序呼叫與本機評分。
 
 圖中的實線表示已實作的執行或資料關係；虛線表示暫停、復原或尚待部署的路徑，依節點標示判讀。圖表使用 Mermaid 原始檔，另提供可直接開啟與分享的 SVG。
 
@@ -311,7 +311,7 @@ main 已包含評估與簽章共同成功的最終必要關卡；儲存庫已恢
 
 # Architecture Overview and repository structure
 
-Reviewed main `28be2e0` includes PR #20, 930 tests, 32 AUTH cases/exactly nine seeded failures, cleanup and signatures in [run 37911499955](https://github.com/chinchiang/MultiAgentEpsilon/actions/runs/37911499955); offline mutation and property tests are on main. The [October 10 audit](audit-20261010.zh-TW.md#en) expands AUTH to 44 cases, moves mutation testing to its own job and adds static checks, pending independent review. LM Studio text integration, cross-batch comparison and bilingual documentation are merged; real local-model acceptance is pending. The Python 3.12 pilot uses CLIs, Actions, isolated containers, and adapters. Models review independently, execute sequentially, and are scored locally.
+Reviewed main `f1a640f` includes the [October 10 audit](audit-20261010.zh-TW.md#en) (PRs #21 and #22): 44 AUTH cases, a separate mutation job and static checks. [run 38098147162](https://github.com/chinchiang/MultiAgentEpsilon/actions/runs/38098147162) passed 1149 tests, exactly nine seeded failures, mutation tests, cleanup and signatures. LM Studio text integration, cross-batch comparison and bilingual documentation are merged; real local-model acceptance is pending. The Python 3.12 pilot uses CLIs, Actions, isolated containers, and adapters. Models review independently, execute sequentially, and are scored locally.
 
 Solid arrows represent implemented execution/data paths; dashed arrows indicate paused, recovery, or undeployed paths as labeled. Editable Mermaid and standalone SVG are bilingual.
 
