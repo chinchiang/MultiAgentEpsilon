@@ -10,7 +10,7 @@ Gemini 3 Flash 系列的審查請求指定 `thinkingLevel=LOW`、`includeThought
 
 單次輸出與整批預留上限不變。Gemini 的 `candidatesTokenCount` 與 `thoughtsTokenCount`（若有回報）合計作為輸出用量，超額仍拒絕；不保存或要求回傳思考內容。失敗回應缺少的用量維持未知，金額成本也維持未知。
 
-schema 依供應商支援範圍設定；它不取代本機驗證。Gemini 使用 `maxItems=3` 與行號上下限；Bedrock 使用行號列舉，不傳送不支援的 `maxItems`、數值上下限或字串長度。兩者仍由本機拒絕超過三項 findings。重複 JSON key、非有限數字、Markdown 圍欄、額外欄位、錯誤案例識別碼、偽造引用、不符的弱點行號及判定／finding 不一致均拒絕。供應商回報截斷、拒答或工具呼叫也維持失敗；不修補模型輸出、不把失敗轉為 CLEAN、不自動重試或切換供應商。`response_format` 納入請求摘要，schema 與 adapter 實作納入實作摘要。
+schema 依供應商支援範圍設定；它不取代本機驗證。Gemini 與 LM Studio 使用 `maxItems=3` 與行號上下限；Bedrock 使用行號列舉，不傳送不支援的 `maxItems`、數值上下限或字串長度。兩者仍由本機拒絕超過三項 findings。重複 JSON key、非有限數字、Markdown 圍欄、額外欄位、錯誤案例識別碼、偽造引用、不符的弱點行號及判定／finding 不一致均拒絕。供應商回報截斷、拒答或工具呼叫也維持失敗；不修補模型輸出、不把失敗轉為 CLEAN、不自動重試或切換供應商。`response_format` 納入請求摘要，schema 與 adapter 實作納入實作摘要。
 
 HTTP 400 可讀取最多 8 KiB、未壓縮的 JSON 錯誤本文，只將提及思考設定或輸出設定的訊息分類為 `THINKING_CONFIGURATION`／`OUTPUT_CONFIGURATION`。不保留原文、欄位路徑或憑證；無法分類、過大或不合法的錯誤維持一般 `HTTP_ERROR`。這是診斷線索，不能憑此推斷完整原因。
 

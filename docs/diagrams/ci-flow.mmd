@@ -1,10 +1,11 @@
 flowchart TB
     PR["PR → main / pull_request_target"] --> Checkout["base evaluator／head candidate 僅當資料<br/>Trusted base evaluates candidate data"]
     Checkout --> Guard{"全部路徑有精確 head 獨立核准？<br/>Trusted independent approval for all changes?"}
-    Guard -->|"是 / Yes"| Evaluate["可信安裝／離線 runtime／文件與靜態檢查／完整回歸<br/>Install, runtime, docs and static checks, regressions"]
+    Guard -->|"是 / Yes"| Evaluate["可信安裝／離線 runtime／文件與靜態檢查／完整回歸／缺陷反例與候選評估<br/>Install, runtime, docs and static checks, regressions, seeded counter-examples and candidate evaluation"]
     Guard -->|"否 / No"| Failed["評估失敗／保留證據<br/>Failed evaluation with evidence"]
     Other["main push／手動 ref 使用不同檢查名稱<br/>Manual runs report under different check names"] --> Evaluate
-    PR --> Mutation["獨立 job：可信基準突變測試<br/>Separate job: trusted mutation tests"]
+    PR --> Mutation["獨立 job：可信基準突變測試（所有觸發皆執行）<br/>Separate job: trusted mutation tests on every trigger"]
+    Other --> Mutation
     Evaluate --> Contract{"證據契約完整？<br/>Publishable evidence contract?"}
     Contract -->|"是 / Yes"| Success["評估工作成功<br/>Evaluation succeeded"]
     Contract -->|"否 / No"| Failed
@@ -16,7 +17,7 @@ flowchart TB
     Sign --> Final{"評估、簽章與突變都是 success？<br/>Evaluation, signing and mutation all successful?"}
     Mutation --> Final
     Block --> Final
-    Final -->|"是 / Yes"| Verify["核對 workflow／head／base 歷程<br/>Verify required-check provenance"]
+    Final -->|"是 / Yes"| Verify["審查者手動核對 workflow／head／base 歷程<br/>Reviewer manually verifies required-check provenance"]
     Final -->|"否 / No"| Deny["最終必要檢查失敗<br/>Failure / cancelled / skipped all block"]
     Verify --> Merge["main 規則與有效獨立核准皆符合<br/>Merge only with all native conditions"]
     Sign -.-> App["專用 App 尚未部署：核對簽章／嘗試／審查／時效<br/>Pending App: signature / attempt / review / freshness"]

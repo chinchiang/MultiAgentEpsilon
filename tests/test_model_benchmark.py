@@ -37,7 +37,7 @@ ROOT = Path(__file__).resolve().parents[1]
 def test_sql_reference_has_executable_counterexample(case_id):
     case = bench.load_cases()[case_id]
     namespace = {}
-    exec(case['source'], namespace)  # 只使用已納入版本管理的可信合成原碼。 / Only checked-in trusted synthetic fixture source.
+    exec(case['source'], namespace)  # 只使用已納入版本管理的可信合成原始碼。 / Only checked-in trusted synthetic fixture source.
     with sqlite3.connect(':memory:') as conn:
         conn.execute('CREATE TABLE items(id INTEGER, name TEXT)')
         conn.executemany('INSERT INTO items VALUES (?,?)', [(1, 'one'), (2, 'two')])

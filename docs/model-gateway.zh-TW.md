@@ -23,7 +23,7 @@ gateway 提供共用 `Request`／`Reply`、離線 mock、Gemini `generateContent
 
 Bedrock 透過 AWS CLI 子程序呼叫時，只傳入 `AWS_*`（不含 endpoint 覆寫）與基本程序、代理及 CA 環境變數；`GH_TOKEN` 或其他供應商金鑰等無關權杖不會進入 CLI 或其 `credential_process`。Gemini 若回報推理詞元卻缺少可見輸出計數，視為用量格式錯誤，不能略過輸出預算檢查。
 
-每個供應商只收到同一個固定 ACK fixture，不接受 repository 路徑、附件或任意 prompt 參數。每個供應商最多 1 次呼叫、要求最多 256 output tokens、單次期限 30 秒；不重試、不自動切換付費供應商。一般 HTTP 操作另有 10 秒 I/O timeout，LM Studio 使用涵蓋模型清單與推論的 30 秒呼叫期限。supervisor 的工作期限為 min(130, 供應商數 × 30＋10) 秒，期限後進行程序清理。退出碼 0 必須同時滿足全部固定回應驗證及清理完成；任一失敗、缺設定或取消為 1。
+每個供應商只收到同一個固定 ACK fixture，不接受 儲存庫路徑、附件或任意 prompt 參數。每個供應商最多 1 次呼叫、要求最多 256 輸出詞元、單次期限 30 秒；不重試、不自動切換付費供應商。一般 HTTP 操作另有 10 秒 I/O timeout，LM Studio 使用涵蓋模型清單與推論的 30 秒呼叫期限。supervisor 的工作期限為 min(130, 供應商數 × 30＋10) 秒，期限後進行程序清理。退出碼 0 必須同時滿足全部固定回應驗證及清理完成；任一失敗、缺設定或取消為 1。
 
 從報告 schema 2 起，正式證據位於 `artifacts/<run-id>/report.json`，開始執行前即建立 INCOMPLETE，逐供應商原子更新進度。`--output` 保留為額外匯出，必須使用新路徑；若 supervisor 被 SIGKILL，匯出檔可能停留在初始 INCOMPLETE，應依其 `canonical_report` 回查正式報告。janitor 不依任意匯出路徑寫檔。
 
@@ -41,17 +41,17 @@ Bedrock 透過 AWS CLI 子程序呼叫時，只傳入 `AWS_*`（不含 endpoint 
 
 ## 已實作的安全邊界
 
-- `Gateway` 只接受可信呼叫者標示的 synthetic 類別，限制 system＋user 共 16 KiB、單次 output 上限與整個 gateway 的呼叫／token 預留額度。預留在 I/O 前完成，失敗不退還，不會以多次平行請求繞過預算。
+- `Gateway` 只接受可信呼叫者標示的 synthetic 類別，限制 system＋user 共 16 KiB、單次 output 上限與整個 gateway 的呼叫／詞元預留額度。預留在 I/O 前完成，失敗不退還，不會以多次平行請求繞過預算。
 - HTTP 禁止 redirects，保留 proxy 與 CA trust；回應 envelope 最多 128 KiB、文字最多 64 KiB。拒絕壓縮回應、非 JSON、重複 key、非有限數值、截斷與不支援的結束原因。
 - tool／function 呼叫、code-execution payload 與 content-filter 拒答均產生失敗證據。任何文字輸出都只當資料，沒有 shell、工具分派或網路委派入口。system 與 user 在供應商協定中分開傳送。
 - AWS CLI 使用封存的 Linux 匿名記憶體檔案傳送 JSON，子程序只繼承指定的檔案描述元；不將內容放入命令列參數或具名暫存檔。stdin 只傳遞登記後的放行字元。禁止 shell、互動提示、重試及 configured endpoint overrides；stdout 有上限，stderr 不寫入證據。取消／逾時時終止 process group 並回收 CLI。
-- 證據保存 call ID、模型／輸入／輸出 digest、可讀的模型標籤（`model_label`；ARN 及任何 12 位數帳號樣式一律遮蔽）、耗時、固定錯誤碼與供應商回報 token 數。缺 usage 為 null，不記作免費或零消耗。ACK smoke 的原始 prompt、回答，以及所有呼叫的 HTTP body、憑證、端點及例外文字都不進報告；盲測則另外保存模型原始回答文字（`response_text`），以便由原文重新導出 review。
+- 證據保存 call ID、模型／輸入／輸出 digest、可讀的模型標籤（`model_label`；ARN 及任何 12 位數帳號樣式一律遮蔽）、耗時、固定錯誤碼與供應商回報詞元數。缺 usage 為 null，不記作免費或零消耗。ACK smoke 的原始 prompt、回答，以及所有呼叫的 HTTP body、憑證、端點及例外文字都不進報告；盲測則另外保存模型原始回答文字（`response_text`），以便由原文重新導出 review。
 
-synthetic 標籤是可信呼叫者的分類聲明，並不是 DLP 或機密偵測。模型輸出仍是不可信資料；分離角色不保證模型本身不受 prompt injection 影響。token 限制不是精確的金額預算，供應商計價、hidden reasoning 與取消後的遠端運算可能另有費用。回應超限時只能拒絕本次結果，無法追回供應商已收取的費用。
+synthetic 標籤是可信呼叫者的分類聲明，並不是 DLP 或機密偵測。模型輸出仍是不可信資料；分離角色不保證模型本身不受 prompt injection 影響。詞元限制不是精確的金額預算，供應商計價、hidden reasoning 與取消後的遠端運算可能另有費用。回應超限時只能拒絕本次結果，無法追回供應商已收取的費用。
 
 ## 本輪驗證與後續
 
-2026-10-04 的實際 Gemini 固定 ACK 推論成功，API 回報 input 35／output 9 tokens。GLM 於 proxy CONNECT 收到 403，尚未到達應用協定驗收；Bedrock 的本地 AWS CLI 回報 profile 尚未設定，且尚缺實際模型識別值。離線 adapter 成功不能取代這兩項真實串接驗收。
+2026-10-04 的實際 Gemini 固定 ACK 推論成功，API 回報 input 35／output 9 詞元。GLM 於 proxy CONNECT 收到 403，尚未到達應用協定驗收；Bedrock 的本地 AWS CLI 回報 profile 尚未設定，且尚缺實際模型識別值。離線 adapter 成功不能取代這兩項真實串接驗收。
 
 56 項離線測試涵蓋協定 payload、資料路由拒絕、平行預算、redirect／429／5xx、不可信 JSON、usage、截斷／拒答／工具請求、輸出指令不執行、HTTP streaming 取消、真實 CLI 子程序逾時／取消／回收及 mock CLI。這些測試由既有 pytest CI 執行，不使用模型金鑰。
 
@@ -94,11 +94,11 @@ janitor 只處理已死亡的 owner；先停止 worker，再重新盤點 AWS 子
 
 目前可執行的介接器為 mock、Gemini、Bedrock、GLM 與 LM Studio；設定一律讀取程序環境變數，`.env.example` 只是參考清單、程式不會載入；設定與目的地授權集中在 `security_harness/llm/config.py`。GLM 與 LM Studio 的遠端主機必須列在 `security/model-roe.json` 的 `allowed_remote_hosts`，否則以 `CONFIGURATION` 拒絕，API 金鑰不會送出；只有 LM Studio 的字面 loopback HTTP 不需列入。GLM 真實連線依使用者指示暫停，離線協定測試持續保留。每次送出呼叫前會將預留次數與詞元上限同步寫入磁碟；程序遭 SIGKILL 時可保留 IN_FLIGHT 紀錄，但無法據此推算遠端實際費用或保證遠端推論已取消。
 
-環境重建後可執行 `python -I scripts/install_aws_cli.py`，安裝官方 PGP 簽章已驗證並固定封存雜湊的 AWS CLI 2.37.10。模型指令使用 `AWS_CLI_PATH="$PWD/.tools/aws-bin/aws"`；SSO profile 與非機密設定另存於忽略的 `.state/bedrock/config`，以 `AWS_CONFIG_FILE` 指定。臨時憑證到期仍須經安全環境更新，不會從聊天或測試報告載入。
+環境重建後可執行 `python3 -I scripts/install_aws_cli.py`，安裝官方 PGP 簽章已驗證並固定封存雜湊的 AWS CLI 2.37.10。模型指令使用 `AWS_CLI_PATH="$PWD/.tools/aws-bin/aws"`；SSO profile 與非機密設定另存於忽略的 `.state/bedrock/config`，以 `AWS_CONFIG_FILE` 指定。臨時憑證到期仍須經安全環境更新，不會從聊天或測試報告載入。
 
 ## LM Studio 地端文字模型
 
-新增 `--provider lmstudio`，設定 `LMSTUDIO_BASE_URL`、`LMSTUDIO_MODEL_ID` 及選用的 `LMSTUDIO_API_KEY`。只對字面 loopback 位址開放 HTTP，其餘維持 HTTPS／443；先查核 `/v1/models` 的精確 ID，再傳送文字與 JSON schema。完整設定、網路界線及待完成真實驗收見 [LM Studio 文件](lmstudio.zh-TW.md)。固定 ACK 的整輪期限為 `min(130, 30 × 供應商數 + 10)` 秒；新增供應商不會提高 130 秒上限。盲測計畫若最壞情況超過整輪上限，`model_review.py` 會在送出付費呼叫前提醒結果可能為 INCOMPLETE。逐次證據另記錄 `output_budget_verified`（供應商是否回報輸出用量），單次 HTTP 逾時記為 `IO_TIMEOUT`。
+新增 `--provider lmstudio`，設定 `LMSTUDIO_BASE_URL`、`LMSTUDIO_MODEL_ID` 及選用的 `LMSTUDIO_API_KEY`。只對字面 loopback 位址開放 HTTP，其餘維持 HTTPS／443；先查核 `/v1/models` 的精確 ID，再傳送文字與 JSON schema。完整設定、網路界線及待完成真實驗收見 [LM Studio 文件](lmstudio.zh-TW.md)。固定 ACK 的整輪期限為 `min(130, 30 × 供應商數 + 10)` 秒；新增供應商不會提高 130 秒上限。盲測計畫若最壞情況超過整輪上限，`model_review.py` 會在送出付費呼叫前提醒結果可能為 INCOMPLETE。逐次證據另記錄 `output_budget_verified`（供應商是否回報輸出用量），單次 HTTP 逾時記為 `IO_TIMEOUT`。目前 `allowed_remote_hosts` 的 `glm` 與 `lmstudio` 清單皆為空，因此任何遠端主機都會以 `CONFIGURATION` 拒絕，新增主機須經受保護的 RoE 變更與獨立審查。模型 worker 的資源限制集中定義於 `security_harness/limits.py` 的 `MODEL_WORKER_RLIMITS`（位址空間 2 GiB、單程序資料 512 MiB、CPU 30 秒、單檔輸出 1 MiB、檔案描述符 128）。真實 LM Studio／Nemotron 驗收與 v3 真實樣本仍待完成；GLM 真實推論依指示暫停。
 
 <a id="en"></a>
 
@@ -146,7 +146,7 @@ AWS CLI 2.37.9 did not accept piped /dev/stdin JSON as expected; seekable sealed
 
 Settings always come from the process environment; `.env.example` is a reference list the scripts never load. Configuration and destination authorization live in `security_harness/llm/config.py`: remote GLM and LM Studio hosts must appear in the model RoE's `allowed_remote_hosts`, otherwise the call is refused as CONFIGURATION before any key is sent; only LM Studio's literal loopback HTTP needs no entry. Live review plans whose worst case exceeds the run cap print a warning before paid calls. Call evidence records `output_budget_verified`, and single HTTP I/O timeouts are recorded as IO_TIMEOUT.
 
-Blind reviews, repeated observations, human identity, and model-family comparisons have separate acceptance requirements. New LM Studio code has offline/loopback-fixture coverage; real Nemotron weights/server/schema behavior are still pending. GLM live remains paused; no arbitrary model registry or automatic model download was added.
+Blind reviews, repeated observations, human identity, and model-family comparisons have separate acceptance requirements. New LM Studio code has offline/loopback-fixture coverage; real Nemotron weights/server/schema behavior are still pending. GLM live remains paused; no arbitrary model registry or automatic model download was added. Both `allowed_remote_hosts` lists (`glm`, `lmstudio`) are currently empty, so every remote host is refused as CONFIGURATION until a protected, independently reviewed RoE change adds one. Model-worker resource limits live in `MODEL_WORKER_RLIMITS` in `security_harness/limits.py` (2 GiB address space, 512 MiB per-process data, 30 s CPU, 1 MiB per output file, 128 descriptors). Real LM Studio/Nemotron acceptance and v3 live samples remain pending.
 
 
 ## Recovery and AWS CLI setup
