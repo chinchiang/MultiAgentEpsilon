@@ -7,7 +7,7 @@ import signal
 from dataclasses import asdict
 from datetime import datetime, timezone
 
-from .benchmark import (CASES_PATH, ORACLE_PATH, OUTPUT_TOKENS, MockReviewer, load_cases,
+from .benchmark import (CASES_PATH, ORACLE_PATH, OUTPUT_BUDGETS, OUTPUT_TOKENS, MockReviewer, load_cases,
                         make_plan, review_request, request_digest, parse_review)
 from .gateway import Gateway, Limits, ModelError, digest
 from .lifecycle import persist, read_report
@@ -19,7 +19,7 @@ def initial_report(providers, case_ids, run_id, output_tokens=OUTPUT_TOKENS, rou
     from .benchmark_score import file_digest
     from .config import implementation_digest, ROOT
     cases, plan = load_cases(), make_plan(providers, case_ids, rounds)
-    if type(output_tokens) is not int or output_tokens not in (512, 1024):
+    if type(output_tokens) is not int or output_tokens not in OUTPUT_BUDGETS:
         raise ValueError('invalid review output budget')
     limits = Limits(max_calls=len(plan), reserved_output_tokens=output_tokens * len(plan), timeout_seconds=30)
     implementation = [implementation_digest(), file_digest(ROOT / 'scripts/model_review.py'),

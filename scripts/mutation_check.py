@@ -37,7 +37,8 @@ TARGETS = {
          'tests/test_model_hardening.py::test_model_roe_boundaries_are_inclusive',
          'tests/test_model_hardening.py::test_remote_host_allowlist_size_boundary')),
     'security_harness/llm/benchmark.py': (
-        ('bounded_text', 'validate_review', 'parse_review'), ('tests/test_model_benchmark.py', '--deselect=tests/test_model_benchmark.py::test_review_cli_supervision_and_explicit_live_opt_in', 'tests/test_security_properties.py')),
+        ('bounded_text', 'validate_review', 'parse_review'), ('tests/test_model_benchmark.py', '--deselect=tests/test_model_benchmark.py::test_review_cli_supervision_and_explicit_live_opt_in',
+                                                              '--deselect=tests/test_model_benchmark.py::test_review_cli_accepts_2048_only_within_the_total_cap', 'tests/test_security_properties.py')),
 }
 SWAPS = {ast.Eq: ast.NotEq, ast.NotEq: ast.Eq, ast.Lt: ast.LtE, ast.LtE: ast.Lt,
          ast.Gt: ast.GtE, ast.GtE: ast.Gt, ast.In: ast.NotIn, ast.NotIn: ast.In,

@@ -32,9 +32,10 @@ HTTP 只允許字面 `127.0.0.1` 或 `[::1]`、明確的 1024–65535 連接埠�
 # 固定合成 ACK，不傳送專案原始碼。 / Fixed synthetic ACK, no project source.
 .venv/bin/python -I scripts/model_smoke.py --live --provider lmstudio
 
-# 先做兩案單模型；再做地端三家族同批比較。 / Two local cases, then a three-family on-prem batch.
+# 先做兩案單模型；再做地端三家族同批比較（推理模型用 2048，三家各一案共 6144）。
+# Two local cases, then a three-family on-prem batch (2048 for reasoning models; one case each, 6144 in total).
 .venv/bin/python -I scripts/model_review.py --live --provider lmstudio --case B13 --case B14 --output-tokens 1024
-.venv/bin/python -I scripts/model_review.py --live --provider glm --provider deepseek --provider lmstudio --case B13 --case B14 --output-tokens 1024
+.venv/bin/python -I scripts/model_review.py --live --provider glm --provider deepseek --provider lmstudio --case B13 --output-tokens 2048
 
 # 離線比較不同批次，不會呼叫 API。 / Offline comparison without API calls.
 .venv/bin/python -I scripts/model_compare.py --report artifacts/<run-a>/report.json --report artifacts/<run-b>/report.json

@@ -2,6 +2,7 @@
 
 Offline provider contracts and regressions for the trusted model boundary."""
 import asyncio
+import hashlib
 import json
 import subprocess
 import sys
@@ -27,6 +28,9 @@ GEMINI = {"candidates": [{"content": {"role": "model", "parts": [{"text": "ok"}]
           "usageMetadata": {"promptTokenCount": 11, "candidatesTokenCount": 2}}
 GLM = {"choices": [{"message": {"role": "assistant", "content": "ok"}, "finish_reason": "stop"}],
        "usage": {"prompt_tokens": 11, "completion_tokens": 2}}
+# DeepSeek 把推理寫在內容前段，以單一 </think> 結束。 / DeepSeek writes inline reasoning ending with one </think>.
+DEEPSEEK = {"choices": [{"message": {"role": "assistant", "content": "synthetic reasoning</think>\nok"},
+                         "finish_reason": "stop"}], "usage": {"prompt_tokens": 11, "completion_tokens": 2}}
 BEDROCK = {"output": {"message": {"role": "assistant", "content": [{"text": "ok"}]}},
            "stopReason": "end_turn", "usage": {"inputTokens": 11, "outputTokens": 2}}
 
@@ -66,7 +70,7 @@ def test_provider_contracts_keep_system_separate_and_bound_output(provider):
         http, wire, _ = http_fixture(GEMINI)
         adapter = GeminiAdapter("Gemini 3.8 Flash", "synthetic-key", http)
     elif provider in ("glm", "deepseek"):
-        http, wire, _ = http_fixture(GLM)
+        http, wire, _ = http_fixture(GLM if provider == "glm" else DEEPSEEK)
         adapter = (GLMAdapter if provider == "glm" else DeepSeekAdapter)(
             "synthetic-" + provider, "https://local.example.invalid/v1/chat/completions", "synthetic-key", http)
         assert adapter.provider == adapter.family == provider
@@ -208,6 +212,49 @@ def test_prompt_injection_stays_user_data_and_output_stays_inert():
     # 注入文字不會進入 system 角色或增加工具。 / Injected text never reaches the system role or adds tools.
     assert messages == [{"role": "system", "content": REQUEST.system}, {"role": "user", "content": instruction}]
     assert not {"tools", "tool_choice", "functions"} & set(json.loads(wire[0].content))
+
+
+def deepseek_reply(content):
+    value = json.loads(json.dumps(DEEPSEEK))
+    value["choices"][0]["message"]["content"] = content
+    http, _, _ = http_fixture(value)
+    return DeepSeekAdapter("deepseek", "https://local.example.invalid/v1/chat/completions", "synthetic-key", http)
+
+
+@pytest.mark.parametrize("content,answer", [
+    ("reasoning</think>ok", "ok"), ("<think>reasoning</think>\n\nok\n", "ok"),
+    ("</think>{\"verdict\": \"CLEAN\"}", '{"verdict": "CLEAN"}'),
+])
+def test_deepseek_keeps_only_the_answer_after_a_single_separator(content, answer):
+    result, evidence = invoke(deepseek_reply(content))
+    assert result.text == answer and evidence["status"] == "SUCCESS"
+    # 推理文字不進入證據，回應摘要只涵蓋答案。 / Reasoning never reaches evidence; the response digest covers only the answer.
+    assert "reasoning" not in json.dumps(evidence)
+    assert evidence["response_sha256"] == hashlib.sha256(answer.encode()).hexdigest()
+
+
+@pytest.mark.parametrize("content,detail", [
+    ("ok", "REASONING_SEPARATOR"), ("a</think>b</think>ok", "REASONING_SEPARATOR"),
+    ("reasoning</think><think>more</think>ok", "REASONING_SEPARATOR"),
+    ("reasoning</think><think>ok", "REASONING_SEPARATOR"), ("re<think>asoning</think>ok", "REASONING_SEPARATOR"),
+    ("<think><think>reasoning</think>ok", "REASONING_SEPARATOR"),
+    ("reasoning</think>", "EMPTY_TEXT"), ("reasoning</think>  \n", "EMPTY_TEXT"),
+])
+def test_deepseek_rejects_anything_but_one_reasoning_separator(content, detail):
+    result, evidence = invoke(deepseek_reply(content))
+    assert result is None
+    assert (evidence["status"], evidence["code"], evidence["diagnostic"]) == ("ERROR", "INVALID_RESPONSE", detail)
+    assert "reasoning" not in json.dumps(evidence)
+
+
+def test_glm_content_is_not_split_on_reasoning_markers():
+    # 分隔規則只屬於 DeepSeek；GLM 的推理在獨立欄位，內容原樣保留。 / The separator rule is DeepSeek-only;
+    # GLM reports reasoning in a separate field, so its content stays as-is.
+    value = json.loads(json.dumps(GLM))
+    value["choices"][0]["message"]["content"] = "a</think>b"
+    http, _, _ = http_fixture(value)
+    result, _ = invoke(GLMAdapter("glm", "https://local.example.invalid/v1/chat/completions", "synthetic-key", http))
+    assert result.text == "a</think>b"
 
 
 @pytest.mark.parametrize("url", ["http://local.example.invalid/v1/chat/completions",
