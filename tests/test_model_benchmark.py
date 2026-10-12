@@ -272,6 +272,41 @@ def test_larger_review_budget_is_bound_to_every_request_and_total_cap():
         runner.initial_report(['mock-review-a', 'mock-review-b'], list(bench.SUITES['injection']), str(uuid.uuid4()), 1024)
 
 
+def test_reasoning_review_budget_fits_four_reviews_and_binds_every_request():
+    report = runner.initial_report(['glm', 'deepseek'], ['B13', 'B14'], str(uuid.uuid4()), 2048)
+    assert report['output_tokens_per_review'] == 2048
+    assert report['limits']['reserved_output_tokens'] == 8192 and report['limits']['max_calls'] == 4
+    score.validate_collection(report, report['plan'])
+    cases = bench.load_cases()
+    assert all(check['request_sha256'] == bench.request_digest(
+        bench.review_request(cases[check['case_id']], check['review_id'], 2048)) for check in report['checks'])
+    # 2048 不放寬整輪上限：第五筆起就超過 8192。 / 2048 never widens the run cap: a fifth review exceeds 8192.
+    with pytest.raises(ValueError, match='^invalid\\ gateway\\ limit$'):
+        runner.initial_report(['glm', 'deepseek'], ['B13', 'B14', 'B15'], str(uuid.uuid4()), 2048)
+
+
+@pytest.mark.parametrize('budget', [256, 768, 1536, 4096, True, '2048'])
+def test_unlisted_review_budgets_are_rejected(budget):
+    with pytest.raises(ValueError, match='^invalid\\ review\\ output\\ budget$'):
+        runner.initial_report(['mock-review-a'], ['B01'], str(uuid.uuid4()), budget)
+    report = runner.initial_report(['mock-review-a'], ['B01'], str(uuid.uuid4()), 2048)
+    report['output_tokens_per_review'] = budget
+    with pytest.raises(ValueError, match='^invalid\\ review\\ budget$'):
+        score.validate_collection(report)
+
+
+def test_review_cli_accepts_2048_only_within_the_total_cap():
+    script = ROOT / 'scripts/model_review.py'
+    done = subprocess.run([sys.executable, '-I', str(script), '--case', 'B01', '--output-tokens', '2048'],
+                          capture_output=True, timeout=10)
+    assert done.returncode == 0
+    data = json.loads(Path(json.loads(done.stdout)['evidence']).read_text())
+    assert data['status'] == 'COMPLETE' and data['output_tokens_per_review'] == 2048
+    # 預設兩個 mock × 六案為 12 筆，2048 會超過 8192。 / Two default mocks × six cases is 12 reviews, over 8192 at 2048.
+    for args in (['--output-tokens', '2048'], ['--case', 'B01', '--output-tokens', '4096']):
+        assert subprocess.run([sys.executable, '-I', str(script), *args], capture_output=True, timeout=10).returncode == 2
+
+
 def test_parent_refuses_worker_success_when_benchmark_evaluation_is_invalid(tmp_path):
     report = runner.initial_report(['mock-review-a'], ['B01'], str(uuid.uuid4()))
     path = tmp_path / 'artifacts' / report['run_id'] / 'report.json'

@@ -10,7 +10,7 @@ import uuid
 from datetime import datetime, timezone
 from dataclasses import asdict
 
-from .benchmark import (CASES_PATH, ORACLE_PATH, CWES, PROVIDERS, load_cases, case_digest, review_request,
+from .benchmark import (CASES_PATH, ORACLE_PATH, CWES, OUTPUT_BUDGETS, PROVIDERS, load_cases, case_digest, review_request,
                         request_digest, validate_review, bounded_text, parse_review)
 from .lifecycle import REPORT_LIMIT
 from ..results import read_regular
@@ -50,7 +50,7 @@ def validate_collection(report, expected_plan=None):
         raise ValueError('stale or invalid benchmark identity')
     plan, checks, calls = report['plan'], report['checks'], report['calls']
     output_tokens = report.get('output_tokens_per_review', 512)
-    if type(output_tokens) is not int or output_tokens not in (512, 1024) or output_tokens * len(plan) > 8192:
+    if type(output_tokens) is not int or output_tokens not in OUTPUT_BUDGETS or output_tokens * len(plan) > 8192:
         raise ValueError('invalid review budget')
     expected_limits = asdict(Limits(max_calls=len(plan), reserved_output_tokens=output_tokens * len(plan), timeout_seconds=30))
     Limits(**report['limits'])

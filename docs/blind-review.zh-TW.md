@@ -28,7 +28,7 @@
 .venv/bin/python -m pytest tests/test_model_benchmark.py
 ```
 
-runner 預設 512 輸出詞元／次，可明確選擇 1024；每批最多 16 次呼叫且合計預留不超過 8192 輸出詞元。每次請求期限 30 秒，HTTP I/O 上限亦為 30 秒；整輪期限為 `min(130, 20 × 呼叫數 + 10)` 秒，整輪期限可先於最後一次請求期限到達。不同預算或案例子集屬於不同實驗，不能悄悄合併為同一個可比結果。不重試或自動增加付費供應商。Bedrock／GLM 仍需要各自的可用身分、模型及連線。
+runner 預設 512 輸出詞元／次，可明確選擇 1024 或 2048；每批最多 16 次呼叫且合計預留不超過 8192 輸出詞元。GLM、DeepSeek 等推理模型的推理詞元也計入輸出，1024 時多數回答會被截斷，建議改用 2048，但每批因此最多 4 次呼叫。每次請求期限 30 秒，HTTP I/O 上限亦為 30 秒；整輪期限為 `min(130, 20 × 呼叫數 + 10)` 秒，整輪期限可先於最後一次請求期限到達。不同預算或案例子集屬於不同實驗，不能悄悄合併為同一個可比結果。不重試或自動增加付費供應商。Bedrock／GLM 仍需要各自的可用身分、模型及連線。
 
 沿用模型 supervisor、登記後才執行的 worker／AWS CLI 與 `scripts/cleanup_runs.py`。正式報告為 `artifacts/<run-id>/report.json`，`operation` 為 `model-smoke`、`task` 為 `blind-review`。中斷仍保留完整預定案例清單；未取得可用回答的案例不會消失。若 catalog／oracle 或預期計畫不一致，評分失敗，不能發布 COMPLETE。
 
@@ -128,7 +128,7 @@ This pilot compares judgments of fixed synthetic snippets; voting never replaces
 
 The default injection suite uses two deliberately disagreeing mock reviewers and six cases (12 calls). Boundaries similarly uses six vulnerable/fixed authorization, traversal, and SSRF cases. Live providers need explicit --live and configured identities/models/routes. GLM examples describe the interface, not completed inference; live GLM is paused. LM Studio is separately configured in its [guide](lmstudio.zh-TW.md#en).
 
-Default output is 512 tokens per call, optionally 1,024. Each batch permits at most 16 calls and 8,192 reserved output tokens. Requests and HTTP I/O are bounded by 30 seconds; the whole run uses min(130, 20 × calls + 10) seconds and may expire first. Different budgets/subsets are different experiments. No automatic retries, added providers, or hidden budget increases occur.
+Default output is 512 tokens per call, optionally 1,024 or 2,048. Each batch permits at most 16 calls and 8,192 reserved output tokens. Reasoning models such as GLM and DeepSeek count reasoning tokens as output and mostly truncate at 1,024; use 2,048, which limits a batch to four calls. Requests and HTTP I/O are bounded by 30 seconds; the whole run uses min(130, 20 × calls + 10) seconds and may expire first. Different budgets/subsets are different experiments. No automatic retries, added providers, or hidden budget increases occur.
 
 The supervisor, registered workers/AWS CLI, and cleanup_runs.py preserve lifecycle controls. Canonical reports are artifacts/<run-id>/report.json with operation=model-smoke and task=blind-review. Canceled/unanswered cases remain in the plan. Catalog/oracle/plan mismatches prevent COMPLETE.
 

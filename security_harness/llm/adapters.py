@@ -3,6 +3,7 @@
 Gemini generateContent, OpenAI-compatible GLM/DeepSeek chat, and Bedrock Converse."""
 import re
 import json
+from dataclasses import replace
 
 from .gateway import ModelError, Reply
 from .transport import AwsCLI, JsonHTTP, validate_url
@@ -152,9 +153,28 @@ class GLMAdapter(ChatAdapter):
     family = "glm"
 
 
+def visible_answer(text):
+    """DeepSeek 把推理寫在內容前段並以單一 </think> 結束；只取其後的答案，推理文字不保存也不修補。
+
+DeepSeek writes its reasoning inline, ending with a single </think>. Only the answer after
+    it is kept; the reasoning is discarded and nothing else is repaired. Anything but exactly
+    one separator, with at most one leading <think>, is invalid."""
+    reasoning, _, answer = text.partition("</think>")
+    if (text.count("</think>") != 1 or "<think>" in answer
+            or "<think>" in reasoning.removeprefix("<think>")):
+        raise ModelError("INVALID_RESPONSE", "REASONING_SEPARATOR")
+    if not answer.strip():
+        raise ModelError("INVALID_RESPONSE", "EMPTY_TEXT")
+    return answer.strip()
+
+
 class DeepSeekAdapter(ChatAdapter):
     provider = "deepseek"
     family = "deepseek"
+
+    async def generate(self, request):
+        reply = await super().generate(request)
+        return replace(reply, text=visible_answer(reply.text))
 
 
 def chat_reply(value):

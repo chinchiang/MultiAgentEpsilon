@@ -28,7 +28,8 @@ Only fixed error codes may cross the evidence boundary."""
     DETAILS = frozenset({'JSON_SYNTAX', 'JSON_ENCODING', 'JSON_DUPLICATE_KEY',
         'JSON_NONFINITE', 'ENVELOPE_SCHEMA', 'MISSING_FIELD', 'UNEXPECTED_CONTENT',
         'EMPTY_TEXT', 'USAGE_SCHEMA', 'STOP_REASON', 'REVIEW_SCHEMA', 'EVIDENCE_MISMATCH',
-        'HTTP_CONTENT_TYPE', 'OUTPUT_CONFIGURATION', 'THINKING_CONFIGURATION', 'MODEL_IDENTITY'})
+        'HTTP_CONTENT_TYPE', 'OUTPUT_CONFIGURATION', 'THINKING_CONFIGURATION', 'MODEL_IDENTITY',
+        'REASONING_SEPARATOR'})
 
     def __init__(self, code, detail=None):
         self.code = code if code in self.CODES else "PROVIDER_FAILURE"

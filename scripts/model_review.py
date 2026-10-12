@@ -11,7 +11,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 if __name__ == "__main__":
     sys.path.insert(0, str(ROOT))
-from security_harness.llm.benchmark import PROVIDERS, SUITES, load_cases
+from security_harness.llm.benchmark import OUTPUT_BUDGETS, PROVIDERS, SUITES, load_cases
 from security_harness.llm.benchmark_runner import initial_report
 from security_harness.llm.lifecycle import persist, supervise
 from scripts.model_smoke import require_model_roe
@@ -40,7 +40,7 @@ def main():
     parser.add_argument('--rounds', type=int, choices=range(1, 5), default=1,
                         help='所有輪次共用呼叫、詞元及時間總上限 / planned repetitions share the same total call/token/time caps')
     parser.add_argument('--live', action='store_true', help='允許選定真實 API 處理固定合成案例 / permit selected live API calls for fixed synthetic cases')
-    parser.add_argument('--output-tokens', type=int, choices=(512, 1024), default=512,
+    parser.add_argument('--output-tokens', type=int, choices=OUTPUT_BUDGETS, default=512,
                         help='每筆審查預留量，合計不得超過 8192 詞元 / per-review reservation; total must remain <=8192 tokens')
     args = parser.parse_args()
     providers = args.provider or ['mock-review-a', 'mock-review-b']
