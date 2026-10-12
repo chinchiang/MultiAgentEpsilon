@@ -82,7 +82,7 @@ python3 -I scripts/dev_db.py stop
 | 授權回歸 | 登入負例、同角色、跨租戶、管理者讀寫、欄位限制、登出、各端點身分狀態、輸入邊界、延遲副作用及完整 fixture 狀態；44 個案例 | 完整 G5／Web/API 黑箱掃描、TLS／CSRF／JWT／SSRF |
 | 政策與證據 | 嚴格結果格式、故障阻擋、subject／policy digest、基準變更檢查、CI 簽章與來源驗證 | 專用可信發布器正式部署、例外生命週期、普通開發者的完整遠端繞過驗收 |
 | CI | 遠端 main／PR 正反例、固定 actions SHA、最小權限、早期拒絕證據與清理；main 規則已讀回 | 專用可信來源尚未部署，普通開發者繞過驗收仍未完成 |
-| 多模型 | [受限 gateway 與模型 adapter](docs/model-gateway.zh-TW.md)、[合成盲測與裁決試點](docs/blind-review.zh-TW.md)；地端 LM Studio（Nemotron、Qwen）與公司 LLM 閘道（GLM、DeepSeek） | 地端模型真實驗收、兩個以上真實家族的多輪穩定性、完整 G6／偏誤驗收 |
+| 多模型 | [受限 gateway 與模型 adapter](docs/model-gateway.zh-TW.md)、[合成盲測與裁決試點](docs/blind-review.zh-TW.md)；地端 LM Studio（Nemotron、Qwen）與公司 LLM 閘道（GLM；DeepSeek 已停用） | 地端模型真實驗收、兩個以上真實家族的多輪穩定性、完整 G6／偏誤驗收 |
 
 [結構化輸出驗收](docs/structured-output.zh-TW.md)已完成 Gemini／Claude 對 B09～B12 的一輪真實配對：八個回應有效，分類與弱點行號皆符合標準答案；這不等於多輪穩定性或偏誤改善。
 
@@ -194,7 +194,7 @@ Reports are created before configuration parsing at `artifacts/<run-id>/report.j
 | G2 | Gitleaks; worktree and candidate-HEAD history; bounded gzip/ZIP/tar expansion and metadata scanning | Server-side push protection, unavailable history/caches, credential revocation |
 | AUTH | 44 synthetic authentication/authorization and side-effect cases | Complete product DAST, TLS, CSRF, JWT, SSRF testing |
 | Policy/evidence | Strict contracts, failure blocking, digests, protected changes, CI signatures and source verification | Dedicated publisher deployment, exception lifecycle, complete developer-role remote probes |
-| Models | Mock, Gemini, Bedrock, GLM and DeepSeek interfaces; LM Studio text interface (Nemotron, Qwen) and batch comparison; on-prem IEC gateway authorized | Real on-prem acceptance, larger cross-family stability/bias studies |
+| Models | Mock, Gemini, Bedrock, GLM and DeepSeek interfaces (DeepSeek disabled in the RoE); LM Studio text interface (Nemotron, Qwen) and batch comparison; on-prem IEC gateway authorized for GLM | Real on-prem acceptance, larger cross-family stability/bias studies |
 
 G2 and subject hashing share one input inventory. Generated directories are excluded only at the repository root; nested names remain source. Python/pytest caches are explicit exclusions; tracked reserved generated paths are rejected. Symlinks, unreadable paths, changing inputs, and limits fail closed. Renamed scan snapshots defeat scanner implicit exclusions and candidate inline allow comments. History must come from the candidate's own non-shallow repository and actual HEAD; no `.git`, no commit, gitfiles, or accidental enclosing repositories are rejected. Candidate Git calls disable hooks, fsmonitor, and transports.
 

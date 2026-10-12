@@ -172,19 +172,32 @@ def test_empty_optional_chat_key_means_no_key(monkeypatch, provider, prefix):
     assert adapter._api_key is None and adapter.provider == adapter.family == provider
 
 
-def test_reviewed_gateway_reaches_glm_and_deepseek_with_their_own_settings(monkeypatch):
-    # 兩個供應商共用已審查的閘道，但各自讀取自己的模型、網址與金鑰。 / Both providers share the reviewed gateway
-    # but each reads only its own model, URL and key.
+def test_reviewed_gateway_reaches_glm_but_disabled_deepseek_never_gets_a_key(monkeypatch):
+    # GLM 仍以自己的設定連到已審查閘道；DeepSeek 已自 RoE 停用，主機清單為空，金鑰不會送出。
+    # GLM still reaches the reviewed gateway with its own settings; DeepSeek is disabled in the RoE,
+    # its host list is empty, and its key is never sent.
     from scripts.model_smoke import configured_adapter
     url = "https://llm.iec.inventec/v1/chat/completions"
     for prefix, model, key in (("GLM", "glm", "synthetic-glm-key"), ("DEEPSEEK", "deepseek", "synthetic-deepseek-key")):
         monkeypatch.setenv(prefix + "_MODEL_ID", model)
         monkeypatch.setenv(prefix + "_CHAT_URL", url)
         monkeypatch.setenv(prefix + "_API_KEY", key)
-    glm, deepseek = configured_adapter("glm"), configured_adapter("deepseek")
+    glm = configured_adapter("glm")
     assert (glm.provider, glm.model, glm._api_key) == ("glm", "glm", "synthetic-glm-key")
-    assert (deepseek.provider, deepseek.family, deepseek.model, deepseek._api_key) == (
-        "deepseek", "deepseek", "deepseek", "synthetic-deepseek-key")
+    with pytest.raises(ModelError) as caught:
+        configured_adapter("deepseek")
+    assert caught.value.code == "CONFIGURATION"
+
+
+def test_model_roe_no_longer_allows_live_deepseek():
+    import json as _json
+    from pathlib import Path as _Path
+    from security_harness.scope import validate_model_roe
+    roe = _json.loads((_Path(__file__).resolve().parents[1] / "security/model-roe.json").read_text())
+    assert "deepseek" not in roe["allowed_live_providers"] and roe["allowed_remote_hosts"]["deepseek"] == []
+    validate_model_roe(roe, ["glm"], 1)
+    with pytest.raises(ValueError, match='^live\\ model\\ calls\\ are\\ outside\\ the\\ approved\\ model\\ RoE$'):
+        validate_model_roe(roe, ["deepseek"], 1)
 
 
 @pytest.mark.parametrize("model,label", [

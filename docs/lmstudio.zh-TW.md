@@ -32,10 +32,10 @@ HTTP 只允許字面 `127.0.0.1` 或 `[::1]`、明確的 1024–65535 連接埠�
 # 固定合成 ACK，不傳送專案原始碼。 / Fixed synthetic ACK, no project source.
 .venv/bin/python -I scripts/model_smoke.py --live --provider lmstudio
 
-# 先做兩案單模型；再做地端三家族同批比較（推理模型用 2048，三家各一案共 6144）。
-# Two local cases, then a three-family on-prem batch (2048 for reasoning models; one case each, 6144 in total).
+# 先做兩案單模型；再做地端家族同批比較（推理模型用 2048，兩家各一案共 4096）。
+# Two local cases, then an on-prem family batch (2048 for reasoning models; one case each, 4096 in total).
 .venv/bin/python -I scripts/model_review.py --live --provider lmstudio --case B13 --case B14 --output-tokens 1024
-.venv/bin/python -I scripts/model_review.py --live --provider glm --provider deepseek --provider lmstudio --case B13 --output-tokens 2048
+.venv/bin/python -I scripts/model_review.py --live --provider glm --provider lmstudio --case B13 --output-tokens 2048
 
 # 離線比較不同批次，不會呼叫 API。 / Offline comparison without API calls.
 .venv/bin/python -I scripts/model_compare.py --report artifacts/<run-a>/report.json --report artifacts/<run-b>/report.json
@@ -47,7 +47,7 @@ HTTP 只允許字面 `127.0.0.1` 或 `[::1]`、明確的 1024–65535 連接埠�
 
 介面只傳送文字、獨立 system／user 訊息與 JSON schema；不傳影像、音訊、影片，不啟用工具。`omni` 名稱不代表此試點已支援多模態。使用 `temperature=0`、`stream=false`、`n=1` 與既有輸出詞元限額。回應模型必須與設定 ID 完全相同；不支援 schema、模型缺失／變更、截斷、工具要求、拒答、非法用量或偽造引用一律保留失敗，不降級為成功。
 
-真實驗收順序：確認路由／TLS或loopback、查清單及精確 ID、ACK、單模型正反例、地端家族同批（例如 Nemotron 或 Qwen 搭配 GLM、DeepSeek）、相同設定多批比較、取消與資源清理。記錄伺服器／模型版本、實際回報用量、錯誤與清理；三模型全同意仍不代表無漏洞、獨立性或偏誤降低。跨批報告未簽章、身分未驗證，服務版本跨批一致性仍標為未知。所需端點與設定由使用者於真實驗收時提供。
+真實驗收順序：確認路由／TLS或loopback、查清單及精確 ID、ACK、單模型正反例、地端家族同批（例如 Nemotron 或 Qwen 搭配 GLM）、相同設定多批比較、取消與資源清理。記錄伺服器／模型版本、實際回報用量、錯誤與清理；三模型全同意仍不代表無漏洞、獨立性或偏誤降低。跨批報告未簽章、身分未驗證，服務版本跨批一致性仍標為未知。所需端點與設定由使用者於真實驗收時提供。
 
 <a id="en"></a>
 
