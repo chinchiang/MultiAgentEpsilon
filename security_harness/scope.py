@@ -19,7 +19,8 @@ def validate_roe(roe: dict) -> dict:
     return roe
 
 
-MODEL_PROVIDERS = ("gemini", "bedrock", "glm", "lmstudio")
+MODEL_PROVIDERS = ("gemini", "bedrock", "glm", "deepseek", "lmstudio")
+LABEL = r"[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?"
 
 
 def validate_model_roe(roe: dict, providers, planned_calls: int = 0) -> dict:
@@ -51,12 +52,13 @@ Separate rules of engagement for advisory model calls.
 
 
 def valid_remote_hosts(hosts) -> bool:
-    """只允許 GLM 與 LM Studio 的小寫主機名稱清單；不接受萬用字元或位址範圍。
+    """只允許 GLM、DeepSeek 與 LM Studio 的小寫主機名稱清單；不接受萬用字元、位址範圍或 IP 字面值。
 
-Lowercase host-name lists for GLM and LM Studio only; no wildcards or address ranges."""
-    return (isinstance(hosts, dict) and set(hosts) == {"glm", "lmstudio"}
+Lowercase host-name lists for GLM, DeepSeek and LM Studio only; no wildcards,
+    address ranges or IP literals (the last label must contain a letter)."""
+    return (isinstance(hosts, dict) and set(hosts) == {"glm", "deepseek", "lmstudio"}
             and all(isinstance(v, list) and len(v) <= 8 and len(set(v)) == len(v)
-                    and all(isinstance(h, str) and re.fullmatch(r"[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)+", h)
+                    and all(isinstance(h, str) and re.fullmatch(rf"{LABEL}(\.{LABEL})*\.(?=[a-z0-9-]*[a-z]){LABEL}", h)
                             for h in v) for v in hosts.values()))
 
 

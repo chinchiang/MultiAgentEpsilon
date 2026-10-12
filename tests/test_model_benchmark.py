@@ -252,7 +252,7 @@ def test_review_cli_supervision_and_explicit_live_opt_in():
     assert denied.returncode == 2
     # 此程序不取得憑證或供應商設定，回歸也不能花費真實呼叫。 / No credentials or provider settings reach this process, so a regression cannot spend real calls.
     offline = {k: v for k, v in os.environ.items()
-               if not k.startswith(('GEMINI_', 'GLM_', 'BEDROCK_', 'AWS_', 'HTTP_PROXY', 'HTTPS_PROXY'))
+               if not k.startswith(('GEMINI_', 'GLM_', 'DEEPSEEK_', 'LMSTUDIO_', 'BEDROCK_', 'AWS_', 'HTTP_PROXY', 'HTTPS_PROXY'))
                and k.lower() not in ('http_proxy', 'https_proxy', 'all_proxy')}
     offline['AWS_CONFIG_FILE'] = offline['AWS_SHARED_CREDENTIALS_FILE'] = os.devnull
     excessive = subprocess.run([sys.executable, '-I', str(script), '--provider', 'gemini', '--provider', 'glm',

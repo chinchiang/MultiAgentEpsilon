@@ -65,9 +65,9 @@ PR #12 已由 CatGrocery 對最新 head `58d9bc0` 獨立核准，正式 [run 375
 6. 在 GitHub 規則集把允許的合併方式限縮為 merge commit（現況為 merge／squash／rebase）。
 7. 以非管理者開發者身分完成六項行為探測（目前皆為 NOT_RUN）。
 
-**模型面：** 真實 LM Studio／Nemotron 端點與精確 model ID 的驗收；以續期後的 AWS 憑證取得 v3（B13–B16）Gemini／Claude 真實樣本。
+**模型面：** 地端模型的真實驗收：LM Studio 的 Nemotron 與 Qwen，以及公司 LLM 閘道的 GLM 與 DeepSeek（DeepSeek 端點在 2026-10-12 實測時沒有回應）；以地端家族取得 v3（B13–B16）真實樣本。雲端供應商在測試期間保留，但不再是必要條件。
 
-**功能面：** G3、完整 G5、其他生態系的 SBOM／SCA／CVE、ASVS 產品適用性判定、正式發布、GLM 真實推論與結構化輸出（依使用者指示暫停）、較大樣本的跨家族穩定性與偏誤實驗，以及 W15–W25。
+**功能面：** G3、完整 G5、其他生態系的 SBOM／SCA／CVE、ASVS 產品適用性判定、正式發布、GLM 與 DeepSeek 的原生結構化輸出、較大樣本的跨家族穩定性與偏誤實驗，以及 W15–W25。
 
 **已知限制：** 本地完整流程僅支援 Linux x86_64、Python 3.12 與 Docker（Windows 需使用 WSL）。開發用 oracle 已改為本機 loopback 真實 HTTP，不再使用棄用的 TestClient；pytest 現在把任何警告視為失敗。
 
@@ -97,7 +97,7 @@ W 編號與 G0–G6 閘門編號都來自本地保留的原始規劃。依公開
 | W05、W09 | main 已有 32 案例／七種變體；本次審視擴為 44 案例／九種變體 | 完整 G5。 |
 | W06、W20 | G1 metadata、鎖定檔 SBOM／OSV SCA 與 G2 | G1 行為分析、安裝映像及其他生態系、G3。 |
 | W08 | main 規則集 active、遠端正反例、run 與 PR base 綁定、全 commit 核准排除 | 專用可信檢查來源與普通開發者繞過驗收；main artifact attestation 已驗證。 |
-| W10–W14 | gateway、模型 adapter、盲測與多輪框架；Gemini／Claude 真實小樣本驗收；LM Studio 文字介接器 | LM Studio 真實推論、較大樣本的穩定性與偏誤實驗；GLM 真實連線暫停。 |
+| W10–W14 | gateway、模型 adapter、盲測與多輪框架；Gemini／Claude 真實小樣本驗收；LM Studio 文字介接器 | 地端模型（Nemotron、Qwen、GLM、DeepSeek）真實推論、較大樣本的穩定性與偏誤實驗。 |
 | W15–W19 | 待完成 | 產品適用性、簽章證據、完整 release、營運與正式資料／預算治理。 |
 | W21 | 限縮本地 RoE；模型 RoE 呼叫上限實際執行 | 任意網路掃描、redirect／DNS／工具委派與外部資產授權。 |
 | W22–W25 | 待完成 | 一手來源查核、組織成熟度評分、供應商驗收及產品弱點處理。 |
@@ -181,7 +181,7 @@ pytest.xml records collected parametrized items, not test-function count. http-s
 | W05/W09 | 32 AUTH cases/seven real mutations on main; 44/nine in the October 10 change | Full G5 |
 | W06/W20 | G1 provenance/lock SBOM/OSV and G2 | Behavior/installed images/other ecosystems/G3 |
 | W08 | Active rules, remote positive/negative CI, run/base binding, all-commit exclusions | Dedicated source and actual non-admin anti-bypass probes |
-| W10–W14 | Gateway/adapters/blind/repeated framework; small Gemini/Claude live samples; LM Studio text adapter | Local real inference, larger stability/bias experiments; GLM paused |
+| W10–W14 | Gateway/adapters/blind/repeated framework; small Gemini/Claude live samples; LM Studio text adapter | Real on-prem inference (Nemotron, Qwen, GLM, DeepSeek), larger stability/bias experiments |
 | W15–W19 | Roadmap | Product applicability, long-term signed evidence/release/operations/data-budget governance |
 | W21 | Bounded local/model RoE and actual caps | Arbitrary assets/network scans/DNS/redirect/tool delegation authorization |
 | W22–W25 | Roadmap | Primary-source checks, maturity scoring, supplier acceptance, product vulnerability handling |

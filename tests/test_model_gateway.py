@@ -10,7 +10,7 @@ from pathlib import Path
 import httpx
 import pytest
 
-from security_harness.llm.adapters import BedrockAdapter, GeminiAdapter, GLMAdapter
+from security_harness.llm.adapters import BedrockAdapter, DeepSeekAdapter, GeminiAdapter, GLMAdapter
 from security_harness.llm.gateway import Gateway, Limits, MockAdapter, ModelError, Reply, Request
 from security_harness.llm.transport import AwsCLI, JsonHTTP, RESPONSE_BYTES
 
@@ -59,15 +59,17 @@ def invoke(adapter, request=REQUEST, limits=None):
     return result, gateway.evidence[-1]
 
 
-@pytest.mark.parametrize("provider", ["gemini", "glm", "bedrock"])
+@pytest.mark.parametrize("provider", ["gemini", "glm", "deepseek", "bedrock"])
 def test_provider_contracts_keep_system_separate_and_bound_output(provider):
     captured = []
     if provider == "gemini":
         http, wire, _ = http_fixture(GEMINI)
         adapter = GeminiAdapter("Gemini 3.8 Flash", "synthetic-key", http)
-    elif provider == "glm":
+    elif provider in ("glm", "deepseek"):
         http, wire, _ = http_fixture(GLM)
-        adapter = GLMAdapter("synthetic-glm", "https://local.example.invalid/v1/chat/completions", "synthetic-key", http)
+        adapter = (GLMAdapter if provider == "glm" else DeepSeekAdapter)(
+            "synthetic-" + provider, "https://local.example.invalid/v1/chat/completions", "synthetic-key", http)
+        assert adapter.provider == adapter.family == provider
     else:
         class CLI:
             async def converse(self, region, payload):
@@ -87,8 +89,9 @@ def test_provider_contracts_keep_system_separate_and_bound_output(provider):
         assert payload["systemInstruction"]["parts"] == [{"text": REQUEST.system}]
         assert payload["generationConfig"]["maxOutputTokens"] == 32
         assert payload["contents"][0]["parts"] == [{"text": REQUEST.user}]
-    elif provider == "glm":
+    elif provider in ("glm", "deepseek"):
         payload = json.loads(wire[0].content)
+        assert payload["model"] == "synthetic-" + provider
         assert payload["messages"] == [{"role": "system", "content": REQUEST.system},
                                         {"role": "user", "content": REQUEST.user}]
         assert payload["max_tokens"] == 32 and payload["stream"] is False

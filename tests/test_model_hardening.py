@@ -144,6 +144,9 @@ def test_chatty_cli_stderr_cannot_block_the_response_or_be_stored(tmp_path):
 @pytest.mark.parametrize("provider,overrides", [
     ("glm", {"GLM_MODEL_ID": "replace-with-deployed-model-id", "GLM_CHAT_URL": "https://glm.internal.test/v1/chat/completions"}),
     ("glm", {"GLM_MODEL_ID": "synthetic-glm", "GLM_CHAT_URL": "https://local.example.invalid/v1/chat/completions"}),
+    ("deepseek", {"DEEPSEEK_MODEL_ID": "replace-with-deployed-model-id",
+                  "DEEPSEEK_CHAT_URL": "https://llm.iec.inventec/v1/chat/completions"}),
+    ("deepseek", {"DEEPSEEK_MODEL_ID": "deepseek", "DEEPSEEK_CHAT_URL": "https://local.example.invalid/v1/chat/completions"}),
     ("gemini", {"GEMINI_MODEL_ID": "gemini-synthetic", "GEMINI_API_KEY": ""}),
     ("bedrock", {"BEDROCK_MODEL_ID": "", "BEDROCK_REGION": "ap-southeast-1"}),
 ])
@@ -157,14 +160,31 @@ def test_example_placeholders_are_configuration_errors(monkeypatch, provider, ov
     assert caught.value.code == "CONFIGURATION"
 
 
-def test_empty_optional_glm_key_means_no_key(monkeypatch):
+@pytest.mark.parametrize("provider,prefix", [("glm", "GLM"), ("deepseek", "DEEPSEEK")])
+def test_empty_optional_chat_key_means_no_key(monkeypatch, provider, prefix):
     from scripts.model_smoke import configured_adapter
     from security_harness.llm import config
-    monkeypatch.setattr(config, "remote_hosts", lambda provider: {"glm.internal.test"})
-    monkeypatch.setenv("GLM_MODEL_ID", "synthetic-glm")
-    monkeypatch.setenv("GLM_CHAT_URL", "https://glm.internal.test/v1/chat/completions")
-    monkeypatch.setenv("GLM_API_KEY", "")
-    assert configured_adapter("glm")._api_key is None
+    monkeypatch.setattr(config, "remote_hosts", lambda provider: {"chat.internal.test"})
+    monkeypatch.setenv(prefix + "_MODEL_ID", "synthetic-" + provider)
+    monkeypatch.setenv(prefix + "_CHAT_URL", "https://chat.internal.test/v1/chat/completions")
+    monkeypatch.setenv(prefix + "_API_KEY", "")
+    adapter = configured_adapter(provider)
+    assert adapter._api_key is None and adapter.provider == adapter.family == provider
+
+
+def test_reviewed_gateway_reaches_glm_and_deepseek_with_their_own_settings(monkeypatch):
+    # 兩個供應商共用已審查的閘道，但各自讀取自己的模型、網址與金鑰。 / Both providers share the reviewed gateway
+    # but each reads only its own model, URL and key.
+    from scripts.model_smoke import configured_adapter
+    url = "https://llm.iec.inventec/v1/chat/completions"
+    for prefix, model, key in (("GLM", "glm", "synthetic-glm-key"), ("DEEPSEEK", "deepseek", "synthetic-deepseek-key")):
+        monkeypatch.setenv(prefix + "_MODEL_ID", model)
+        monkeypatch.setenv(prefix + "_CHAT_URL", url)
+        monkeypatch.setenv(prefix + "_API_KEY", key)
+    glm, deepseek = configured_adapter("glm"), configured_adapter("deepseek")
+    assert (glm.provider, glm.model, glm._api_key) == ("glm", "glm", "synthetic-glm-key")
+    assert (deepseek.provider, deepseek.family, deepseek.model, deepseek._api_key) == (
+        "deepseek", "deepseek", "deepseek", "synthetic-deepseek-key")
 
 
 @pytest.mark.parametrize("model,label", [
@@ -182,6 +202,8 @@ def test_model_label_is_readable_without_account_identity(model, label):
 @pytest.mark.parametrize("provider,variable,url", [
     ("glm", "GLM_CHAT_URL", "https://attacker.example/v1/chat/completions"),
     ("glm", "GLM_CHAT_URL", "https://169.254.169.254/v1/chat/completions"),
+    ("deepseek", "DEEPSEEK_CHAT_URL", "https://attacker.example/v1/chat/completions"),
+    ("deepseek", "DEEPSEEK_CHAT_URL", "https://llm.iec.inventec.attacker.example/v1/chat/completions"),
     ("lmstudio", "LMSTUDIO_BASE_URL", "https://unlisted.example/v1"),
     ("lmstudio", "LMSTUDIO_BASE_URL", "http://192.168.1.5:1234/v1"),
 ])
@@ -189,6 +211,7 @@ def test_keyed_providers_only_reach_reviewed_destinations(monkeypatch, provider,
     # 未列入模型 RoE 的主機不能收到 API 金鑰。 / A host outside the model RoE never receives an API key.
     from scripts.model_smoke import configured_adapter
     monkeypatch.setenv("GLM_MODEL_ID", "synthetic-glm")
+    monkeypatch.setenv("DEEPSEEK_MODEL_ID", "deepseek")
     monkeypatch.setenv("LMSTUDIO_MODEL_ID", "synthetic-local")
     monkeypatch.setenv(variable, url)
     with pytest.raises(ModelError) as caught:
@@ -214,9 +237,19 @@ def test_malformed_url_setting_is_a_configuration_error(monkeypatch, value):
     assert caught.value.code == "CONFIGURATION"
 
 
-@pytest.mark.parametrize("hosts", [None, [], {"glm": []}, {"glm": [], "lmstudio": ["*.example"]},
-                                   {"glm": ["Upper.Example"], "lmstudio": []}, {"glm": [], "lmstudio": ["a.b", "a.b"]},
-                                   {"glm": [], "lmstudio": [], "gemini": []}, {"glm": [], "lmstudio": ["10.0.0.0/8"]}])
+@pytest.mark.parametrize("hosts", [None, [], {"glm": []}, {"glm": [], "lmstudio": []},
+                                   {"glm": [], "deepseek": [], "lmstudio": ["*.example"]},
+                                   {"glm": ["Upper.Example"], "deepseek": [], "lmstudio": []},
+                                   {"glm": [], "deepseek": [], "lmstudio": ["a.b", "a.b"]},
+                                   {"glm": [], "deepseek": [], "lmstudio": [], "gemini": []},
+                                   {"glm": [], "deepseek": [], "lmstudio": ["10.0.0.0/8"]},
+                                   # IP 字面值不能取代已審查的主機名稱。 / IP literals cannot stand in for reviewed host names.
+                                   {"glm": ["169.254.169.254"], "deepseek": [], "lmstudio": []},
+                                   {"glm": [], "deepseek": ["10.0.0.5"], "lmstudio": []},
+                                   {"glm": [], "deepseek": [], "lmstudio": ["127.0.0.1"]},
+                                   {"glm": ["llm.iec.-inventec"], "deepseek": [], "lmstudio": []},
+                                   {"glm": ["llm.iec.inventec-"], "deepseek": [], "lmstudio": []},
+                                   {"glm": ["localhost"], "deepseek": [], "lmstudio": []}])
 def test_model_roe_rejects_malformed_destination_allowlists(hosts):
     import json as _json
     from pathlib import Path as _Path
@@ -245,5 +278,11 @@ def test_model_roe_boundaries_are_inclusive():
 @pytest.mark.parametrize("count,valid", [(8, True), (9, False)])
 def test_remote_host_allowlist_size_boundary(count, valid):
     from security_harness.scope import valid_remote_hosts
-    hosts = {"glm": [], "lmstudio": [f"h{i}.example" for i in range(count)]}
+    hosts = {"glm": [], "deepseek": [], "lmstudio": [f"h{i}.example" for i in range(count)]}
     assert valid_remote_hosts(hosts) is valid
+
+
+@pytest.mark.parametrize("host", ["llm.iec.inventec", "a.b", "x1.lab.example", "a-b.c-d.e2e"])
+def test_reviewed_host_names_are_accepted(host):
+    from security_harness.scope import valid_remote_hosts
+    assert valid_remote_hosts({"glm": [host], "deepseek": [host], "lmstudio": []}) is True

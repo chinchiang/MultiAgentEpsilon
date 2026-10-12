@@ -17,7 +17,7 @@
 | 路徑 | 目前作用 | 狀態與邊界 |
 |---|---|---|
 | 確定性測試 | G1 套件來源／OSV 漏洞驗證、G2 機密掃描、44 個 AUTH 授權案例，再由政策判定 ALLOW／BLOCK | 已實作；AUTH 僅評估合成 FastAPI fixture，必要 gate 故障即阻擋 |
-| 多模型盲審 | 固定合成程式送給選定模型，驗證回答、對照本機標準答案並比較分歧 | Gemini／Claude Sonnet 已完成 B09～B12 真實配對；GLM 保留離線回歸，真實連線暫停；LM Studio 文字介面離線完成、真實待驗收；模型結果僅供參考 |
+| 多模型盲審 | 固定合成程式送給選定模型，驗證回答、對照本機標準答案並比較分歧 | Gemini／Claude Sonnet 已完成 B09～B12 真實配對；地端 GLM／DeepSeek（公司 LLM 閘道）與 LM Studio（Nemotron、Qwen）已授權，真實驗收待完成；模型結果僅供參考 |
 | CI 與證據簽署 | base evaluator 評估 head candidate，獨立 runner 簽署證據 ZIP 摘要 | 已運作；不把候選 checkout 的工具、政策或測試匯入受信任 host |
 | 遠端合併保護 | 最新 head 獨立核准、正式必要檢查與來源驗證 | `main` 規則集 24512048 啟用、無 bypass；必要來源仍為共用 Actions App 15368 |
 | 專用檢查發布器 | 受控主機讀取 GitHub 證據及審查狀態，驗證後發布 `epsilon/trusted-merge` | 程式、設定及 systemd 範本已備妥；App、主機及 Ruleset 綁定尚未部署 |
@@ -329,7 +329,7 @@ Solid arrows represent implemented execution/data paths; dashed arrows indicate 
 | Path | Current role and boundary |
 |---|---|
 | Deterministic | G1 provenance/OSV, G2 secrets, 44 synthetic AUTH cases, policy ALLOW/BLOCK; required failures block |
-| Model review | Fixed snippets, strict outputs/reference scoring/disagreement; historical Gemini/Claude B09–B12 pairing, GLM offline/live paused, LM Studio offline/live pending; advisory only |
+| Model review | Fixed snippets, strict outputs/reference scoring/disagreement; historical Gemini/Claude B09–B12 pairing; on-prem GLM/DeepSeek (IEC gateway) and LM Studio (Nemotron, Qwen) authorized, live acceptance pending; advisory only |
 | CI/signing | Base evaluator reads head candidate; separate runner signs ZIP digest; no candidate tools/policy/tests imported on trusted host |
 | Merge protection | Exact-head independent approval and required source verification; active ruleset 24512048/no bypass, shared Actions App 15368 |
 | Dedicated publisher | Controlled host verifies evidence/reviews and publishes epsilon/trusted-merge; code/templates ready, App/host/binding undeployed |
