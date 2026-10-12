@@ -16,9 +16,10 @@ CASES_PATH = ROOT / 'security/review-cases.json'
 ORACLE_PATH = ROOT / 'security/review-oracle.json'
 PROVIDERS = ('mock-review-a', 'mock-review-b', 'gemini', 'bedrock', 'glm', 'deepseek', 'lmstudio')
 OUTPUT_TOKENS = 512
-# 每筆審查可選的輸出預留；推理模型的推理詞元也計入輸出，因此提供 2048。整輪合計仍不得超過 8192。
-# Per-review output reservations. Reasoning tokens count as output, hence 2048; a run still totals at most 8192.
-OUTPUT_BUDGETS = (512, 1024, 2048)
+# 每筆審查可選的輸出預留；推理模型的推理詞元也計入輸出，因此提供 2048 與 4096（gateway 單次上限）。
+# 整輪合計仍不得超過 8192。 / Per-review output reservations. Reasoning tokens count as output, hence 2048 and
+# 4096 (the gateway's per-call ceiling); a run still totals at most 8192.
+OUTPUT_BUDGETS = (512, 1024, 2048, 4096)
 CWES = ('CWE-89', 'CWE-78', 'CWE-639', 'CWE-22', 'CWE-918')
 SUITES = {'injection': tuple(f'B{i:02}' for i in range(1, 7)),
           'boundaries': tuple(f'B{i:02}' for i in range(7, 13)),

@@ -285,7 +285,19 @@ def test_reasoning_review_budget_fits_four_reviews_and_binds_every_request():
         runner.initial_report(['glm', 'deepseek'], ['B13', 'B14', 'B15'], str(uuid.uuid4()), 2048)
 
 
-@pytest.mark.parametrize('budget', [256, 768, 1536, 4096, True, '2048'])
+def test_largest_review_budget_fits_two_reviews_at_the_gateway_ceiling():
+    report = runner.initial_report(['glm', 'deepseek'], ['B13'], str(uuid.uuid4()), 4096)
+    assert report['limits']['reserved_output_tokens'] == 8192 and report['limits']['max_calls'] == 2
+    score.validate_collection(report, report['plan'])
+    cases = bench.load_cases()
+    assert all(check['request_sha256'] == bench.request_digest(
+        bench.review_request(cases[check['case_id']], check['review_id'], 4096)) for check in report['checks'])
+    # 4096 等於 gateway 單次上限，第三筆起就超過 8192。 / 4096 is the gateway's per-call ceiling; a third review exceeds 8192.
+    with pytest.raises(ValueError, match='^invalid\\ gateway\\ limit$'):
+        runner.initial_report(['glm', 'deepseek'], ['B13', 'B14'], str(uuid.uuid4()), 4096)
+
+
+@pytest.mark.parametrize('budget', [256, 768, 1536, 3072, 8192, True, '2048'])
 def test_unlisted_review_budgets_are_rejected(budget):
     with pytest.raises(ValueError, match='^invalid\\ review\\ output\\ budget$'):
         runner.initial_report(['mock-review-a'], ['B01'], str(uuid.uuid4()), budget)
@@ -295,15 +307,18 @@ def test_unlisted_review_budgets_are_rejected(budget):
         score.validate_collection(report)
 
 
-def test_review_cli_accepts_2048_only_within_the_total_cap():
+@pytest.mark.parametrize('budget', [2048, 4096])
+def test_review_cli_accepts_large_budgets_only_within_the_total_cap(budget):
     script = ROOT / 'scripts/model_review.py'
-    done = subprocess.run([sys.executable, '-I', str(script), '--case', 'B01', '--output-tokens', '2048'],
+    done = subprocess.run([sys.executable, '-I', str(script), '--case', 'B01', '--output-tokens', str(budget)],
                           capture_output=True, timeout=10)
     assert done.returncode == 0
     data = json.loads(Path(json.loads(done.stdout)['evidence']).read_text())
-    assert data['status'] == 'COMPLETE' and data['output_tokens_per_review'] == 2048
-    # 預設兩個 mock × 六案為 12 筆，2048 會超過 8192。 / Two default mocks × six cases is 12 reviews, over 8192 at 2048.
-    for args in (['--output-tokens', '2048'], ['--case', 'B01', '--output-tokens', '4096']):
+    assert data['status'] == 'COMPLETE' and data['output_tokens_per_review'] == budget
+    # 預設兩個 mock × 六案為 12 筆，會超過 8192；8192 不是可選預算。 / Two default mocks × six cases is 12 reviews,
+    # over 8192; 8192 itself is not a selectable budget.
+    for args in (['--output-tokens', str(budget)], ['--case', 'B01', '--case', 'B02', '--output-tokens', '4096'],
+                 ['--case', 'B01', '--output-tokens', '8192']):
         assert subprocess.run([sys.executable, '-I', str(script), *args], capture_output=True, timeout=10).returncode == 2
 
 
