@@ -74,6 +74,12 @@ MUTATIONS.update({
         '                with connect(dsn, schema) as conn:\n'
         '                    conn.execute("UPDATE items SET value=\'delayed-side-effect\' WHERE id=3")\n'
         '            __import__("threading").Timer(0.3, later).start()\n\n    return app'),
+    # 本文正確，但被拒絕的讀取把他人資料放進回應標頭。 / A correct body, but the denied read leaks the row through a response header.
+    'denied_read_header_leak': (
+        'permitted(row, user)):\n            raise HTTPException(404, "item not found")\n        return row',
+        'permitted(row, user)):\n'
+        '            raise HTTPException(404, "item not found", headers={"X-Item": row["value"]} if row else None)\n'
+        '        return row'),
     'admin_cross_tenant_delete': (
         "DELETE FROM items WHERE id=%s AND tenant=%s AND (owner=%s OR %s='admin') RETURNING *",
         "DELETE FROM items WHERE id=%s AND ((tenant=%s AND owner=%s) OR %s='admin') RETURNING *"),
@@ -86,6 +92,8 @@ EXPECTED = {
     'patch_weaker_session_check': {'anonymous write denied', 'forged bearer write denied',
                                    'expired session write denied', 'logged-out session write denied'},
     'delayed_cross_tenant_write': {'no delayed or out-of-band state changes'},
+    'denied_read_header_leak': {'bob: unauthorized read denied without data',
+                                'carol: unauthorized read denied without data', 'admin cross-tenant denied'},
     'admin_cross_tenant_delete': {'admin cross-tenant delete denied without side effect'},
     'wrong_password_accepted': {'wrong password denied without session'},
     'cross_tenant_404_leak': {'admin cross-tenant denied'},

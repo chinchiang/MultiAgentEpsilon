@@ -32,7 +32,9 @@ def main():
         content = response.read(65537)
         if len(content) > 65536:
             raise ValueError('response too large')
-        print(json.dumps({'status': response.status, 'body': base64.b64encode(content).decode('ascii')}))
+        # 標頭原樣傳回，由 host oracle 判定；不在此過濾。 / Headers are returned as-is for the host oracle to judge, never filtered here.
+        print(json.dumps({'status': response.status, 'headers': response.getheaders(),
+                          'body': base64.b64encode(content).decode('ascii')}))
     finally:
         conn.close()
 

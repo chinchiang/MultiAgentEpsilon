@@ -10,6 +10,8 @@ import httpx
 
 from .processes import bounded_output, docker_command, docker_environment
 
+HEADER_TEXT = re.compile(r'[\x20-\x7e]{1,1024}')
+
 
 class BoundedClient:
     def __init__(self, container):
@@ -21,14 +23,18 @@ class BoundedClient:
         payload = json_codec.dumps({'method': method, 'path': path, 'headers': headers or {}, 'json': json}).encode()
         command = docker_command('exec', '-i', self.container, 'python', '-I', '/opt/epsilon/request.py')
         data = json_codec.loads(bounded_output(command, payload, env=docker_environment()))
-        if (not isinstance(data, dict) or set(data) != {'status', 'body'} or
+        if (not isinstance(data, dict) or set(data) != {'status', 'headers', 'body'} or
                 type(data['status']) is not int or not 100 <= data['status'] <= 599 or
+                not isinstance(data['headers'], list) or len(data['headers']) > 32 or
+                not all(isinstance(pair, list) and len(pair) == 2 and
+                        all(isinstance(part, str) and HEADER_TEXT.fullmatch(part) for part in pair)
+                        for pair in data['headers']) or
                 not isinstance(data['body'], str)):
             raise ValueError('invalid container HTTP envelope')
         body = base64.b64decode(data['body'], validate=True)
         if len(body) > 65536:
             raise ValueError('container HTTP body too large')
-        return httpx.Response(data['status'], content=body,
+        return httpx.Response(data['status'], headers=[tuple(pair) for pair in data['headers']], content=body,
                               request=httpx.Request(method, 'http://localhost' + path))
 
     def get(self, path, **kwargs):

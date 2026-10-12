@@ -2,16 +2,19 @@ import gzip
 import hashlib
 import io
 import json
+import re
 import secrets
+import struct
 import subprocess
 import tarfile
 import zipfile
+import zlib
 from dataclasses import replace
 
 import pytest
 from security_harness import secrets as scanner, inputs
 from security_harness.limits import LIMITS, ResourceLimit
-from security_harness.scan_content import UnsupportedContent
+from security_harness.scan_content import ContentInventory, UnsupportedContent
 from tests.test_gitleaks import run
 
 
@@ -62,7 +65,7 @@ def test_secret_removed_from_compressed_history_is_detected(tmp_path):
 @pytest.mark.parametrize('data', [b'\xff\x00\xfe', b'\x00synthetic', b'\x1f\x8bbroken'])
 def test_unknown_or_corrupt_content_never_claims_complete(tmp_path, data):
     (tmp_path / 'data').write_bytes(data)
-    with pytest.raises((UnsupportedContent, OSError, EOFError), match='Compressed file ended before the end-of-stream marker was reached|binary content needs an adapter'):
+    with pytest.raises(UnsupportedContent, match='^(?:unsupported gzip header|binary content needs an adapter or a reviewed digest in the binary allowlist)$'):
         run(tmp_path)
 
 
@@ -253,6 +256,80 @@ def test_unaccounted_archive_bytes_block(tmp_path, build):
     (tmp_path / 'bundle.bin').write_bytes(build(canary_bytes()))
     with pytest.raises(UnsupportedContent, match='^(?:data\\ after\\ tar\\ end\\-of\\-archive|directory\\ archive\\ member\\ carries\\ data|unaccounted\\ zip\\ bytes)$'):
         run(tmp_path)
+
+
+def compressed(canary):
+    # 壓縮後的機密不再是可讀字串，只能靠結構檢查攔下。 / A compressed secret has no readable strings; only structural checks can stop it.
+    return zlib.compress(b'aws_secret_access_key = ' + canary)
+
+
+def zip_with(*, comment=b'', member_comment=b'', extra=b'', trailer=b''):
+    def build(output):
+        item = zipfile.ZipInfo('clean.txt')
+        item.comment, item.extra = member_comment, extra
+        output.writestr(item, 'synthetic')
+        output.comment = comment
+    return zipped(build) + trailer
+
+
+def gzip_with(flags, field):
+    data = gzip.compress(b'synthetic', mtime=0)
+    return data[:3] + bytes([flags]) + data[4:10] + field + data[10:]
+
+
+@pytest.mark.parametrize('build, message', [
+    (lambda c: zip_with(comment=compressed(c)), 'binary zip comment'),
+    (lambda c: zip_with(member_comment=compressed(c)), 'binary zip comment'),
+    (lambda c: zip_with(trailer=compressed(c)), 'unaccounted zip bytes'),
+    (lambda c: zip_with(trailer=zipped(lambda output: output.writestr('secret.txt', c))), 'unaccounted zip bytes'),
+    (lambda c: zip_with(extra=struct.pack('<HH', 0x9999, len(compressed(c))) + compressed(c)),
+     'unsupported zip extra field'),
+    (lambda c: zip_with(extra=struct.pack('<HH', 0x5455, len(compressed(c))) + compressed(c)),
+     'unsupported zip extra field'),
+    (lambda c: zip_with(extra=b'\x55\x54\x05'), 'unsupported zip extra field'),
+    (lambda c: gzip_with(0x04, struct.pack('<H', len(compressed(c))) + compressed(c)), 'unsupported gzip header'),
+    (lambda c: gzip_with(0x10, compressed(c).replace(b'\x00', b'\x01') + b'\x00'), 'binary gzip header field'),
+    (lambda c: gzip.compress(b'synthetic') + gzip.compress(c), 'unaccounted gzip bytes'),
+    (lambda c: gzip.compress(b'synthetic') + compressed(c), 'unaccounted gzip bytes'),
+    (lambda c: gzip.compress(c)[:-4], 'unaccounted gzip bytes'),
+])
+def test_compressed_data_outside_members_blocks(tmp_path, build, message):
+    with pytest.raises(UnsupportedContent, match='^' + re.escape(message) + '$'):
+        ContentInventory(tmp_path).add(build(canary_bytes()), 'bundle.bin', scope='worktree')
+
+
+def zip64_end_record():
+    stream = io.BytesIO()
+    limit = zipfile.ZIP_FILECOUNT_LIMIT
+    zipfile.ZIP_FILECOUNT_LIMIT = 0
+    try:
+        with zipfile.ZipFile(stream, 'w') as output:
+            output.writestr('clean.txt', 'synthetic')
+    finally:
+        zipfile.ZIP_FILECOUNT_LIMIT = limit
+    assert b'PK\x06\x06' in stream.getvalue()
+    return stream.getvalue()
+
+
+def zip64_member():
+    stream = io.BytesIO()
+    with zipfile.ZipFile(stream, 'w', compression=zipfile.ZIP_DEFLATED) as output:
+        with output.open('clean.txt', 'w', force_zip64=True) as member:
+            member.write(b'synthetic')
+    return stream.getvalue()
+
+
+@pytest.mark.parametrize('data', [
+    zip_with(comment=b'release notes', member_comment=b'synthetic note'),
+    zip_with(extra=struct.pack('<HHBI', 0x5455, 5, 1, 1700000000) + struct.pack('<HHBBIBI', 0x7875, 11, 1, 4, 1000, 4, 1000)),
+    zip64_member(), zip64_end_record(), zipped(lambda output: None),
+    gzip.compress(b'synthetic'), gzip.compress(b'synthetic') + bytes(8),
+    gzip_with(0x18, b'clean.txt\x00synthetic comment\x00'),
+])
+def test_standard_archive_metadata_is_still_accepted(tmp_path, data):
+    inventory = ContentInventory(tmp_path)
+    inventory.add(data, 'bundle.bin', scope='worktree')
+    assert inventory.archives == 1
 
 
 def test_stored_zip_member_is_not_double_counted(tmp_path):

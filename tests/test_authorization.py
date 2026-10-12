@@ -41,6 +41,46 @@ def test_duplicate_json_key_cannot_hide_private_response_data():
         response_body(response)
 
 
+DATE = ('date', 'Mon, 12 Oct 2026 04:40:29 GMT')
+JSON_HEADERS = [DATE, ('server', 'uvicorn'), ('content-type', 'application/json')]
+
+
+@pytest.mark.parametrize('status, headers, content', [
+    (404, [*JSON_HEADERS, ('content-length', '27')], b'{"detail":"item not found"}'),
+    (204, JSON_HEADERS, b''),
+    (200, [*JSON_HEADERS, ('content-length', '2'), ('Connection', 'close')], b'[]'),
+    (404, [('Date', DATE[1]), ('Server', 'uvicorn'), ('Content-Type', 'application/json'),
+           ('Content-Length', '27')], b'{"detail":"item not found"}'),
+])
+def test_fixture_contract_headers_are_accepted(status, headers, content):
+    from security_harness.authorization import headers_match
+    assert headers_match(httpx.Response(status, headers=headers, content=content))
+
+
+@pytest.mark.parametrize('headers, content', [
+    ([*JSON_HEADERS, ('content-length', '27'), ('x-item', 'carol-private')], b'{"detail":"item not found"}'),
+    ([*JSON_HEADERS, ('content-length', '27'), ('set-cookie', 'owner=carol')], b'{"detail":"item not found"}'),
+    ([*JSON_HEADERS, ('content-length', '27'), ('content-type', 'text/plain')], b'{"detail":"item not found"}'),
+    ([DATE, ('server', 'carol-private'), ('content-type', 'application/json'), ('content-length', '27')],
+     b'{"detail":"item not found"}'),
+    ([('date', 'carol-private'), ('server', 'uvicorn'), ('content-type', 'application/json'),
+      ('content-length', '27')], b'{"detail":"item not found"}'),
+    ([DATE, ('server', 'uvicorn'), ('content-type', 'application/json; carol-private'),
+      ('content-length', '27')], b'{"detail":"item not found"}'),
+    ([*JSON_HEADERS, ('content-length', '28')], b'{"detail":"item not found"}'),
+    ([*JSON_HEADERS, ('content-length', '0')], b''),
+    ([*JSON_HEADERS, ('transfer-encoding', 'chunked')], b'{"detail":"item not found"}'),
+    ([*JSON_HEADERS, ('content-length', '27'), ('connection', 'carol-private')], b'{"detail":"item not found"}'),
+    ([*JSON_HEADERS, ('content-length', '27'), ('connection', 'close'), ('connection', 'close')],
+     b'{"detail":"item not found"}'),
+    ([DATE, ('server', 'uvicorn'), ('content-length', '27')], b'{"detail":"item not found"}'),
+])
+def test_data_hidden_in_response_headers_fails_the_case(headers, content):
+    # 本文正確不足以通過；標頭夾帶資料或偏離契約都算失敗。 / A correct body is not enough; data or drift in headers fails the case.
+    from security_harness.authorization import headers_match
+    assert not headers_match(httpx.Response(404, headers=headers, content=content))
+
+
 @pytest.mark.integration
 def test_oracle_queries_fail_fast_when_candidate_holds_a_table_lock():
     import time
