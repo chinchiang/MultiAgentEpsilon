@@ -4,7 +4,7 @@
 
 # LM Studio 地端 Nemotron 文字模型
 
-已提供 `lmstudio` adapter，目標模型為 `nvidia/nemotron-3-nano-omni`。目前完成合成 HTTP、實際 loopback 測試伺服器、嚴格回應驗證與生命週期回歸；**尚未連到使用者的 LM Studio 或驗證真實模型權重、版本與推論結果**。同一個介接器也可指定 Qwen 3 系列，例如 `qwen/qwen3.8-27b`，回報家族為 `qwen`；其他模型 ID 標為 `unverified`，不計入家族比較。一次 run 只能指定一個 LM Studio 模型，Nemotron 與 Qwen 須分批執行，再以 `model_compare.py` 比較。
+已提供 `lmstudio` adapter，目標模型為 `nvidia/nemotron-3-nano-omni`。目前完成合成 HTTP、實際 loopback 測試伺服器、嚴格回應驗證與生命週期回歸；2026-10-12／13 已連到使用者的 LM Studio，但該主機只能以 CPU 推論，速度不足以在 harness 的期限內完成盲審，詳見下方實測紀錄；**真實推論結果仍未驗收**。同一個介接器也可指定 Qwen 3 系列，例如 `qwen/qwen3.8-27b`，回報家族為 `qwen`；其他模型 ID 標為 `unverified`，不計入家族比較。一次 run 只能指定一個 LM Studio 模型，Nemotron 與 Qwen 須分批執行，再以 `model_compare.py` 比較。
 
 ## 準備服務與設定
 
@@ -49,11 +49,18 @@ HTTP 只允許字面 `127.0.0.1` 或 `[::1]`、明確的 1024–65535 連接埠�
 
 真實驗收順序：確認路由／TLS或loopback、查清單及精確 ID、ACK、單模型正反例、地端家族同批（例如 Nemotron 或 Qwen 搭配 GLM）、相同設定多批比較、取消與資源清理。記錄伺服器／模型版本、實際回報用量、錯誤與清理；三模型全同意仍不代表無漏洞、獨立性或偏誤降低。跨批報告未簽章、身分未驗證，服務版本跨批一致性仍標為未知。所需端點與設定由使用者於真實驗收時提供。
 
+## 2026-10-12／13 實測紀錄
+
+- **連線：** LM Studio 只監聽 Windows 的 `127.0.0.1:5422`，WSL2 的 NAT 網路看不到；Windows 防火牆也擋下 WSL 連進主機。harness 只接受字面 loopback 的明碼 HTTP，因此以臨時反向通道接通：Windows 端主動連進 WSL，WSL 端只監聽 `127.0.0.1:5422`，只接受來自 Windows 主機位址的回連線。WSL 可取得 `/v1/models`，回傳 `nvidia/nemotron-3-nano-omni` 與 `qwen/qwen3.8-27b`。測完即關閉兩端。
+- **盲審：** main `b86277c`，Nemotron，B13／B14，每次 2048 個 token（run `7617a770`）。B13 撞到單次呼叫 30 秒上限（`DEADLINE`），B14 在整輪 50 秒上限到時被取消（`CANCELLED`），沒有可評分的結果。
+- **原因：** 不經通道直接在 Windows 呼叫，37 個 token（其中 33 個為推理）花了 21.6 秒，約每秒 1.7 個 token。主機只有內建的 Intel Iris Xe 顯示卡、63.6 GB 記憶體，已載入的 Nemotron（26.1 GB）與 Qwen（17.7 GB）都在 CPU 上執行。盲審一題通常超過 1000 個 token，遠超過單次 30 秒（gateway 上限 60 秒）的期限，改用 mirrored 網路也無法解決。
+- **後續：** 改在可以獨立執行 LM Studio、具備獨立 GPU 的機器上提供 HTTPS 服務，並把該主機經受保護的變更加入模型 RoE 的 `lmstudio` 允許清單後再驗收。在此之前，跨家族盲審使用 Gemini、GLM 與 Claude。
+
 <a id="en"></a>
 
 # Local Nemotron text models through LM Studio
 
-The lmstudio adapter targets nvidia/nemotron-3-nano-omni. Synthetic HTTP, a real loopback fixture server, strict response checks, and lifecycle regressions exist. **The user's actual LM Studio, model weights/version, and inference remain unverified.** The same adapter accepts Qwen 3 IDs such as `qwen/qwen3.8-27b`, reported as family `qwen`; other IDs are `unverified` and excluded from family comparisons. One run names one LM Studio model, so run Nemotron and Qwen as separate batches and compare them with `model_compare.py`.
+The lmstudio adapter targets nvidia/nemotron-3-nano-omni. Synthetic HTTP, a real loopback fixture server, strict response checks, and lifecycle regressions exist. On 2026-10-12/13 the user's LM Studio was reached, but that host can only infer on CPU, too slowly to finish a blind review within the harness deadlines (see the live results below); **real inference results remain unaccepted.** The same adapter accepts Qwen 3 IDs such as `qwen/qwen3.8-27b`, reported as family `qwen`; other IDs are `unverified` and excluded from family comparisons. One run names one LM Studio model, so run Nemotron and Qwen as separate batches and compare them with `model_compare.py`.
 
 ## Server and configuration
 
@@ -82,3 +89,10 @@ The shared commands above perform a fixed synthetic ACK, two local cases, a Gemi
 Only text, separate system/user roles, and JSON schema are supported—no images/audio/video/tools. Omni naming does not establish multimodal support. Requests use temperature 0, stream=false, n=1 and bounded max_tokens. Response model must exactly match configured ID. Unsupported schema, missing/changed models, truncation, tools/refusal, invalid usage, or fabricated evidence remain failures without fallback.
 
 Live sequence: route/TLS or loopback, catalog/exact ID, ACK, single-model positive/negative cases, matched three-provider batch, compatible repeated batches, cancellation/cleanup. Record server/model version, reported usage, errors, and cleanup. Unanimity does not prove safety, independence, or bias reduction. Cross-batch reports remain unsigned/unverified and serving-version consistency unknown. The user will provide actual endpoint/settings at that acceptance stage.
+
+## 2026-10-12/13 live results
+
+- **Connectivity:** LM Studio listens only on Windows `127.0.0.1:5422`, which WSL2's NAT network cannot see, and the Windows firewall blocks WSL from connecting to the host. The harness accepts plain HTTP only on literal loopback, so a temporary reverse tunnel was used: the Windows side dials into WSL, and the WSL side listens only on `127.0.0.1:5422` and accepts back-connections only from the Windows host address. WSL could read `/v1/models` (`nvidia/nemotron-3-nano-omni`, `qwen/qwen3.8-27b`). Both ends were stopped after the test.
+- **Blind review:** main `b86277c`, Nemotron, B13/B14 at 2048 tokens (run `7617a770`). B13 hit the 30 s per-call deadline (`DEADLINE`) and B14 was cancelled at the 50 s run cap (`CANCELLED`); nothing could be scored.
+- **Cause:** a direct call on Windows, without the tunnel, produced 37 tokens (33 of them reasoning) in 21.6 s, about 1.7 tokens per second. The host has only an integrated Intel Iris Xe GPU and 63.6 GB RAM, so the loaded Nemotron (26.1 GB) and Qwen (17.7 GB) run on CPU. A review usually needs over 1,000 tokens, far beyond the 30 s per-call deadline (60 s gateway ceiling); mirrored networking would not change that.
+- **Next:** serve LM Studio over HTTPS from a machine with a discrete GPU that can run it on its own, add that host to the model RoE's `lmstudio` allowlist through a protected change, and then accept it. Until then, cross-family blind reviews use Gemini, GLM and Claude.
