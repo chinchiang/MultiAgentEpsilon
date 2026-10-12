@@ -14,7 +14,7 @@ from .transport import strict_json
 ROOT = Path(__file__).resolve().parents[2]
 CASES_PATH = ROOT / 'security/review-cases.json'
 ORACLE_PATH = ROOT / 'security/review-oracle.json'
-PROVIDERS = ('mock-review-a', 'mock-review-b', 'gemini', 'bedrock', 'glm', 'lmstudio')
+PROVIDERS = ('mock-review-a', 'mock-review-b', 'gemini', 'bedrock', 'glm', 'deepseek', 'lmstudio')
 OUTPUT_TOKENS = 512
 CWES = ('CWE-89', 'CWE-78', 'CWE-639', 'CWE-22', 'CWE-918')
 SUITES = {'injection': tuple(f'B{i:02}' for i in range(1, 7)),

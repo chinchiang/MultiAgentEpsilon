@@ -1,6 +1,6 @@
-"""Gemini generateContent、OpenAI 相容 GLM chat 與 Bedrock Converse 介接。
+"""Gemini generateContent、OpenAI 相容 GLM／DeepSeek chat 與 Bedrock Converse 介接。
 
-Gemini generateContent, OpenAI-compatible GLM chat, and Bedrock Converse."""
+Gemini generateContent, OpenAI-compatible GLM/DeepSeek chat, and Bedrock Converse."""
 import re
 import json
 
@@ -121,15 +121,17 @@ class GeminiAdapter:
 
 
 def chat_payload(model, request):
-    """OpenAI 相容文字完成請求；GLM 與 LM Studio 共用。 / OpenAI-compatible text completion shared by GLM and LM Studio."""
+    """OpenAI 相容文字完成請求；GLM、DeepSeek 與 LM Studio 共用。 / OpenAI-compatible text completion shared by GLM, DeepSeek and LM Studio."""
     return {"model": model, "messages": [{"role": "system", "content": request.system},
                                          {"role": "user", "content": request.user}],
             "max_tokens": request.max_output_tokens, "temperature": 0, "stream": False, "n": 1}
 
 
-class GLMAdapter:
-    provider = "glm"
-    family = "glm"
+class ChatAdapter:
+    """地端 OpenAI 相容 chat 端點；各供應商只差在名稱與家族標籤。
+
+On-prem OpenAI-compatible chat endpoint; providers differ only in name and family label."""
+    provider = family = None
 
     def __init__(self, model, url, api_key=None, http=None):
         parsed = validate_url(url)
@@ -140,9 +142,19 @@ class GLMAdapter:
 
     async def generate(self, request):
         headers = {"Authorization": f"Bearer {self._api_key}"} if self._api_key else {}
-        # GLM 維持提示詞式輸出，不宣稱原生 schema 約束。 / GLM keeps prompt-based output; no native schema claim.
+        # 維持提示詞式輸出，不宣稱原生 schema 約束。 / Prompt-based output; no native schema claim.
         value = await self.http.post(self._url, headers, chat_payload(self.model, request))
         return chat_reply(value)
+
+
+class GLMAdapter(ChatAdapter):
+    provider = "glm"
+    family = "glm"
+
+
+class DeepSeekAdapter(ChatAdapter):
+    provider = "deepseek"
+    family = "deepseek"
 
 
 def chat_reply(value):

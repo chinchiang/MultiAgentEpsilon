@@ -11,6 +11,11 @@ from .gateway import ModelError
 from .output_schema import REVIEW_FORMAT, request_schema
 from .transport import JsonHTTP, validate_url
 
+# 依設定的模型 ID 分類家族；未列出的模型為 unverified，不計入家族比較。 / Family by configured model ID;
+# unlisted models are unverified and excluded from family comparisons.
+FAMILIES = (('nemotron', r'^(?:nvidia/)?nemotron-3-nano-omni(?:$|[-/])'),
+            ('qwen', r'^(?:qwen/)?qwen3(?:\.\d+)?-\d+(?:\.\d+)?b(?:$|[-/])'))
+
 
 def endpoint(base):
     """驗證固定服務入口；Validate the fixed service origin and API path."""
@@ -59,8 +64,7 @@ class LMStudioAdapter:
         if type(model) is not str or not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9._/-]{0,127}', model):
             raise ModelError('CONFIGURATION')
         self.model, self.base, self._api_key = model, base, api_key
-        self.family = ('nemotron' if re.match(r'^(?:nvidia/)?nemotron-3-nano-omni(?:$|[-/])', model.lower())
-                       else 'unverified')
+        self.family = next((family for family, pattern in FAMILIES if re.match(pattern, model.lower())), 'unverified')
         # 家族是設定與回報名稱的分類，不是模型權重的密碼學證明。
         # Family is a configured/reported-name classification, not a weight attestation.
         if http is not None and not isinstance(http, LMStudioHTTP):

@@ -4,7 +4,7 @@
 
 # LM Studio 地端 Nemotron 文字模型
 
-已提供 `lmstudio` adapter，目標模型為 `nvidia/nemotron-3-nano-omni`。目前完成合成 HTTP、實際 loopback 測試伺服器、嚴格回應驗證與生命週期回歸；**尚未連到使用者的 LM Studio 或驗證真實模型權重、版本與推論結果**。GLM 真實連線維持暫停。
+已提供 `lmstudio` adapter，目標模型為 `nvidia/nemotron-3-nano-omni`。目前完成合成 HTTP、實際 loopback 測試伺服器、嚴格回應驗證與生命週期回歸；**尚未連到使用者的 LM Studio 或驗證真實模型權重、版本與推論結果**。同一個介接器也可指定 Qwen 3 系列，例如 `qwen/qwen3.8-27b`，回報家族為 `qwen`；其他模型 ID 標為 `unverified`，不計入家族比較。一次 run 只能指定一個 LM Studio 模型，Nemotron 與 Qwen 須分批執行，再以 `model_compare.py` 比較。
 
 ## 準備服務與設定
 
@@ -18,7 +18,7 @@ LMSTUDIO_MODEL_ID=nvidia/nemotron-3-nano-omni
 LMSTUDIO_API_KEY=
 ```
 
-ID 範例須以實際 `/v1/models` 為準。未設定驗證的同主機服務可留空金鑰；受控遠端入口應設定適當的存取控制與 TLS。使用名稱分類的 `family=nemotron` 不是權重或供應商身分的密碼學證明。
+ID 範例須以實際 `/v1/models` 為準。未設定驗證的同主機服務可留空金鑰；受控遠端入口應設定適當的存取控制與 TLS。依名稱分類的 `family=nemotron`／`family=qwen` 不是權重或供應商身分的密碼學證明。
 
 ## 雲端如何連到地端
 
@@ -32,9 +32,9 @@ HTTP 只允許字面 `127.0.0.1` 或 `[::1]`、明確的 1024–65535 連接埠�
 # 固定合成 ACK，不傳送專案原始碼。 / Fixed synthetic ACK, no project source.
 .venv/bin/python -I scripts/model_smoke.py --live --provider lmstudio
 
-# 先做兩案單模型；再做三模型同批比較。 / Two local cases, then a three-model batch.
+# 先做兩案單模型；再做地端三家族同批比較。 / Two local cases, then a three-family on-prem batch.
 .venv/bin/python -I scripts/model_review.py --live --provider lmstudio --case B13 --case B14 --output-tokens 1024
-.venv/bin/python -I scripts/model_review.py --live --provider gemini --provider bedrock --provider lmstudio --case B13 --case B14 --output-tokens 1024
+.venv/bin/python -I scripts/model_review.py --live --provider glm --provider deepseek --provider lmstudio --case B13 --case B14 --output-tokens 1024
 
 # 離線比較不同批次，不會呼叫 API。 / Offline comparison without API calls.
 .venv/bin/python -I scripts/model_compare.py --report artifacts/<run-a>/report.json --report artifacts/<run-b>/report.json
@@ -46,13 +46,13 @@ HTTP 只允許字面 `127.0.0.1` 或 `[::1]`、明確的 1024–65535 連接埠�
 
 介面只傳送文字、獨立 system／user 訊息與 JSON schema；不傳影像、音訊、影片，不啟用工具。`omni` 名稱不代表此試點已支援多模態。使用 `temperature=0`、`stream=false`、`n=1` 與既有輸出詞元限額。回應模型必須與設定 ID 完全相同；不支援 schema、模型缺失／變更、截斷、工具要求、拒答、非法用量或偽造引用一律保留失敗，不降級為成功。
 
-真實驗收順序：確認路由／TLS或loopback、查清單及精確 ID、ACK、單模型正反例、Gemini／Claude／Nemotron 同批、相同設定多批比較、取消與資源清理。記錄伺服器／模型版本、實際回報用量、錯誤與清理；三模型全同意仍不代表無漏洞、獨立性或偏誤降低。跨批報告未簽章、身分未驗證，服務版本跨批一致性仍標為未知。所需端點與設定由使用者於真實驗收時提供。
+真實驗收順序：確認路由／TLS或loopback、查清單及精確 ID、ACK、單模型正反例、地端家族同批（例如 Nemotron 或 Qwen 搭配 GLM、DeepSeek）、相同設定多批比較、取消與資源清理。記錄伺服器／模型版本、實際回報用量、錯誤與清理；三模型全同意仍不代表無漏洞、獨立性或偏誤降低。跨批報告未簽章、身分未驗證，服務版本跨批一致性仍標為未知。所需端點與設定由使用者於真實驗收時提供。
 
 <a id="en"></a>
 
 # Local Nemotron text models through LM Studio
 
-The lmstudio adapter targets nvidia/nemotron-3-nano-omni. Synthetic HTTP, a real loopback fixture server, strict response checks, and lifecycle regressions exist. **The user's actual LM Studio, model weights/version, and inference remain unverified.** Live GLM stays paused.
+The lmstudio adapter targets nvidia/nemotron-3-nano-omni. Synthetic HTTP, a real loopback fixture server, strict response checks, and lifecycle regressions exist. **The user's actual LM Studio, model weights/version, and inference remain unverified.** The same adapter accepts Qwen 3 IDs such as `qwen/qwen3.8-27b`, reported as family `qwen`; other IDs are `unverified` and excluded from family comparisons. One run names one LM Studio model, so run Nemotron and Qwen as separate batches and compare them with `model_compare.py`.
 
 ## Server and configuration
 
@@ -64,7 +64,7 @@ LMSTUDIO_MODEL_ID=nvidia/nemotron-3-nano-omni
 LMSTUDIO_API_KEY=
 ```
 
-Replace the example ID with the actual catalog ID. A same-host unauthenticated service may omit a key; controlled remote ingress needs appropriate access control/TLS. Never commit or paste keys. The name-derived nemotron family label is not cryptographic model-weight/provider attestation.
+Replace the example ID with the actual catalog ID. A same-host unauthenticated service may omit a key; controlled remote ingress needs appropriate access control/TLS. Never commit or paste keys. Name-derived nemotron/qwen family labels are not cryptographic model-weight/provider attestation.
 
 ## Cloud-to-local connectivity
 

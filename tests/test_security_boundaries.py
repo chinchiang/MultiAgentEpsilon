@@ -231,7 +231,7 @@ def test_attestation_verifier_rejects_forged_or_wrong_run_proofs(tmp_path, monke
         for flag in ('--signer-workflow', '--signer-digest', '--source-ref', '--deny-self-hosted-runners', '--bundle'):
             assert flag in command
         assert command[command.index('--signer-digest') + 1] == settings['evaluator_sha']
-        assert not any(k.startswith(('AWS_', 'GEMINI_', 'GLM_', 'BEDROCK_', 'GH_TOKEN')) for k in kwargs['env'])
+        assert not any(k.startswith(('AWS_', 'GEMINI_', 'GLM_', 'DEEPSEEK_', 'LMSTUDIO_', 'BEDROCK_', 'GH_TOKEN')) for k in kwargs['env'])
         assert kwargs['env']['XDG_CACHE_HOME'].startswith('/tmp/epsilon-attestation-')
         if field == 'nonzero': raise RuntimeError('invalid cryptographic signature')
         return json.dumps([] if field == 'missing' else [{'verificationResult': {'statement': statement}}]).encode()

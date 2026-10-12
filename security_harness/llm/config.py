@@ -12,7 +12,7 @@ import shutil
 from pathlib import Path
 from urllib.parse import urlsplit
 
-from .adapters import BedrockAdapter, GeminiAdapter, GLMAdapter
+from .adapters import BedrockAdapter, DeepSeekAdapter, GeminiAdapter, GLMAdapter
 from .gateway import MockAdapter, ModelError
 from .lmstudio import LMStudioAdapter
 from .transport import AwsCLI
@@ -20,6 +20,8 @@ from .transport import AwsCLI
 ROOT = Path(__file__).resolve().parents[2]
 PLACEHOLDER_HOSTS = {"local.example.invalid"}
 LOOPBACK = ("127.0.0.1", "::1")
+# 地端 OpenAI 相容 chat 供應商與其環境變數前綴。 / On-prem OpenAI-compatible chat providers and their setting prefixes.
+CHAT_ADAPTERS = {"glm": ("GLM", GLMAdapter), "deepseek": ("DEEPSEEK", DeepSeekAdapter)}
 
 
 def setting(name, required=True):
@@ -67,10 +69,11 @@ def configured_adapter(provider, work=None, http=None):
         base = setting("LMSTUDIO_BASE_URL")
         authorize_destination(provider, base)
         return LMStudioAdapter(setting("LMSTUDIO_MODEL_ID"), base, setting("LMSTUDIO_API_KEY", False), http=http)
-    if provider == "glm":
-        url = setting("GLM_CHAT_URL")
+    if provider in CHAT_ADAPTERS:
+        prefix, adapter = CHAT_ADAPTERS[provider]
+        url = setting(prefix + "_CHAT_URL")
         authorize_destination(provider, url)
-        return GLMAdapter(setting("GLM_MODEL_ID"), url, setting("GLM_API_KEY", False), http=http)
+        return adapter(setting(prefix + "_MODEL_ID"), url, setting(prefix + "_API_KEY", False), http=http)
     if provider != "bedrock":
         raise ModelError("CONFIGURATION")
     executable = os.getenv("AWS_CLI_PATH", "aws")

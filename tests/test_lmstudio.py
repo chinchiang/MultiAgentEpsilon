@@ -7,7 +7,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import httpx
 import pytest
 
-from security_harness.llm.gateway import Gateway, Request
+from security_harness.llm.gateway import Gateway, ModelError, Request
 from security_harness.llm.lmstudio import LMStudioAdapter, LMStudioHTTP, endpoint
 from security_harness.llm.transport import validate_url
 from security_harness.llm.benchmark import load_cases, review_request
@@ -156,6 +156,24 @@ def test_cancellation_and_deadline_close_the_response_stream():
         assert stream.closed
         assert gateway.evidence[0]['status'] == ('CANCELLED' if cancel else 'TIMEOUT')
     asyncio.run(exercise(False)); asyncio.run(exercise(True))
+
+
+@pytest.mark.parametrize('model,family', [
+    ('nvidia/nemotron-3-nano-omni', 'nemotron'), ('nemotron-3-nano-omni', 'nemotron'),
+    ('qwen/qwen3.8-27b', 'qwen'), ('qwen3-8b', 'qwen'),
+    ('qwen/qwen3.8-27b-instruct', 'qwen'),
+    # 名稱相近但未審查的模型不能借用家族標籤。 / Look-alike, unreviewed names cannot borrow a family label.
+    ('qwen/qwen2.5-7b', 'unverified'), ('qwen/qwen3.8-embedding', 'unverified'), ('notqwen/qwen3-8b', 'unverified'),
+    ('text-embedding-nomic-embed-text-v1.5', 'unverified'), ('nvidia/nemotron-4-mini', 'unverified'),
+])
+def test_lmstudio_family_comes_only_from_reviewed_model_ids(model, family):
+    assert LMStudioAdapter(model, BASE).family == family
+
+
+def test_lmstudio_quantization_suffix_is_not_a_model_id():
+    # 模型 ID 規則不接受 @，量化標記不能夾帶在 ID 中。 / The model-ID rule rejects @, so a quantization tag cannot ride in the ID.
+    with pytest.raises(ModelError, match='CONFIGURATION'):
+        LMStudioAdapter('qwen/qwen3.8-27b@q4_k_m', BASE)
 
 
 def test_configured_lmstudio_keeps_glm_separate(monkeypatch):
