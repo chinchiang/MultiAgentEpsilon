@@ -4,7 +4,7 @@
 
 # 第一個里程碑：實作狀態與驗收方式
 
-本文件記錄**現況與可辨識的歷史驗收**（2026-10-11）。正式 main `9508a7c` 已合併 PR #21（[2026-10-10 稽核修正](audit-20261010.zh-TW.md)）至 PR #24，合併後的 [CI 執行 38106362078](https://github.com/chinchiang/MultiAgentEpsilon/actions/runs/38106362078) 成功：1150 項測試，修正版 44 個案例／0 項缺陷為 ALLOW，指定缺陷版恰好 9 項缺陷為 BLOCK，突變測試、清理與真實簽章均通過。前一基準 `28be2e0`（PR #20，930 項測試）與稽核當時的 1149 項本機證據保留於歷史。專用 GitHub App 部署與真實 LM Studio 驗收仍待完成。各批次的原始紀錄與當時數字保留於[里程碑歷史紀錄](milestone-history.zh-TW.md)。
+本文件記錄**現況與可辨識的歷史驗收**（2026-10-12）。正式 main `f9fa905` 已合併 PR #26（封存中繼資料與回應標頭的假綠燈修正），合併後的 [CI 執行 38209419557](https://github.com/chinchiang/MultiAgentEpsilon/actions/runs/38209419557) 成功：1195 項測試，修正版 44 個案例／0 項缺陷為 ALLOW，指定缺陷版恰好 9 項缺陷為 BLOCK，突變測試、清理與真實簽章均通過，證據自我檢查為 PUBLISHABLE。前一基準 `9508a7c`（PR #21 至 #24，[CI 執行 38106362078](https://github.com/chinchiang/MultiAgentEpsilon/actions/runs/38106362078)，1150 項測試）、`28be2e0`（PR #20，930 項測試）與稽核當時的 1149 項本機證據保留於歷史。專用 GitHub App 部署與真實 LM Studio 驗收仍待完成。各批次的原始紀錄與當時數字保留於[里程碑歷史紀錄](milestone-history.zh-TW.md)。
 
 ## 遠端治理
 
@@ -15,6 +15,7 @@
 - 第二次受控基準遷移（2026-10-11）：PR #21 合併後，main 上一項測試只接受 root 身分下的錯誤訊息，在非 root 的 runner 上必然失敗（[run 38095207581](https://github.com/chinchiang/MultiAgentEpsilon/actions/runs/38095207581)）。`pull_request_target` 以 base 上的測試判定，因此任何 PR（含修正 PR #22）都無法通過必要檢查。PR #22 已由 d98922036ntu 對 head `746c473` 獨立核准且 guard 放行，擁有者暫時解除規則集後合併為 `f1a640f`，隨即恢復；合併後 [CI 執行 38098147162](https://github.com/chinchiang/MultiAgentEpsilon/actions/runs/38098147162) 全部通過。
 - 2026-10-11 合併保護稽核：擁有者以具 Administration 讀取權限的權杖執行 `audit_merge_protection.py --pr 22`，無讀取錯誤。規則集 active、bypass 名單為空、禁止刪除與強推、須獨立審查、必要檢查存在且為 strict、base CODEOWNERS 含獨立審查者；可用的獨立審查者與非管理者開發者為 CatGrocery、d98922036ntu。未通過的一項是必要檢查仍綁定共用 Actions App，未綁定專用 App（`source_binding` 為 NOT_VERIFIED）。六項行為探測（直接推送、未核准政策修改、同名假檢查、換版後舊核准、撤回核准、合法核准）仍為 NOT_RUN，需由非管理者開發者實測。
 - 後續文件與工具 PR（2026-10-11）：PR #23 記錄基準遷移與稽核結果（`6b23491`），PR #24 讓 pytest 在 root 執行時顯示警告（CI 為非 root，推送前須以一般使用者重跑），並把「基準自身失效時的受控遷移」程序寫入 [trusted-execution](trusted-execution.zh-TW.md)；兩者皆依規則集合併，未停用規則，合併後 [run 38106362078](https://github.com/chinchiang/MultiAgentEpsilon/actions/runs/38106362078) 全部通過（1150 項測試）。
+- 2026-10-11／10-12 的 PR：PR #25 把說明、文件與架構圖同步至 `9508a7c`（`3059642`）。PR #26 修正兩個假綠燈：ZIP／gzip 成員以外的位元組須對應已知結構，以及 AUTH oracle 須核對回應標頭，並新增第十種真實隔離缺陷變體。PR #26 由 d98922036ntu 對 head `80cb1f3` 獨立核准，作者重跑後 guard 放行，`verify_required_check.py` 為 ALLOW；之後依規則集以 merge commit 合併為 `f9fa905`，未停用規則，合併後的 run 38209419557 全部通過（1195 項測試）。
 
 ### 遷移後的真實流程驗收（2026-10-06）
 
@@ -113,7 +114,7 @@ W 編號與 G0–G6 閘門編號都來自本地保留的原始規劃。依公開
 
 # Milestone status and acceptance
 
-Current reviewed main is `9508a7c` (2026-10-11), including PR #21 (the [October 10 audit](audit-20261010.zh-TW.md#en)) through PR #24. Post-merge [run 38106362078](https://github.com/chinchiang/MultiAgentEpsilon/actions/runs/38106362078) succeeded with 1150 tests, fixed 44/0 ALLOW, seeded exactly 9 findings BLOCK, mutation tests, cleanup and real signatures. The previous `28be2e0` baseline (PR #20, 930 tests) and the audit-time 1149-test local evidence remain in history. Dedicated GitHub App deployment and real LM Studio acceptance remain pending. Original dated totals remain in [history](milestone-history.zh-TW.md#en).
+Current reviewed main is `f9fa905` (2026-10-12), including PR #26 (false-pass fixes for archive metadata and response headers). Post-merge [run 38209419557](https://github.com/chinchiang/MultiAgentEpsilon/actions/runs/38209419557) succeeded with 1195 tests, fixed 44/0 ALLOW, seeded exactly 9 findings BLOCK, mutation tests, cleanup, real signatures and PUBLISHABLE evidence. The previous `9508a7c` baseline (PRs #21–#24, [run 38106362078](https://github.com/chinchiang/MultiAgentEpsilon/actions/runs/38106362078), 1150 tests), the `28be2e0` baseline (PR #20, 930 tests) and the audit-time 1149-test local evidence remain in history. Dedicated GitHub App deployment and real LM Studio acceptance remain pending. Original dated totals remain in [history](milestone-history.zh-TW.md#en).
 
 ## Remote governance
 
@@ -124,6 +125,8 @@ Initial October 6 migration temporarily disabled rules and merged #6 da567d8 and
 Second controlled baseline migration (October 11): after PR #21 merged, one main test accepted only the root-only denial message and always failed on the non-root runner ([run 38095207581](https://github.com/chinchiang/MultiAgentEpsilon/actions/runs/38095207581)). Because `pull_request_target` judges with the base tests, no PR, including fix PR #22, could pass the required check. PR #22 had d98922036ntu's independent approval of head `746c473` and passed the guard; the owner temporarily lifted the ruleset, merged it as `f1a640f`, and restored enforcement. Post-merge [run 38098147162](https://github.com/chinchiang/MultiAgentEpsilon/actions/runs/38098147162) passed every job.
 
 Follow-up documentation and tooling PRs (October 11): PR #23 recorded the baseline migration and audit (`6b23491`); PR #24 made pytest warn when run as root (CI is non-root, so rerun as an ordinary user before pushing) and wrote the controlled-migration procedure for a failing baseline into [trusted-execution](trusted-execution.zh-TW.md#en). Both merged under the ruleset without disabling it; post-merge [run 38106362078](https://github.com/chinchiang/MultiAgentEpsilon/actions/runs/38106362078) passed with 1150 tests.
+
+October 11–12 PRs: PR #25 synchronized the README, docs and diagrams with `9508a7c` (`3059642`). PR #26 fixed two false passes: ZIP/gzip bytes outside members must map to known structures, and the AUTH oracle checks response headers, with a tenth real-isolation defect variant. d98922036ntu independently approved head `80cb1f3`; after the author reran the workflow the guard passed and `verify_required_check.py` returned ALLOW. It was merged under the ruleset with a merge commit as `f9fa905`, without disabling rules, and post-merge run 38209419557 passed every job (1195 tests).
 
 October 11 merge-protection audit: the owner ran `audit_merge_protection.py --pr 22` with a token holding Administration read, with no read errors. The ruleset is active with an empty bypass list, deletion and force push are blocked, independent review is required, the required check is present and strict, and base CODEOWNERS include independent reviewers; CatGrocery and d98922036ntu are available independent reviewers and non-admin developers. The one failing item is that the required check is still bound to the shared Actions App rather than a dedicated App (`source_binding` NOT_VERIFIED). The six behavioral probes (direct push, unapproved policy change, forged same-name check, stale-head approval, dismissed approval, legitimate approval) remain NOT_RUN and need a non-admin developer.
 
@@ -149,7 +152,7 @@ Publisher rechecks mutable same-head PRs/timelines immediately before green, ope
 
 Owner decisions/actions: restrict the live ruleset's allowed merge methods to merge commits; run the six behavioral probes as a non-admin developer; whether to separately authorize rewriting historical AWS account identifiers (not API secrets; may already be cached); enable/verify Secret scanning, Push Protection, Dependabot and private reporting with capable administrative access; require approval for all outside-contributor fork workflows and enforce Actions SHA pinning; choose a source license; provision dedicated App/installation/key/controlled Linux host and perform developer-role source/merge denial acceptance. Never paste credentials, disable rules, force-push history, or treat connector 403 as an automatic-review denial. Current private-reporting enable attempt still returns 403.
 
-Deployment must use approved merged main and explicit regenerated evaluator/policy pins, not a candidate. Reviewed main `9508a7c` is the accepted source for preparing a new deployment bundle; this does not update existing deployment pins or deploy the service. Real LM Studio/Nemotron endpoint, exact model ID and schema acceptance, and renewed AWS credentials for new v3 Gemini/Claude samples remain separate; GLM live stays paused.
+Deployment must use approved merged main and explicit regenerated evaluator/policy pins, not a candidate. Reviewed main `f9fa905` is the accepted source for preparing a new deployment bundle; this does not update existing deployment pins or deploy the service. Real LM Studio/Nemotron endpoint, exact model ID and schema acceptance, and renewed AWS credentials for new v3 Gemini/Claude samples remain separate; GLM live stays paused.
 
 Known limits: the complete local flow supports Linux x86_64, Python 3.12 and Docker only (use WSL on Windows). The development oracle now uses real loopback HTTP instead of the deprecated TestClient, and pytest treats every warning as an error.
 
