@@ -21,7 +21,7 @@
 
 - `security/policy.json` 的 `gate_contracts` 指定 gate kind 與必要 case ID。AUTH 必須恰好涵蓋唯一集合；數量、findings 與逐案例結果須一致。schema 3 拒絕舊版（schema 1、2）證據及不同 run ID 的混用。G2 另須有候選儲存庫 本身的 HEAD 歷史（`history_required`）；沒有 `.git`、沒有 commit，或位於外層儲存庫 之中的子目錄都不能取得 ALLOW。
 - 掃描／subject 共用 `security_harness/inputs.py`。只在 儲存庫根目錄排除生成目錄；Python／pytest 快取為明列例外，已追蹤的保留生成路徑會拒絕。候選容器使用相同清冊的 fixture Python 子集，未納入來源不會掛載。
-- Gitleaks 使用重新命名的快照，映射回原始檔名；原始 `.git` 等名字不能觸發工具的隱含略過，候選 inline allow 與 ignore file 不能自行抑制可信掃描。壓縮檔除了展開成員，也掃描容器本身的可讀字串（註解、檔名、extra 欄位、gzip 標頭）；zip 中不屬於任何列出成員的位元組、帶資料的目錄項目，以及 tar 結尾之後的非零資料一律阻擋。
+- Gitleaks 使用重新命名的快照，映射回原始檔名；原始 `.git` 等名字不能觸發工具的隱含略過，候選 inline allow 與 ignore file 不能自行抑制可信掃描。壓縮檔除了展開成員，也掃描容器本身的可讀字串（註解、檔名、extra 欄位、gzip 標頭）；zip 中不屬於任何列出成員的位元組、帶資料的目錄項目，以及 tar 結尾之後的非零資料一律阻擋。成員以外的位元組須逐一對應已知結構：zip 註解須為文字、extra 欄位只接受有長度上限的已知紀錄、結尾紀錄後不得有資料；gzip 只接受單一成員，不接受標頭 extra 欄位，檔名與註解須為可讀 ASCII。
 - 對候選儲存庫 的 git 呼叫一律經 `security_harness/candidate_git.py`：以命令列 `-c` 停用 fsmonitor、hooks 與任何 transport，清除繼承的 `GIT_*` 環境變數，不讀取系統／全域設定，並以明確的 `--git-dir` 指向候選自己的 `.git` 目錄（gitfile 或 symlink 拒絕）。候選的 `.git/config` 是資料，不能讓 host 執行程式。
 - Audit envelope 在設定解析之前寫出，subject／policy 尚不可得時保留 null。錯誤只記錄階段與例外型別。報告採原子替換，初始 RUNNING 報告一律 BLOCK；沒有成功完成的證據不得放行。
 - `artifacts/latest.txt` 僅索引 security run；其他入口各有 `<operation>-latest.txt`。本機 artifact 未簽章；CI 另以獨立工作簽署上傳 ZIP，保存 7 天，仍不是長期不可竄改證據庫。
@@ -86,7 +86,7 @@ python3 -I scripts/dev_db.py start
 python3 -I scripts/dev_db.py stop
 ```
 
-隔離回歸會執行缺陷版、修正版，以及在候選匯入時嘗試寫入唯讀來源／入口、讀取 evaluator／Docker socket／權杖、建立 IP 出向連線的探測。必要結果為：完整 44 案例、缺陷版恰好政策 `seeded_defect_case_ids` 的 9 個 findings／BLOCK、修正版 0 findings／ALLOW。另有錯誤密碼登入、404 洩漏、匯出夾帶跨租戶資料、其他資料列被非法修改、admin 寫入條件越過租戶邊界、過期工作階段、跨租戶刪除、寫入端點較弱的工作階段檢查，以及回應後才排程的跨租戶寫入共九種變體，必須產生指定 AUTH findings；評估前也會核對兩個容器的網路、唯讀根目錄、權限、記憶體、程序數、使用者與映像；socket 改指向 host 測試端點必須失敗且端點不得收到連線。
+隔離回歸會執行缺陷版、修正版，以及在候選匯入時嘗試寫入唯讀來源／入口、讀取 evaluator／Docker socket／權杖、建立 IP 出向連線的探測。必要結果為：完整 44 案例、缺陷版恰好政策 `seeded_defect_case_ids` 的 9 個 findings／BLOCK、修正版 0 findings／ALLOW。另有錯誤密碼登入、404 洩漏、匯出夾帶跨租戶資料、其他資料列被非法修改、admin 寫入條件越過租戶邊界、過期工作階段、跨租戶刪除、寫入端點較弱的工作階段檢查，回應後才排程的跨租戶寫入，以及拒絕讀取時以回應標頭外洩資料共十種變體，必須產生指定 AUTH findings；評估前也會核對兩個容器的網路、唯讀根目錄、權限、記憶體、程序數、使用者與映像；socket 改指向 host 測試端點必須失敗且端點不得收到連線。
 
 候選 lock digest 必須等於已驗證 runtime lock digest；尚不支援任意候選依賴映像建置。受保護變更使用禁用 rename 折疊的 diff，同時判斷刪除與新增路徑。結果 schema 3 使用版本化逐檔 manifest，不能沿用 schema 2 的 gate 證據。
 
@@ -117,7 +117,7 @@ Linux containers still share a kernel; this is not kernel/runtime-exploit resist
 
 Gate contracts specify kind and exact unique AUTH case IDs, consistent counts/findings/per-case results. Schema 3 rejects versions 1/2 and mixed run IDs. G2 requires the candidate's own HEAD history: missing .git/commits or a nested directory inside another repository cannot ALLOW.
 
-Scanning and subject hashing share inputs.py. Generated directories are excluded only at root; Python/pytest caches are explicit exceptions, and tracked reserved generated paths are rejected. Candidate mounts contain only inventoried fixture Python. Gitleaks scans renamed snapshots mapped back to original names: .git names, inline allow comments, and candidate ignore files cannot silently skip trusted scanning. Archive container strings/metadata and expanded members are scanned; unlisted ZIP bytes, data-bearing directory entries, and nonzero trailing TAR bytes block.
+Scanning and subject hashing share inputs.py. Generated directories are excluded only at root; Python/pytest caches are explicit exceptions, and tracked reserved generated paths are rejected. Candidate mounts contain only inventoried fixture Python. Gitleaks scans renamed snapshots mapped back to original names: .git names, inline allow comments, and candidate ignore files cannot silently skip trusted scanning. Archive container strings/metadata and expanded members are scanned; unlisted ZIP bytes, data-bearing directory entries, and nonzero trailing TAR bytes block. Every byte outside members must map to a known structure: text ZIP comments, length-capped known extra records, nothing after the end record, and single-member gzip without a header extra field and with printable-ASCII name/comment.
 
 Candidate Git calls use candidate_git.py, disabling fsmonitor/hooks/transports with -c, clearing inherited GIT_*, ignoring system/global config, and explicitly selecting a real candidate .git directory. Gitfiles/symlinks are rejected. Candidate configuration is data, never host execution authority.
 
@@ -177,7 +177,7 @@ python3 -I scripts/dev_db.py start
 python3 -I scripts/dev_db.py stop
 ```
 
-Isolation regressions attempt writes to read-only source/entrypoint, reads of evaluator/Docker socket/tokens, and IP egress. Required results: exact 44 cases; fixed zero findings/ALLOW; seeded exact nine policy IDs/BLOCK. Nine additional real-container variants cover wrong-password login, 404 disclosure, cross-tenant export, hidden unrelated-row mutation, admin cross-tenant writes, expired sessions, cross-tenant deletion, a weaker write-endpoint session check, and a cross-tenant write scheduled after the response. Both containers' network, read-only root, privileges, memory, process, user and image settings are verified before evaluation. Redirecting the HTTP socket to a host endpoint must fail without contacting that endpoint.
+Isolation regressions attempt writes to read-only source/entrypoint, reads of evaluator/Docker socket/tokens, and IP egress. Required results: exact 44 cases; fixed zero findings/ALLOW; seeded exact nine policy IDs/BLOCK. Ten additional real-container variants cover wrong-password login, 404 disclosure, cross-tenant export, hidden unrelated-row mutation, admin cross-tenant writes, expired sessions, cross-tenant deletion, a weaker write-endpoint session check, a cross-tenant write scheduled after the response, and a denied read that leaks the row through a response header. Both containers' network, read-only root, privileges, memory, process, user and image settings are verified before evaluation. Redirecting the HTTP socket to a host endpoint must fail without contacting that endpoint.
 
 Candidate lock must match verified runtime lock; arbitrary candidate dependency images are unsupported. Protected diffs disable rename collapsing and check both old/new paths. Schema 3 uses versioned per-file manifests. See [remote gaps](remote-merge-protection.zh-TW.md#en).
 

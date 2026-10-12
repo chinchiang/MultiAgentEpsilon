@@ -5,12 +5,18 @@ from copy import deepcopy
 from datetime import datetime, timedelta, timezone
 import hashlib
 import json
+import re
 import secrets
 import time
 
 # 最後一個案例後的靜置時間，用來攔截延遲寫入。 / Quiet period after the last case, so delayed writes are observed.
 SETTLE_SECONDS = 1.0
 DRIFT_CASE = "no delayed or out-of-band state changes"
+# uvicorn／Starlette 對合成 JSON 契約固定送出的標頭；content-length 只在有本文時出現。 / Headers uvicorn and
+# Starlette always send for the synthetic JSON contract; content-length appears only with a body.
+RESPONSE_HEADERS = {b"date", b"server", b"content-type"}
+DATE_HEADER = re.compile(rb"(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun), \d{2} "
+                         rb"(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec) \d{4} \d{2}:\d{2}:\d{2} GMT")
 
 
 TABLES = {
@@ -32,6 +38,23 @@ def response_body(response):
         raise ValueError("non-JSON response constant")
     return json.loads(response.content, object_pairs_hook=object_pairs,
                       parse_constant=invalid_constant) if response.content else None
+
+
+def headers_match(response):
+    """標頭也屬於回應契約：只允許固定的 date、server、content-type、相符的 content-length 與單一 connection: close，避免資料藏在標頭。
+
+Headers are part of the response contract: only the fixed date, server and content-type
+    plus a matching content-length and one connection: close are allowed, so no data can hide in a header."""
+    actual = sorted((name.lower(), value) for name, value in response.headers.raw)
+    if (b"connection", b"close") in actual:
+        # bridge 每次要求關閉連線，伺服器回送一次相同的逐跳標頭。 / The bridge closes every connection and the server echoes it once.
+        actual.remove((b"connection", b"close"))
+    if [name for name, _ in actual] != sorted(RESPONSE_HEADERS | ({b"content-length"} if response.content else set())):
+        return False
+    values = dict(actual)
+    return (bool(DATE_HEADER.fullmatch(values[b"date"])) and values[b"server"] == b"uvicorn"
+            and values[b"content-type"] == b"application/json"
+            and values.get(b"content-length", b"%d" % len(response.content)) == b"%d" % len(response.content))
 
 
 def same(actual, expected):
@@ -96,7 +119,7 @@ def evaluate(client, dsn, schema, passwords, connect, settle=SETTLE_SECONDS):
             body_matches = False
         after = snapshot(dsn, schema, connect)
         target = expected or before
-        passed = response.status_code == status and body_matches and after == target
+        passed = response.status_code == status and body_matches and headers_match(response) and after == target
         cases.append({"case": name, "passed": passed})
         if passed:
             model["state"] = target
@@ -121,7 +144,8 @@ def evaluate(client, dsn, schema, passwords, connect, settle=SETTLE_SECONDS):
             raise RuntimeError("fixture login failed; cannot evaluate authorization")
         body = response_body(response)
         token = body.get("access_token")
-        if set(body) != {"access_token"} or not isinstance(token, str) or not 1 <= len(token) <= 256:
+        if (set(body) != {"access_token"} or not isinstance(token, str) or not 1 <= len(token) <= 256
+                or not headers_match(response)):
             raise ValueError("invalid login response")
         after = snapshot(dsn, schema, connect)
         token_hash = hashlib.sha256(token.encode()).hexdigest()
@@ -174,8 +198,9 @@ def evaluate(client, dsn, schema, passwords, connect, settle=SETTLE_SECONDS):
         denied_matches = same(response_body(denied), {"detail": "authentication required"})
     except ValueError:
         denied_matches = False
-    logged_out = (response.status_code == 204 and not response.content and after_logout == expected
-                  and denied.status_code == 401 and denied_matches
+    logged_out = (response.status_code == 204 and not response.content and headers_match(response)
+                  and after_logout == expected and denied.status_code == 401 and denied_matches
+                  and headers_match(denied)
                   and snapshot(dsn, schema, connect) == expected)
     cases.append({"case": "logout revokes session", "passed": logged_out})
     model["state"] = expected

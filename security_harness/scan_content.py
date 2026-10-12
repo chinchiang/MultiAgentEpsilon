@@ -1,13 +1,13 @@
 """有限額地展開封存為平面檔案，不把封存路徑直接解到磁碟。
 
 Bounded archive expansion into flat files; never extract archive paths to disk."""
-import gzip
 import hashlib
 import io
 import json
 import re
 import tarfile
 import zipfile
+import zlib
 from pathlib import PurePosixPath
 
 from .limits import LIMITS, ResourceLimit
@@ -15,6 +15,10 @@ from .limits import LIMITS, ResourceLimit
 MIN_STRING = 6
 ASCII_RUN = re.compile(rb"[\x20-\x7e\t]{%d,}" % MIN_STRING)
 UTF16LE_RUN = re.compile(rb"(?:[\x20-\x7e\t]\x00){%d,}" % MIN_STRING)
+GZIP_TEXT = re.compile(rb"[\x20-\x7e]*")
+# ZIP64、NTFS 時間、延伸時間戳記與 Unix UID/GID 的資料長度上限。 / Data-length caps for ZIP64, NTFS times,
+# extended timestamps and Unix UID/GID records.
+ZIP_EXTRA_LIMITS = {0x0001: 28, 0x000a: 32, 0x5455: 13, 0x7875: 19}
 
 
 class UnsupportedContent(ValueError):
@@ -57,18 +61,65 @@ Embedded plaintext (ASCII and UTF-16LE, as `strings -e s/l` would see it)."""
     return b"\n".join(runs) + b"\n"
 
 
-def zip_payloads(data, archive):
-    """列出成員的 payload 範圍；中央目錄之前每一位元組都須屬於成員，避免藏入未列出壓縮內容。
+def number(data, start, size):
+    return int.from_bytes(data[start:start+size], 'little')
 
-Payload ranges of the listed members. Every byte before the central directory
-    must belong to one, so no compressed payload can hide between or before entries."""
+
+def zip_extra(field):
+    """extra 欄位只接受已知格式且有長度上限的紀錄，不能夾帶任意壓縮內容。
+
+Extra fields may only hold known, length-capped records, never arbitrary compressed data."""
+    position = 0
+    while position < len(field):
+        if len(field) - position < 4:
+            raise UnsupportedContent("unsupported zip extra field")
+        tag, size = number(field, position, 2), number(field, position + 2, 2)
+        position += 4
+        if size > ZIP_EXTRA_LIMITS.get(tag, -1) or position + size > len(field):
+            raise UnsupportedContent("unsupported zip extra field")
+        position += size
+
+
+def zip_central(data, archive):
+    """中央目錄、ZIP64 結尾紀錄與結尾紀錄須逐位元組對應，註解須為文字，且結尾紀錄後不得有資料。
+
+The central directory, ZIP64 end records and end record must account for every
+    remaining byte; comments must be text and nothing may follow the end record."""
+    position = archive.start_dir
+    for _ in archive.infolist():
+        if data[position:position+4] != b'PK\x01\x02':
+            raise UnsupportedContent("unaccounted zip bytes")
+        names, extra, comment = (number(data, position + offset, 2) for offset in (28, 30, 32))
+        position += 46 + names
+        zip_extra(data[position:position+extra])
+        position += extra
+        if not is_text(data[position:position+comment]):
+            raise UnsupportedContent("binary zip comment")
+        position += comment
+    if data[position:position+4] == b'PK\x06\x06':
+        # ZIP64 結尾紀錄不接受可延伸資料區。 / The ZIP64 end record may not carry an extensible data sector.
+        if number(data, position + 4, 8) != 44 or data[position+56:position+60] != b'PK\x06\x07':
+            raise UnsupportedContent("unaccounted zip bytes")
+        position += 76
+    if data[position:position+4] != b'PK\x05\x06' or position + 22 + number(data, position + 20, 2) != len(data):
+        raise UnsupportedContent("unaccounted zip bytes")
+    if not is_text(data[position+22:]):
+        raise UnsupportedContent("binary zip comment")
+
+
+def zip_payloads(data, archive):
+    """列出成員的 payload 範圍；成員以外的每一位元組都須屬於已知結構，避免藏入未列出壓縮內容。
+
+Payload ranges of the listed members. Every other byte must belong to a known
+    structure, so no compressed payload can hide between, before or after entries."""
     position = 0
     payloads = []
     for member in sorted(archive.infolist(), key=lambda m: m.header_offset):
         if member.header_offset != position or data[position:position+4] != b'PK\x03\x04':
             raise UnsupportedContent("unaccounted zip bytes")
-        names = int.from_bytes(data[position+26:position+28], 'little')
-        extra = int.from_bytes(data[position+28:position+30], 'little')
+        names = number(data, position + 26, 2)
+        extra = number(data, position + 28, 2)
+        zip_extra(data[position+30+names:position+30+names+extra])
         position += 30 + names + extra
         payloads.append((position, member.compress_size))
         position += member.compress_size
@@ -81,6 +132,7 @@ Payload ranges of the listed members. Every byte before the central directory
             position = target
     if position != archive.start_dir:
         raise UnsupportedContent("unaccounted zip bytes")
+    zip_central(data, archive)
     return payloads
 
 
@@ -105,14 +157,43 @@ class ContentInventory:
         self.archives = 0
         self.reviewed = 0
 
-    def read(self, stream):
-        maximum = min(self.limits.max_file_bytes,
-                      self.limits.max_expanded_bytes - self.expanded_bytes)
-        value = stream.read(maximum + 1)
+    def budget(self):
+        return min(self.limits.max_file_bytes, self.limits.max_expanded_bytes - self.expanded_bytes)
+
+    def account(self, value, maximum):
         if len(value) > maximum:
             raise ResourceLimit("expanded content byte limit exceeded")
         self.expanded_bytes += len(value)
         return value
+
+    def read(self, stream):
+        maximum = self.budget()
+        return self.account(stream.read(maximum + 1), maximum)
+
+    def gunzip(self, data):
+        """只接受單一 gzip 成員：標頭不得有 extra 欄位，檔名與註解須為可讀 ASCII，結尾後只允許零填補。
+
+A single gzip member only: no header extra field, printable-ASCII name and
+        comment, and nothing but zero padding after the trailer."""
+        flags = data[3] if len(data) > 3 else 0
+        if len(data) < 18 or data[2] != 8 or flags & 0xe4:
+            raise UnsupportedContent("unsupported gzip header")
+        position = 10
+        for flag in (0x08, 0x10):
+            if flags & flag:
+                end = data.find(b'\x00', position)
+                if end < 0 or not GZIP_TEXT.fullmatch(data[position:end]):
+                    raise UnsupportedContent("binary gzip header field")
+                position = end + 1
+        maximum = self.budget()
+        stream = zlib.decompressobj(31)
+        try:
+            value = stream.decompress(data, maximum + 1)
+        except zlib.error:
+            raise UnsupportedContent("corrupt gzip stream") from None
+        if len(value) <= maximum and (not stream.eof or stream.unused_data.strip(b'\x00')):
+            raise UnsupportedContent("unaccounted gzip bytes")
+        return self.account(value, maximum)
 
     def member(self, name):
         path = PurePosixPath(name)
@@ -134,8 +215,7 @@ class ContentInventory:
         payloads = []
         if is_gzip:
             self.member('gzip-stream')
-            with gzip.GzipFile(fileobj=io.BytesIO(data)) as stream:
-                self.add(self.read(stream), origin + '!gzip', scope=scope, depth=depth+1, object_id=object_id)
+            self.add(self.gunzip(data), origin + '!gzip', scope=scope, depth=depth+1, object_id=object_id)
         elif is_zip:
             with zipfile.ZipFile(io.BytesIO(data)) as archive:
                 payloads = zip_payloads(data, archive)
