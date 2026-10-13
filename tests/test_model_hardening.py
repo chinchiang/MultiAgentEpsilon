@@ -189,6 +189,29 @@ def test_reviewed_gateway_reaches_glm_but_disabled_deepseek_never_gets_a_key(mon
     assert caught.value.code == "CONFIGURATION"
 
 
+def tampered_roe(tmp_path, monkeypatch, change):
+    from pathlib import Path as _Path
+    from security_harness.llm import config
+    roe = json.loads((_Path(__file__).resolve().parents[1] / "security/model-roe.json").read_text())
+    change(roe)
+    (tmp_path / "security").mkdir()
+    (tmp_path / "security/model-roe.json").write_text(json.dumps(roe))
+    monkeypatch.setattr(config, "ROOT", tmp_path)
+
+
+def test_worker_refuses_a_destination_from_an_unvalidated_roe(tmp_path, monkeypatch):
+    # supervisor 驗證後 RoE 仍可能被換掉；worker 重新讀取時也須驗證。 / The RoE can still be swapped after the
+    # supervisor validated it, so the worker's reread must validate too.
+    from scripts.model_smoke import configured_adapter
+    tampered_roe(tmp_path, monkeypatch, lambda roe: roe["allowed_remote_hosts"].update(glm=["10.0.0.1"]))
+    monkeypatch.setenv("GLM_MODEL_ID", "glm")
+    monkeypatch.setenv("GLM_CHAT_URL", "https://10.0.0.1/v1/chat/completions")
+    monkeypatch.setenv("GLM_API_KEY", "synthetic-glm-key")
+    with pytest.raises(ModelError) as caught:
+        configured_adapter("glm")
+    assert caught.value.code == "CONFIGURATION"
+
+
 def test_model_roe_no_longer_allows_live_deepseek():
     import json as _json
     from pathlib import Path as _Path

@@ -188,6 +188,21 @@ def test_changed_case_catalog_spends_no_calls(tmp_path, monkeypatch):
     assert [c['code'] for c in data['checks']] == ['CONFIGURATION']
 
 
+def test_changed_model_roe_spends_no_calls(tmp_path, monkeypatch):
+    # 即使換上的 RoE 仍然合法，也不是 supervisor 驗證過的那一份。 / Even a still-valid replacement RoE is not the
+    # one the supervisor validated.
+    report = runner.initial_report(['mock-review-a'], ['B01'], str(uuid.uuid4()), 512, 1)
+    report['model_roe_sha256'] = '0' * 64  # 計畫綁定後 RoE 被修改。 / RoE edited after the plan was bound
+    path = tmp_path/'artifacts'/report['run_id']/'report.json'
+    life.persist(path, report); prepare_run(tmp_path, report['run_id'], operation='model-smoke')
+    async def forbidden(self, request): raise AssertionError('call spent against an unbound RoE')
+    monkeypatch.setattr(bench.MockReviewer, 'generate', forbidden)
+    assert asyncio.run(runner.run_worker(tmp_path, report['run_id'])) == 1
+    data = json.loads(path.read_text())
+    assert data['code'] == 'CONFIGURATION' and data['calls'] == []
+    assert [c['code'] for c in data['checks']] == ['CONFIGURATION']
+
+
 @pytest.mark.parametrize('code', ['TIMEOUT', 'SUPERVISOR_FAILED', 'WORKER_FAILED', 'PROVIDER_INCOMPLETE'])
 def test_supervisor_stop_reasons_are_known_categories(code):
     assert score.error_categories([{'status': 'ERROR', 'code': code}]) == {code: 1}
