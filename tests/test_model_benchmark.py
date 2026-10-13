@@ -322,6 +322,67 @@ def test_review_cli_accepts_large_budgets_only_within_the_total_cap(budget):
         assert subprocess.run([sys.executable, '-I', str(script), *args], capture_output=True, timeout=10).returncode == 2
 
 
+def test_coordinated_budget_tampering_before_the_worker_starts_is_refused(tmp_path):
+    # 報告自身前後一致，但與 supervisor 交付的不可變計畫不同。 / The report is internally consistent,
+    # yet differs from the immutable plan the supervisor handed over.
+    report = runner.initial_report(['mock-review-a', 'mock-review-b'], ['B01'], str(uuid.uuid4()))
+    path = tmp_path / 'artifacts' / report['run_id'] / 'report.json'
+    life.persist(path, report)
+    tampered = runner.initial_report(['mock-review-a', 'mock-review-b'], ['B01'], report['run_id'], 1024)
+    for key in ('started_at', 'plan', 'checks'):
+        tampered[key] = report[key] if key != 'checks' else [
+            {**check, 'request_sha256': bench.request_digest(bench.review_request(
+                bench.load_cases()[check['case_id']], check['review_id'], 1024))} for check in report['checks']]
+    life.persist(path, tampered)
+    prepare_run(tmp_path, report['run_id'], operation='model-smoke')
+    assert asyncio.run(runner.run_worker(tmp_path, report['run_id'])) == 0
+    data = life.finish(tmp_path, report['run_id'], providers=report['providers'], returncode=0, expected_report=report)
+    assert (data['status'], data['code']) == ('INCOMPLETE', 'EVALUATION_INVALID')
+
+
+def test_worker_spends_nothing_when_the_report_differs_from_the_supervisor_plan(tmp_path):
+    # 摘要經命令列而非磁碟交付；竄改的報告一次呼叫都不能發。 / The digest travels by argv, not disk;
+    # a tampered report must not make a single call.
+    report = runner.initial_report(['mock-review-a', 'mock-review-b'], ['B01'], str(uuid.uuid4()))
+    path = tmp_path / 'artifacts' / report['run_id'] / 'report.json'
+    tampered = copy.deepcopy(report)
+    tampered['implementation_sha256'] = '0' * 64
+    life.persist(path, tampered)
+    prepare_run(tmp_path, report['run_id'], operation='model-smoke')
+    returncode = asyncio.run(runner.run_worker(tmp_path, report['run_id'], plan_digest=life.plan_digest(report)))
+    assert returncode != 0
+    data = life.finish(tmp_path, report['run_id'], providers=report['providers'], returncode=returncode,
+                       expected_report=report)
+    assert data['calls'] == [] and (data['status'], data['code']) == ('INCOMPLETE', 'EVALUATION_INVALID')
+
+
+def test_worker_runs_normally_with_the_matching_plan_digest(tmp_path):
+    report = runner.initial_report(['mock-review-a', 'mock-review-b'], ['B01'], str(uuid.uuid4()))
+    life.persist(tmp_path / 'artifacts' / report['run_id'] / 'report.json', report)
+    prepare_run(tmp_path, report['run_id'], operation='model-smoke')
+    assert asyncio.run(runner.run_worker(tmp_path, report['run_id'], plan_digest=life.plan_digest(report))) == 0
+    data = life.finish(tmp_path, report['run_id'], providers=report['providers'], returncode=0, expected_report=report)
+    assert data['status'] == 'COMPLETE' and len(data['calls']) == 2
+
+
+@pytest.mark.parametrize('tamper', [
+    lambda r: r.update(implementation_sha256='0' * 64),
+    lambda r: r.update(model_roe_sha256='0' * 64),
+    lambda r: r.update(total_timeout_seconds=r['total_timeout_seconds'] + 10),
+    lambda r: r['checks'][1].update(request_sha256='0' * 64),
+], ids=['implementation', 'model-roe', 'run-deadline', 'one-request'])
+def test_single_immutable_field_tampering_is_refused(tmp_path, tamper):
+    report = runner.initial_report(['mock-review-a', 'mock-review-b'], ['B01'], str(uuid.uuid4()))
+    path = tmp_path / 'artifacts' / report['run_id'] / 'report.json'
+    tampered = copy.deepcopy(report)
+    tamper(tampered)
+    life.persist(path, tampered)
+    prepare_run(tmp_path, report['run_id'], operation='model-smoke')
+    asyncio.run(runner.run_worker(tmp_path, report['run_id']))
+    data = life.finish(tmp_path, report['run_id'], providers=report['providers'], returncode=0, expected_report=report)
+    assert (data['status'], data['code']) == ('INCOMPLETE', 'EVALUATION_INVALID')
+
+
 def test_parent_refuses_worker_success_when_benchmark_evaluation_is_invalid(tmp_path):
     report = runner.initial_report(['mock-review-a'], ['B01'], str(uuid.uuid4()))
     path = tmp_path / 'artifacts' / report['run_id'] / 'report.json'
