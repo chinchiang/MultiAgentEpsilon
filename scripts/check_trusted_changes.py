@@ -61,6 +61,12 @@ def live_approval(number, head, base):
         output = subprocess.check_output(args, encoding="utf-8", timeout=30, stderr=subprocess.DEVNULL)
         return [json.loads(line) for line in output.splitlines() if line] if pages else json.loads(output)
     pr = api(f"pulls/{number}")
+    # 提交身分可自報，真正擋下審查者自我核准的是規則集的最後推送核准；規則被關掉時不得放行。 / Commit identities
+    # are self-asserted, so the ruleset's last-push approval is what stops self-approval; refuse when it is off.
+    rules = api("rules/branches/main?per_page=100", pages=True)
+    if not any(rule.get("type") == "pull_request" and isinstance(rule.get("parameters"), dict)
+               and rule["parameters"].get("require_last_push_approval") is True for rule in rules):
+        raise Denied("LAST_PUSH_APPROVAL")
     reviews = api(f"pulls/{number}/reviews?per_page=100", pages=True)
     candidates = {r["user"]["login"] for r in reviews
                   if r["state"] in ("APPROVED", "CHANGES_REQUESTED", "DISMISSED")}
