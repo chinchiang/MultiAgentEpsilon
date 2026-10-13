@@ -507,10 +507,11 @@ def test_seeded_defect_must_have_real_complete_negative_evidence(bundle, attack)
 
 
 @pytest.mark.parametrize("change", ["none", "head", "rerun", "new_run", "review_dismissed", "review_permission",
-                                    "foreign_base", "run_branch"])
+                                    "foreign_base", "run_branch", "review_repeated"])
 def test_publication_rechecks_mutable_state_before_green(bundle, monkeypatch, change):
     writes = []
     gets = 0
+    permission_lookups = []
     run = copy.deepcopy(bundle["run"])
     reviews = copy.deepcopy(bundle["reviews"])
     fresh = copy.deepcopy(bundle["pr"])
@@ -520,6 +521,8 @@ def test_publication_rechecks_mutable_state_before_green(bundle, monkeypatch, ch
     if change == "rerun": run["run_attempt"] = 2
     if change == "run_branch": run["head_branch"] = "other-feature"
     if change == "review_dismissed": reviews.append({**reviews[0], "id": 12, "state": "DISMISSED"})
+    # 同一審查者多次核准只查一次權限，才不會耗盡呼叫預算。 / Repeated approvals by one reviewer need one lookup, sparing the call budget.
+    if change == "review_repeated": reviews[:0] = [{**reviews[0], "id": i} for i in (8, 9, 10)]
     class Client:
         def api(self, path, method="GET", payload=None):
             nonlocal gets
@@ -534,7 +537,9 @@ def test_publication_rechecks_mutable_state_before_green(bundle, monkeypatch, ch
                 assert "head_sha=" + "b"*40 in path
                 listing = [run, {"id": 101, "head_sha": "b"*40, "head_branch": "feature", "head_repository": {"id": 10}}] if change == "new_run" else [run]
                 return {"total_count": len(listing), "workflow_runs": listing}
-            if "/permission" in path: return {"role_name": "read" if change == "review_permission" else "write"}
+            if "/permission" in path:
+                permission_lookups.append(path)
+                return {"role_name": "read" if change == "review_permission" else "write"}
             raise AssertionError("unexpected request")
         def pages(self, path):
             if "/timeline" in path: return []
@@ -549,8 +554,9 @@ def test_publication_rechecks_mutable_state_before_green(bundle, monkeypatch, ch
         "excluded_identities": []})
     report = publisher.publish(Client(), bundle["settings"], bundle["gate_policy"], 5, 100)
     assert len(writes) == 1 and writes[0]["status"] == "completed"
-    assert writes[-1]["conclusion"] == ("success" if change == "none" else "failure")
-    assert report["decision"] == ("ALLOW" if change == "none" else "BLOCK")
+    assert len(permission_lookups) == len(set(permission_lookups))
+    assert writes[-1]["conclusion"] == ("success" if change in ("none", "review_repeated") else "failure")
+    assert report["decision"] == ("ALLOW" if change in ("none", "review_repeated") else "BLOCK")
 
 
 @pytest.mark.parametrize("attack", ["writable_parent", "symlink_parent"])
