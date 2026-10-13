@@ -4,7 +4,7 @@
 
 # 系統架構與流程（Architecture Overview）
 
-正式 main `f9fa905` 已合併 [2026-10-10 稽核修正](audit-20261010.zh-TW.md)（PR #21 至 #24：AUTH 擴為 44 個案例、突變測試改為獨立 job，並新增靜態檢查），以及 PR #26 的封存中繼資料與回應標頭修正；[run 38209419557](https://github.com/chinchiang/MultiAgentEpsilon/actions/runs/38209419557) 完成 1195 項測試、9 個指定缺陷的正反例、突變測試與簽章驗收。LM Studio 文字介接器、分批比較與雙語文件已合併，地端真實模型尚未驗收。系統為 Python 3.12 資安測試試點，由命令列、GitHub Actions、隔離容器與模型介接器組成；多模型採獨立盲審、循序呼叫與本機評分。
+正式 main `e7d0c87` 已合併 [2026-10-10 稽核修正](audit-20261010.zh-TW.md)（PR #21 至 #24：AUTH 擴為 44 個案例、突變測試改為獨立 job，並新增靜態檢查），PR #26 的封存中繼資料與回應標頭修正，以及 PR #27 至 #36（模型介接器與輸出預算、Bedrock 推理區塊、盲審綁定 supervisor 計畫摘要、發布程式在呼叫預算耗盡時改發 failure，以及 guard 須確認規則集仍要求最後推送核准）；[run 38350438520](https://github.com/chinchiang/MultiAgentEpsilon/actions/runs/38350438520) 完成 1278 項測試、9 個指定缺陷的正反例、突變測試與簽章驗收。LM Studio 文字介接器、分批比較與雙語文件已合併，地端真實模型尚未驗收。系統為 Python 3.12 資安測試試點，由命令列、GitHub Actions、隔離容器與模型介接器組成；多模型採獨立盲審、循序呼叫與本機評分。
 
 圖中的實線表示已實作的執行或資料關係；虛線表示暫停、復原或尚待部署的路徑，依節點標示判讀。圖表使用 Mermaid 原始檔，另提供可直接開啟與分享的 SVG。
 
@@ -316,7 +316,7 @@ main 已包含評估、簽章與獨立突變測試共同成功的最終必要關
 
 # Architecture Overview and repository structure
 
-Reviewed main `f9fa905` includes the [October 10 audit](audit-20261010.zh-TW.md#en) (PRs #21 through #24: 44 AUTH cases, a separate mutation job and static checks) and the PR #26 archive-metadata and response-header fixes. [run 38209419557](https://github.com/chinchiang/MultiAgentEpsilon/actions/runs/38209419557) passed 1195 tests, exactly nine seeded failures, mutation tests, cleanup and signatures. LM Studio text integration, cross-batch comparison and bilingual documentation are merged; real local-model acceptance is pending. The Python 3.12 pilot uses CLIs, Actions, isolated containers, and adapters. Models review independently, execute sequentially, and are scored locally.
+Reviewed main `e7d0c87` includes the [October 10 audit](audit-20261010.zh-TW.md#en) (PRs #21 through #24: 44 AUTH cases, a separate mutation job and static checks) the PR #26 archive-metadata and response-header fixes, and PRs #27–#36 (model adapters and output budgets, Bedrock reasoning blocks, blind reviews bound to the supervisor's plan digest, the publisher posting failure when its call budget runs out, and the guard requiring the ruleset to still demand last-push approval). [run 38350438520](https://github.com/chinchiang/MultiAgentEpsilon/actions/runs/38350438520) passed 1278 tests, exactly nine seeded failures, mutation tests, cleanup and signatures. LM Studio text integration, cross-batch comparison and bilingual documentation are merged; real local-model acceptance is pending. The Python 3.12 pilot uses CLIs, Actions, isolated containers, and adapters. Models review independently, execute sequentially, and are scored locally.
 
 Solid arrows represent implemented execution/data paths; dashed arrows indicate paused, recovery, or undeployed paths as labeled. Editable Mermaid and standalone SVG are bilingual.
 
