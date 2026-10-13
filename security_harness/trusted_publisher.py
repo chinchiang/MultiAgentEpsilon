@@ -689,8 +689,10 @@ Publish one completed check only when the verified outcome changes.
         validate_run_base(run, fresh, twins, settings["base_branch"], run_base_history(client, prefix, fresh, twins))
         reject_newer_runs(run, head_runs(client, settings, head), head)
         reviews = client.pages(f"{prefix}/pulls/{number}/reviews")
-        permissions = {r["user"]["login"]: client.api(f"{prefix}/collaborators/{urllib.parse.quote(r['user']['login'], safe='')}/permission")["role_name"]
-                       for r in reviews if r["state"] in ("APPROVED", "DISMISSED", "CHANGES_REQUESTED")}
+        # 每個帳號只查一次，重複審查不會耗盡呼叫預算。 / One lookup per login, so repeated reviews cannot exhaust the call budget.
+        logins = {r["user"]["login"] for r in reviews if r["state"] in ("APPROVED", "DISMISSED", "CHANGES_REQUESTED")}
+        permissions = {login: client.api(f"{prefix}/collaborators/{urllib.parse.quote(login, safe='')}/permission")["role_name"]
+                       for login in logins}
         excluded = identities(run.get("actor"), run.get("triggering_actor")) | set(proof["excluded_identities"])
         need(validate_review(fresh, reviews, permissions, settings, excluded) == proof["review_ids"], "REVIEW_CHANGED")
         conclusion, code = "success", "VERIFIED"
