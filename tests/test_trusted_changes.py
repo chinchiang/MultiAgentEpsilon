@@ -8,6 +8,10 @@ from pathlib import Path
 
 # 目前 main 規則集套用的最後推送核准規則。 / The last-push approval rule the main ruleset currently applies.
 PULL_REQUEST_RULE = {"type": "pull_request", "ruleset_id": 1, "parameters": {"require_last_push_approval": True}}
+PULL = {"state": "open", "head": {"sha": "h" * 40, "ref": "feature"}, "base": {"sha": "b" * 40},
+        "user": {"login": "someone-else"}}
+# GitHub 伺服器記錄的推送；commit 日期可自報，不能代表推送時間。 / A server-recorded push; commit dates are self-asserted.
+HEAD_PUSH = {"activity_type": "push", "before": "e" * 40, "after": "h" * 40, "timestamp": "2026-10-13T07:00:09Z"}
 
 
 @pytest.fixture(autouse=True)
@@ -60,11 +64,12 @@ def test_live_approval_resolves_reviewer_permission_through_github(monkeypatch, 
     import scripts.check_trusted_changes as guard
     reviewer = json.loads((Path(__file__).resolve().parents[1] / "security/trust-policy.json").read_text())["baseline_reviewers"][-1]
     responses = {
-        "pulls/7": {"state": "open", "head": {"sha": "h" * 40}, "base": {"sha": "b" * 40}, "user": {"login": "someone-else"}},
+        "pulls/7": PULL,
         f"collaborators/{reviewer}/permission": {"role_name": role},
         "commits/" + "h" * 40: {"author": {"login": "someone-else"}, "committer": {"login": "web-flow"}},
     }
-    review = {"id": 3, "state": "APPROVED", "commit_id": "h" * 40, "user": {"login": reviewer}}
+    review = {"id": 3, "state": "APPROVED", "commit_id": "h" * 40, "user": {"login": reviewer},
+              "submitted_at": "2026-10-13T07:02:12Z"}
     commits = [{"sha": "h" * 40, "author": {"login": "someone-else"}, "committer": {"login": "web-flow"}}]
     requested = []
     def fake(args, **kwargs):
@@ -77,6 +82,8 @@ def test_live_approval_resolves_reviewer_permission_through_github(monkeypatch, 
             return "".join(json.dumps(c) + "\n" for c in commits)
         if path.startswith("rules/branches/main"):
             return json.dumps(PULL_REQUEST_RULE) + "\n"
+        if path.startswith("activity?"):
+            return json.dumps(HEAD_PUSH) + "\n"
         return json.dumps(responses[path])
     monkeypatch.setattr(guard.subprocess, "check_output", fake)
     result = guard.live_approval(7, "h" * 40, "b" * 40)
@@ -143,15 +150,15 @@ def test_git_rename_checks_both_sides(tmp_path, old, new, blocked):
     assert data["protected_changes"] == protected_changes(sorted([old, new]))
 
 
-def guard_with_commits(monkeypatch, commits, rules=None):
+def guard_with_commits(monkeypatch, commits, rules=None, submitted="2026-10-13T07:02:12Z", activity=None):
     import scripts.check_trusted_changes as guard
     reviewer = json.loads((Path(__file__).resolve().parents[1] / "security/trust-policy.json").read_text())["baseline_reviewers"][-1]
     responses = {
-        "pulls/7": {"state": "open", "head": {"sha": "h" * 40}, "base": {"sha": "b" * 40}, "user": {"login": "someone-else"}},
+        "pulls/7": PULL,
         f"collaborators/{reviewer}/permission": {"role_name": "write"},
         "commits/" + "h" * 40: {"author": {"login": "someone-else"}, "committer": {"login": "web-flow"}},
     }
-    review = {"id": 3, "state": "APPROVED", "commit_id": "h" * 40, "user": {"login": reviewer}}
+    review = {"id": 3, "state": "APPROVED", "commit_id": "h" * 40, "user": {"login": reviewer}, "submitted_at": submitted}
     def fake(args, **kwargs):
         path = args[2].split("/", 3)[3]
         if path.startswith("pulls/7/reviews"):
@@ -160,6 +167,9 @@ def guard_with_commits(monkeypatch, commits, rules=None):
             return "".join(json.dumps(c) + "\n" for c in commits(reviewer))
         if path.startswith("rules/branches/main"):
             return "".join(json.dumps(r) + "\n" for r in (rules if rules is not None else [PULL_REQUEST_RULE]))
+        if path.startswith("activity?"):
+            assert path.startswith("activity?ref=refs/heads/feature&")
+            return "".join(json.dumps(a) + "\n" for a in (activity if activity is not None else [HEAD_PUSH]))
         return json.dumps(responses[path])
     monkeypatch.setattr(guard.subprocess, "check_output", fake)
     return lambda: guard.live_approval(7, "h" * 40, "b" * 40)
@@ -178,6 +188,24 @@ def test_valid_approval_is_refused_when_last_push_approval_is_not_enforced(monke
     approve = guard_with_commits(monkeypatch, lambda reviewer: [
         {"sha": "h" * 40, "author": {"login": "someone-else"}, "committer": {"login": "web-flow"}}], rules=rules)
     with pytest.raises(Denied, match="^LAST_PUSH_APPROVAL$"):
+        approve()
+
+
+def test_approval_submitted_before_the_head_was_pushed_does_not_count(monkeypatch):
+    # 只合併 base 的 update-branch 不會讓核准失效，GitHub 還把 commit_id 改指新 head。 / A base-only update-branch keeps
+    # the approval and GitHub re-points its commit_id to the new head.
+    approve = guard_with_commits(monkeypatch, lambda reviewer: [
+        {"sha": "h" * 40, "author": {"login": "someone-else"}, "committer": {"login": "web-flow"}}],
+        submitted="2026-10-13T06:44:15Z")
+    assert approve() is None
+
+
+@pytest.mark.parametrize("activity", [[], [{**HEAD_PUSH, "after": "e" * 40}]], ids=["no-activity", "other-head"])
+def test_unknown_push_time_of_the_head_fails_closed(monkeypatch, activity):
+    from security_harness.trusted_publisher import Denied
+    approve = guard_with_commits(monkeypatch, lambda reviewer: [
+        {"sha": "h" * 40, "author": {"login": "someone-else"}, "committer": {"login": "web-flow"}}], activity=activity)
+    with pytest.raises(Denied, match="^LAST_PUSH_UNKNOWN$"):
         approve()
 
 
