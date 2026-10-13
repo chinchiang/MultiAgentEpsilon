@@ -2,6 +2,7 @@
 
 Model supervisor and recovery using the shared run inventory, without Docker."""
 import fcntl
+import hashlib
 import json
 import math
 import os
@@ -22,6 +23,19 @@ from .transport import strict_json
 SOURCE_ROOT = Path(__file__).resolve().parents[2]
 # 最多 16 筆審查乘以 16 KiB 原文，另加中繼資料。 / 16 reviews x 16 KiB bound raw responses, plus metadata.
 REPORT_LIMIT = 1024 * 1024
+BLIND_REVIEW_IMMUTABLE = ('plan', 'providers', 'selected_providers', 'case_ids', 'rounds', 'limits',
+                          'total_timeout_seconds', 'output_tokens_per_review', 'implementation_sha256',
+                          'case_catalog_sha256', 'oracle_sha256', 'model_roe_sha256')
+
+
+def plan_digest(report):
+    """盲審不可變計畫、預算、身分與逐筆請求摘要的雜湊；supervisor 經命令列交給 worker，不經磁碟。
+
+Digest of a blind review's immutable plan, budget, identities and per-request digests. The
+    supervisor hands it to the worker on the command line, never through the report on disk."""
+    fixed = {key: report.get(key) for key in BLIND_REVIEW_IMMUTABLE}
+    fixed['request_sha256'] = [check.get('request_sha256') for check in report.get('checks', [])]
+    return hashlib.sha256(json.dumps(fixed, sort_keys=True, separators=(',', ':')).encode()).hexdigest()
 
 
 def persist(path, data):
@@ -167,6 +181,10 @@ def finish(root, run_id, *, providers=(), returncode=None, reason=None, recovere
         try:
             from .benchmark_score import summarize
             data['analysis'] = summarize(data, (expected_report or {}).get('plan'))
+            # 盲審 worker 也綁定 supervisor 交付的不可變計畫、預算與請求摘要。 / Blind-review workers are bound to
+            # the supervisor's immutable plan, budget and request digests too.
+            if expected_report is not None and plan_digest(data) != plan_digest(expected_report):
+                raise ValueError('blind review differs from the supervisor plan')
         except Exception:
             completed = False
             data.update(analysis=None, code='EVALUATION_INVALID')

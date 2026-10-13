@@ -10,7 +10,7 @@ from datetime import datetime, timezone
 from .benchmark import (CASES_PATH, ORACLE_PATH, OUTPUT_BUDGETS, OUTPUT_TOKENS, MockReviewer, load_cases,
                         make_plan, review_request, request_digest, parse_review)
 from .gateway import Gateway, Limits, ModelError, digest
-from .lifecycle import persist, read_report
+from .lifecycle import persist, plan_digest as current_plan_digest, read_report
 from .transport import JsonHTTP
 from ..lifecycle import run_directory
 
@@ -42,11 +42,15 @@ def initial_report(providers, case_ids, run_id, output_tokens=OUTPUT_TOKENS, rou
             'cleanup': {'completed': False}, 'analysis': None}
 
 
-async def run_worker(root, run_id):
+async def run_worker(root, run_id, plan_digest=None):
     from . import config
     report = read_report(root, run_id)
     cases = load_cases()
     path = root / 'artifacts' / run_id / 'report.json'
+    # 磁碟上的報告與 supervisor 的計畫不同時，一次呼叫都不發。 / Make no call at all when the report on disk
+    # differs from the supervisor's plan.
+    if plan_digest is not None and current_plan_digest(report) != plan_digest:
+        return 2
     gateway = Gateway(Limits(**report['limits']))
     report['calls'] = gateway.evidence
     task, loop = asyncio.current_task(), asyncio.get_running_loop()

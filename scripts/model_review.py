@@ -13,7 +13,7 @@ if __name__ == "__main__":
     sys.path.insert(0, str(ROOT))
 from security_harness.llm.benchmark import OUTPUT_BUDGETS, PROVIDERS, SUITES, load_cases
 from security_harness.llm.benchmark_runner import initial_report
-from security_harness.llm.lifecycle import persist, supervise
+from security_harness.llm.lifecycle import persist, plan_digest, supervise
 from scripts.model_smoke import require_model_roe
 
 
@@ -62,7 +62,8 @@ def main():
     path = ROOT / 'artifacts' / report['run_id'] / 'report.json'
     persist(path, report)
     data = supervise(ROOT, report, [sys.executable, '-I', str(ROOT / 'scripts/model_worker.py'),
-                                  str(ROOT), report['run_id'], 'blind-review'], report['total_timeout_seconds'])
+                                  str(ROOT), report['run_id'], 'blind-review', plan_digest(report)],
+                     report['total_timeout_seconds'])
     print(json.dumps({'status': data['status'], 'advisory_only': True, 'evidence': str(path),
                       'bias_reduction': 'NOT_ESTABLISHED'}))
     return 0 if data['status'] == 'COMPLETE' else 1
