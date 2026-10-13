@@ -15,6 +15,7 @@ from urllib.parse import urlsplit
 from .adapters import BedrockAdapter, DeepSeekAdapter, GeminiAdapter, GLMAdapter
 from .gateway import MockAdapter, ModelError
 from .lmstudio import LMStudioAdapter
+from ..scope import validate_model_roe
 from .transport import AwsCLI
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -45,7 +46,12 @@ Unset values and the documented .env.example placeholders are configuration
 def remote_hosts(provider):
     """已審查 RoE 中允許該供應商連線的遠端主機。 / Remote hosts the reviewed RoE authorizes for this provider."""
     roe = json.loads((ROOT / "security/model-roe.json").read_text())
-    return set(roe["allowed_remote_hosts"].get(provider, []))
+    # supervisor 驗證後檔案仍可能被換掉，重新讀取時同樣驗證。 / The file can change after the supervisor validated it; validate the reread too.
+    try:
+        validate_model_roe(roe, [provider])
+    except ValueError:
+        raise ModelError("CONFIGURATION") from None
+    return set(roe["allowed_remote_hosts"][provider])
 
 
 def authorize_destination(provider, url):

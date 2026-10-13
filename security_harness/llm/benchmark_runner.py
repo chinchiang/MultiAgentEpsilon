@@ -74,8 +74,10 @@ async def run_worker(root, run_id, plan_digest=None):
 
     try:
         from .benchmark_score import file_digest
-        if file_digest(CASES_PATH) != report['case_catalog_sha256']:
-            # 呼叫前須核對計畫綁定的目錄；不可先花費再偵測。 / Calls must review the catalog the plan was bound to; never spend first, detect later.
+        if (file_digest(CASES_PATH) != report['case_catalog_sha256']
+                or file_digest(config.ROOT / 'security/model-roe.json') != report['model_roe_sha256']):
+            # 呼叫前須核對計畫綁定的目錄與 RoE；不可先花費再偵測。 / Calls must use the catalog and RoE the plan was
+            # bound to; never spend first, detect later.
             report['code'] = 'CONFIGURATION'
             for check in report['checks']:
                 check.update(status='ERROR', code='CONFIGURATION')
