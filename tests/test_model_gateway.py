@@ -257,6 +257,61 @@ def test_glm_content_is_not_split_on_reasoning_markers():
     assert result.text == "a</think>b"
 
 
+REASONING = {"reasoningContent": {"reasoningText": {"text": "synthetic reasoning", "signature": "c2ln"}}}
+REDACTED = {"reasoningContent": {"redactedContent": "cmVkYWN0ZWQ="}}
+
+
+def bedrock_reply(content):
+    value = json.loads(json.dumps(BEDROCK))
+    value["output"]["message"]["content"] = content
+
+    class CLI:
+        async def converse(self, region, payload):
+            return value
+    return BedrockAdapter("global.anthropic.claude-synthetic-v1", "ap-southeast-1", CLI())
+
+
+@pytest.mark.parametrize("content", [
+    [REASONING, {"text": "ok"}], [REDACTED, {"text": "ok"}], [REASONING, REDACTED, {"text": "o"}, {"text": "k"}],
+    [{"reasoningContent": {"reasoningText": {"text": "synthetic reasoning"}}}, {"text": "ok"}],
+])
+def test_bedrock_discards_leading_reasoning_blocks_and_keeps_the_text(content):
+    result, evidence = invoke(bedrock_reply(content))
+    assert result.text == "ok" and evidence["status"] == "SUCCESS"
+    # 推理文字不進入證據，回應摘要只涵蓋答案。 / Reasoning never reaches evidence; the response digest covers only the answer.
+    assert "synthetic reasoning" not in json.dumps(evidence) and "c2ln" not in json.dumps(evidence)
+    assert evidence["response_sha256"] == hashlib.sha256(b"ok").hexdigest()
+
+
+@pytest.mark.parametrize("content,detail", [
+    ([{"text": "ok"}, REASONING], "UNEXPECTED_CONTENT"),
+    ([{"reasoningContent": {"reasoningText": {"text": "r"}, "redactedContent": "eA=="}}, {"text": "ok"}], "UNEXPECTED_CONTENT"),
+    ([{"reasoningContent": {"reasoningText": {"text": "r", "extra": "x"}}}, {"text": "ok"}], "UNEXPECTED_CONTENT"),
+    ([{"reasoningContent": {"reasoningText": {"signature": "c2ln"}}}, {"text": "ok"}], "UNEXPECTED_CONTENT"),
+    ([{"reasoningContent": {"reasoningText": {"text": "r", "signature": 1}}}, {"text": "ok"}], "UNEXPECTED_CONTENT"),
+    ([{"reasoningContent": {"reasoningText": "r"}}, {"text": "ok"}], "UNEXPECTED_CONTENT"),
+    ([{"reasoningContent": {"redactedContent": 1}}, {"text": "ok"}], "UNEXPECTED_CONTENT"),
+    ([{"reasoningContent": {"unknownReasoning": "r"}}, {"text": "ok"}], "UNEXPECTED_CONTENT"),
+    ([{"reasoningContent": "r"}, {"text": "ok"}], "UNEXPECTED_CONTENT"),
+    ([{"reasoningContent": {"reasoningText": {"text": "r"}}, "text": "ok"}], "UNEXPECTED_CONTENT"),
+    ([REASONING], "EMPTY_TEXT"), ([REASONING, REDACTED], "EMPTY_TEXT"), ([], "ENVELOPE_SCHEMA"),
+])
+def test_bedrock_rejects_misplaced_or_malformed_reasoning(content, detail):
+    result, evidence = invoke(bedrock_reply(content))
+    assert result is None
+    assert (evidence["code"], evidence["diagnostic"]) == ("INVALID_RESPONSE", detail)
+
+
+def test_reasoning_blocks_are_accepted_only_from_bedrock():
+    # Gemini 的推理以 thought 旗標表示；Bedrock 形式的推理區塊仍屬未知內容。 / Gemini marks reasoning with thought flags;
+    # a Bedrock-style reasoning block stays unknown content there.
+    value = json.loads(json.dumps(GEMINI))
+    value["candidates"][0]["content"]["parts"] = [REASONING, {"text": "ok"}]
+    http, _, _ = http_fixture(value)
+    result, evidence = invoke(GeminiAdapter("gemini-synthetic", "synthetic-key", http))
+    assert result is None and (evidence["code"], evidence["diagnostic"]) == ("INVALID_RESPONSE", "UNEXPECTED_CONTENT")
+
+
 @pytest.mark.parametrize("url", ["http://local.example.invalid/v1/chat/completions",
     "https://user:pass@local.example.invalid/v1/chat/completions",
     "https://local.example.invalid/v1/chat/completions?token=x",

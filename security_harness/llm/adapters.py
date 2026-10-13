@@ -202,6 +202,33 @@ def chat_reply(value):
     return Reply(message["content"], *usage(value.get("usage"), "prompt_tokens", "completion_tokens"),
                  reported_model(value.get("model")))
 
+def without_reasoning(parts):
+    """Bedrock 的推理區塊須位於所有文字之前且格式正確；直接丟棄、不保存，其餘內容交給 text_parts 嚴格檢查。
+
+Bedrock reasoning blocks must come before every text block and be well formed. They are
+    discarded and never stored; everything else goes through text_parts' strict checks."""
+    if not isinstance(parts, list) or not parts:
+        raise ModelError("INVALID_RESPONSE", "ENVELOPE_SCHEMA")
+    kept = []
+    for part in parts:
+        if not (isinstance(part, dict) and set(part) == {"reasoningContent"}):
+            kept.append(part)
+            continue
+        reasoning = part["reasoningContent"]
+        if kept or not isinstance(reasoning, dict) or len(reasoning) != 1:
+            raise ModelError("INVALID_RESPONSE", "UNEXPECTED_CONTENT")
+        if "reasoningText" in reasoning:
+            detail = reasoning["reasoningText"]
+            if (not isinstance(detail, dict) or "text" not in detail or set(detail) - {"text", "signature"}
+                    or any(type(v) is not str for v in detail.values())):
+                raise ModelError("INVALID_RESPONSE", "UNEXPECTED_CONTENT")
+        elif type(reasoning.get("redactedContent")) is not str:
+            raise ModelError("INVALID_RESPONSE", "UNEXPECTED_CONTENT")
+    if not kept:
+        raise ModelError("INVALID_RESPONSE", "EMPTY_TEXT")
+    return kept
+
+
 class BedrockAdapter:
     provider = "bedrock"
 
@@ -238,5 +265,5 @@ class BedrockAdapter:
             raise ModelError("INVALID_RESPONSE", "ENVELOPE_SCHEMA")
         if 'content' not in message:
             raise ModelError('INVALID_RESPONSE', 'MISSING_FIELD')
-        text = text_parts(message['content'])
+        text = text_parts(without_reasoning(message['content']))
         return Reply(text, *usage(value.get("usage"), "inputTokens", "outputTokens"))
