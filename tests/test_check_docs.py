@@ -81,6 +81,24 @@ def test_english_half_may_quote_terms_without_failing(tmp_path):
     assert errors(root) == []
 
 
+def test_cli_reads_every_document_as_utf8_regardless_of_the_locale(tmp_path):
+    # 未指定編碼時依 locale 解碼（如 Windows cp950），中文文件會讀錯。 / Without an explicit encoding the locale
+    # decides (e.g. cp950 on Windows) and Chinese documents are misread.
+    import sys
+    from pathlib import Path
+    svg = '<svg xmlns="http://www.w3.org/2000/svg"><text>新標籤</text><text>New label</text></svg>'
+    root = repo(tmp_path, base_files(**{
+        "README.md": BILINGUAL + "[指南](docs/guide.md#en)\n", "docs/guide.md": BILINGUAL,
+        "docs/d.mmd": 'flowchart TB\n    A["新標籤<br/>New label"]\n', "docs/d.svg": svg,
+        "module.py": '"""中文說明。\n\nEnglish description."""\n'}))
+    script = Path(__file__).resolve().parents[1] / "scripts/check_docs.py"
+    process = subprocess.run([sys.executable, "-I", "-X", "utf8=0", "-X", "warn_default_encoding",
+                              "-W", "error::EncodingWarning", str(script), "--root", str(root)],
+                             capture_output=True, text=True, encoding="utf-8", timeout=60)
+    assert process.returncode == 0, process.stderr[-500:]
+    assert "Documentation checks passed" in process.stdout
+
+
 def test_stale_svg_labels_are_reported(tmp_path):
     svg = '<svg xmlns="http://www.w3.org/2000/svg"><text>舊標籤</text><text>Old label</text></svg>'
     root = repo(tmp_path, base_files(**{"docs/d.mmd": 'flowchart TB\n    A["新標籤<br/>New label"]\n',
