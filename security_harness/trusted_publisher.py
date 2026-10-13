@@ -319,6 +319,7 @@ class GitHub:
     def __init__(self, token):
         self.token = token
         self.calls = 0
+        self.publish_reserved_used = False
         self.deadline = time.monotonic() + API_SECONDS
         self.opener = urllib.request.build_opener(NoRedirect())
 
@@ -326,8 +327,15 @@ class GitHub:
         parsed = urllib.parse.urlsplit(url)
         need(parsed.scheme == "https" and not parsed.username and not parsed.password and parsed.port in (None, 443), "API_URL")
         need(not authenticated or parsed.netloc == "api.github.com", "AUTH_DESTINATION")
-        self.calls += 1
-        need(self.calls <= API_CALL_BUDGET and time.monotonic() < self.deadline, "API_BUDGET")
+        # 驗證預算用完後仍保留一次發布結果的呼叫，才能以 failure 取代舊綠燈。 / One result-publishing call stays
+        # reserved after verification spends the budget, so a failure can still replace an earlier green.
+        reserved = (method == "POST" and not self.publish_reserved_used
+                    and re.fullmatch(r"https://api\.github\.com/repos/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+/check-runs", url))
+        if reserved:
+            self.publish_reserved_used = True
+        else:
+            self.calls += 1
+            need(self.calls <= API_CALL_BUDGET and time.monotonic() < self.deadline, "API_BUDGET")
         headers = {"Accept": "application/vnd.github+json", "X-GitHub-Api-Version": "2022-11-28"}
         if authenticated:
             headers["Authorization"] = "Bearer " + self.token
@@ -336,7 +344,8 @@ class GitHub:
         req = urllib.request.Request(url, headers=headers, method=method,
                                      data=None if payload is None else json.dumps(payload).encode())
         try:
-            with self.opener.open(req, timeout=min(20, max(1, self.deadline-time.monotonic()))) as response:
+            timeout = 20 if reserved else min(20, max(1, self.deadline-time.monotonic()))
+            with self.opener.open(req, timeout=timeout) as response:
                 data = response.read(limit + 1)
                 need(len(data) <= limit, "API_RESPONSE_LIMIT")
                 return data
@@ -639,7 +648,10 @@ def discover_run(client, settings, pr):
     return max(r["id"] for r in runs)
 
 
-THROTTLED = ("GITHUB_RATE_LIMIT", "API_BUDGET")
+# 只有 GitHub 限流時無法發布而需退避；自身呼叫預算用完是驗證失敗，必須取代舊綠燈。 / Only GitHub throttling
+# blocks publishing and needs back-off; exhausting our own call budget is a verification failure that must
+# replace an earlier green.
+THROTTLED = ("GITHUB_RATE_LIMIT",)
 
 
 def publish(client, settings, gate_policy, number, run_id=None, state=None):
