@@ -39,8 +39,14 @@ def run(id_, event="pull_request_target", path=".github/workflows/security.yml",
             "status": "completed", "conclusion": "success"}
 
 
-def listing(*extra):
-    return lambda path: [] if "/timeline?" in path else [pull(), *extra]
+def listing(*extra, statuses=()):
+    def pages(path):
+        if "/timeline?" in path:
+            return []
+        if path == f"repos/owner/repo/commits/{HEAD}/statuses":
+            return list(statuses)
+        return [pull(), *extra]
+    return pages
 
 
 def test_trusted_pull_request_target_source_allows():
@@ -85,6 +91,21 @@ def test_forged_or_manual_sources_block(attack, code):
         runs[11] = [run(101, event="push")]
     with pytest.raises(checker.Denied, match=code):
         checker.verify(fake_api(checks, runs), "owner/repo", 5, listing())
+
+
+def test_queued_rerun_check_is_newer_than_an_earlier_success():
+    # 重跑排隊時尚無 started_at；較舊的成功不能代表最新結果。 / A queued rerun has no started_at yet; an older success is not the latest.
+    queued = check(2, 11, conclusion=None, started=None)
+    queued["status"] = "queued"
+    with pytest.raises(checker.Denied, match="LATEST_CHECK_NOT_SUCCESS"):
+        checker.verify(fake_api([check(1, 10), queued], {10: [run(100)], 11: [run(101)]}), "owner/repo", 5, listing())
+
+
+def test_same_named_commit_status_on_the_head_blocks():
+    # Actions 權杖可送出同名 status，規則集可能把它當成必要檢查。 / An Actions token can post a same-named status the ruleset may count.
+    forged = {"id": 7, "context": "trusted-security-pilot", "state": "success"}
+    with pytest.raises(checker.Denied, match="FOREIGN_STATUS_SOURCE"):
+        checker.verify(fake_api([check(1, 10)], {10: [run(100)]}), "owner/repo", 5, listing(statuses=[forged]))
 
 
 def test_closed_pr_is_not_verified():

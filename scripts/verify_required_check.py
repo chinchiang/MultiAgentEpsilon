@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""審查者使用的必要 Actions 檢查來源核對工具，暫行且唯讀。專用 App 尚未發布前，其他工作流程也能用共用 App 產生同名 trusted-security-pilot；核准或合併前須從 GitHub 中繼資料確認 head 上每個同名檢查皆來自正確 head 的可信 pull_request_target。任何外來或手動 run 都阻擋。該事件使用 PR base 分支 YAML，而 run 未記錄 base，故另綁定 head 分支，拒絕同 SHA／儲存庫／分支的任何狀態 PR 指向其他 base 或曾改 base。這只是暫行中繼資料查核，專用發布器另需密碼學簽章。
+"""審查者使用的必要 Actions 檢查來源核對工具，暫行且唯讀。專用 App 尚未發布前，其他工作流程也能用共用 App 產生同名 trusted-security-pilot；核准或合併前須從 GitHub 中繼資料確認 head 上每個同名檢查皆來自正確 head 的可信 pull_request_target。任何外來或手動 run，或 head 上的同名 commit status 都阻擋；最新檢查依建立順序判定。該事件使用 PR base 分支 YAML，而 run 未記錄 base，故另綁定 head 分支，拒絕同 SHA／儲存庫／分支的任何狀態 PR 指向其他 base 或曾改 base。這只是暫行中繼資料查核，專用發布器另需密碼學簽章。
 
 Reviewer-side source check for the required Actions check (interim, read-only).
 
@@ -7,7 +7,8 @@ Until the dedicated App publishes epsilon/trusted-merge, any workflow can report
 check named trusted-security-pilot from the shared GitHub Actions app. Before
 approving or merging, confirm through GitHub's own run metadata that every such
 check on the PR head came from a pull_request_target run of the trusted workflow
-for exactly that head. One foreign or manual run on the head blocks.
+for exactly that head. One foreign or manual run, or a same-named commit status, on
+the head blocks; the latest check is the newest by creation order.
 
 Such a run executes the workflow file from the PR's base branch, which run metadata
 does not record; each run is therefore also bound to this PR's head branch, and any
@@ -46,6 +47,9 @@ def verify(api, repo, number, pages):
     need(listing["total_count"] == len(listing["check_runs"]), "CHECK_RUNS_TRUNCATED")
     checks = [c for c in listing["check_runs"] if c["name"] == REQUIRED_CHECK]
     need(checks, "REQUIRED_CHECK_MISSING")
+    # Actions 權杖送出的同名 commit status 也可能滿足規則集。 / A same-named commit status from an Actions token can satisfy the ruleset too.
+    statuses = pages(f"repos/{repo}/commits/{head}/statuses")
+    need(all(s["context"] != REQUIRED_CHECK for s in statuses), "FOREIGN_STATUS_SOURCE")
     sources = []
     pull_requests = pages(related_pull_path(f"repos/{repo}", pr) + "&per_page=100")
     histories = {p["number"]: pages(f"repos/{repo}/issues/{p['number']}/timeline?per_page=100")
@@ -65,7 +69,8 @@ def verify(api, repo, number, pages):
             raise Denied(str(exc)) from None
         sources.append({"check_run_id": check["id"], "run_id": run["id"], "run_attempt": run["run_attempt"],
                         "status": check["status"], "conclusion": check["conclusion"]})
-    latest = max(checks, key=lambda c: (c.get("started_at") or "", c["id"]))
+    # 排隊中的重跑尚無 started_at；依建立順序（ID）取最新。 / A queued rerun has no started_at yet; take the newest by creation order (ID).
+    latest = max(checks, key=lambda c: c["id"])
     need(latest["status"] == "completed" and latest["conclusion"] == "success", "LATEST_CHECK_NOT_SUCCESS")
     latest_source = next(s for s in sources if s['check_run_id'] == latest['id'])
     complete = api(f"repos/{repo}/actions/runs/{latest_source['run_id']}")
