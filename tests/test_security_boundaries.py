@@ -394,6 +394,7 @@ def test_full_guard_fetches_and_excludes_the_rerun_actor(bundle, monkeypatch):
     reviewer = 'CatGrocery'
     bundle['reviews'][0]['user']['login'] = reviewer
     bundle['run']['triggering_actor']['login'] = reviewer
+    bundle['reviews'][0]['submitted_at'] = '2026-10-13T07:02:12Z'
     monkeypatch.setenv('GITHUB_RUN_ID', '100')
     paths = []
     def api(args, **kwargs):
@@ -407,6 +408,8 @@ def test_full_guard_fetches_and_excludes_the_rerun_actor(bundle, monkeypatch):
         elif path == 'actions/runs/100': value = bundle['run']
         elif path.startswith('pulls?state=all&head='): value = [bundle['pr']]
         elif '/timeline?' in path: value = []
+        elif path.startswith('activity?ref=refs/heads/feature&'):
+            value = [{'activity_type': 'push', 'after': 'b'*40, 'timestamp': '2026-10-13T07:00:09Z'}]
         elif path.startswith('rules/branches/main'):
             value = [{'type': 'pull_request', 'ruleset_id': 1, 'parameters': {'require_last_push_approval': True}}]
         else: pytest.fail('unexpected API ' + path)

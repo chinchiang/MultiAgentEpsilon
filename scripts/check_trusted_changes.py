@@ -12,6 +12,7 @@ import os
 import re
 import subprocess
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -43,6 +44,10 @@ An approval counts only from a listed, write-capable reviewer who is not the
     return {"review_id": review["id"], "reviewer": review["user"]["login"], "commit_id": head}
 
 
+def parse_time(value):
+    return datetime.strptime(value, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
+
+
 def live_approval(number, head, base):
     policy = json.loads((ROOT / "security/trust-policy.json").read_text())
     # 此 guard 只實作獨立審查；政策若要求其他模式必須拒絕。 / This guard only implements independent review;
@@ -68,6 +73,18 @@ def live_approval(number, head, base):
                and rule["parameters"].get("require_last_push_approval") is True for rule in rules):
         raise Denied("LAST_PUSH_APPROVAL")
     reviews = api(f"pulls/{number}/reviews?per_page=100", pages=True)
+    # 只合併 base 的推送不會讓核准失效，GitHub 還會把 commit_id 改指新 head；改以伺服器記錄的推送時間判定。
+    # / A base-only push keeps approvals and GitHub re-points their commit_id; judge by the server-recorded push time.
+    ref = pr["head"]["ref"]
+    if not re.fullmatch(r"[A-Za-z0-9._/-]+", ref):
+        raise Denied("HEAD_REF")
+    pushes = [parse_time(a["timestamp"]) for a in api(f"activity?ref=refs/heads/{ref}&per_page=100", pages=True)
+              if a.get("after") == head]
+    if not pushes:
+        raise Denied("LAST_PUSH_UNKNOWN")
+    pushed = max(pushes)
+    reviews = [{**r, "state": "DISMISSED"} if r["state"] == "APPROVED" and parse_time(r["submitted_at"]) <= pushed
+               else r for r in reviews]
     candidates = {r["user"]["login"] for r in reviews
                   if r["state"] in ("APPROVED", "CHANGES_REQUESTED", "DISMISSED")}
     permissions = {}
