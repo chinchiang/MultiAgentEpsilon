@@ -6,6 +6,9 @@ import sys
 import pytest
 from pathlib import Path
 
+# 目前 main 規則集套用的最後推送核准規則。 / The last-push approval rule the main ruleset currently applies.
+PULL_REQUEST_RULE = {"type": "pull_request", "ruleset_id": 1, "parameters": {"require_last_push_approval": True}}
+
 
 @pytest.fixture(autouse=True)
 def clear_ci_run_identity(monkeypatch):
@@ -72,6 +75,8 @@ def test_live_approval_resolves_reviewer_permission_through_github(monkeypatch, 
             return json.dumps(review) + "\n"
         if path.startswith("pulls/7/commits"):
             return "".join(json.dumps(c) + "\n" for c in commits)
+        if path.startswith("rules/branches/main"):
+            return json.dumps(PULL_REQUEST_RULE) + "\n"
         return json.dumps(responses[path])
     monkeypatch.setattr(guard.subprocess, "check_output", fake)
     result = guard.live_approval(7, "h" * 40, "b" * 40)
@@ -138,7 +143,7 @@ def test_git_rename_checks_both_sides(tmp_path, old, new, blocked):
     assert data["protected_changes"] == protected_changes(sorted([old, new]))
 
 
-def guard_with_commits(monkeypatch, commits):
+def guard_with_commits(monkeypatch, commits, rules=None):
     import scripts.check_trusted_changes as guard
     reviewer = json.loads((Path(__file__).resolve().parents[1] / "security/trust-policy.json").read_text())["baseline_reviewers"][-1]
     responses = {
@@ -153,9 +158,27 @@ def guard_with_commits(monkeypatch, commits):
             return json.dumps(review) + "\n"
         if path.startswith("pulls/7/commits"):
             return "".join(json.dumps(c) + "\n" for c in commits(reviewer))
+        if path.startswith("rules/branches/main"):
+            return "".join(json.dumps(r) + "\n" for r in (rules if rules is not None else [PULL_REQUEST_RULE]))
         return json.dumps(responses[path])
     monkeypatch.setattr(guard.subprocess, "check_output", fake)
     return lambda: guard.live_approval(7, "h" * 40, "b" * 40)
+
+
+@pytest.mark.parametrize("rules", [
+    [{**PULL_REQUEST_RULE, "parameters": {"require_last_push_approval": False}}],
+    [{**PULL_REQUEST_RULE, "parameters": {}}],
+    [{"type": "deletion", "ruleset_id": 1}],
+    [],
+], ids=["disabled", "parameter-missing", "no-pull-request-rule", "no-rules"])
+def test_valid_approval_is_refused_when_last_push_approval_is_not_enforced(monkeypatch, rules):
+    # 審查者身分可偽造推送者，真正擋下的是規則集的最後推送核准；規則被關掉時不得放行。 / Commit identities are
+    # self-asserted, so the ruleset's last-push approval is what really stops self-approval; refuse when it is off.
+    from security_harness.trusted_publisher import Denied
+    approve = guard_with_commits(monkeypatch, lambda reviewer: [
+        {"sha": "h" * 40, "author": {"login": "someone-else"}, "committer": {"login": "web-flow"}}], rules=rules)
+    with pytest.raises(Denied, match="^LAST_PUSH_APPROVAL$"):
+        approve()
 
 
 def test_reviewer_who_pushed_an_earlier_pr_commit_cannot_approve(monkeypatch):
