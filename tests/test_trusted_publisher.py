@@ -356,7 +356,60 @@ def test_unchanged_outcome_is_not_reposted_but_a_change_is(bundle, monkeypatch):
     assert len(writes) == 2 and state["published"]["code"] == "GATE_REJECTED"
 
 
-@pytest.mark.parametrize("code", ["GITHUB_RATE_LIMIT", "API_BUDGET"])
+def test_exhausted_call_budget_replaces_an_earlier_success_with_failure(bundle, monkeypatch):
+    # 自身預算用完不是 GitHub 限流；舊綠燈不能因此一直留著。 / Running out of our own call budget is not
+    # GitHub throttling, so an earlier green must not survive it.
+    writes = []
+    class Client:
+        def api(self, path, method="GET", payload=None):
+            if method == "GET": return bundle["pr"]
+            writes.append(copy.deepcopy(payload))
+            return {"id": 40 + len(writes), "app": {"id": 42}, "head_sha": "b"*40, "conclusion": payload["conclusion"]}
+    state = {"published": {"head_sha": "b"*40, "conclusion": "success", "code": "VERIFIED", "run_id": 100,
+                           "run_attempt": 1, "review_ids": [7], "check_run_id": 30}}
+    def exhausted(*args): raise publisher.Denied("API_BUDGET")
+    monkeypatch.setattr(publisher, "collect", exhausted)
+    report = publisher.publish(Client(), bundle["settings"], bundle["gate_policy"], 5, 100, state)
+    assert [(w["conclusion"], w["output"]["summary"]) for w in writes] == [("failure", "API_BUDGET")]
+    assert (report["decision"], report["code"], report["check_run_id"]) == ("BLOCK", "API_BUDGET", 41)
+    assert state["published"]["conclusion"] == "failure"
+
+
+def test_real_client_still_posts_the_failure_after_verification_spends_the_whole_budget(bundle, monkeypatch):
+    # 只替換對 GitHub 的 HTTP 傳輸；預算由真正的 client 計算並真的耗盡。 / Only the HTTP transport to GitHub is
+    # faked; the real client counts the budget and genuinely runs out.
+    posts = []
+
+    class Response:
+        def __init__(self, value): self.body = json.dumps(value).encode()
+        def __enter__(self): return self
+        def __exit__(self, *exc): return False
+        def read(self, limit): return self.body[:limit]
+
+    class Transport:
+        def open(self, request, timeout):
+            if request.get_method() == "POST":
+                payload = json.loads(request.data)
+                posts.append(payload)
+                return Response({"id": 77, "app": {"id": 42}, "head_sha": payload["head_sha"],
+                                 "conclusion": payload["conclusion"]})
+            return Response(bundle["pr"] if request.full_url.endswith("/pulls/5") else {})
+
+    client = publisher.GitHub("synthetic-token")
+    client.opener = Transport()
+    prefix = "/repos/" + bundle["settings"]["repository"]
+    def spend_everything(*args):
+        while True:
+            client.api(prefix + "/commits/" + "b"*40)
+    monkeypatch.setattr(publisher, "collect", spend_everything)
+    state = {"published": {"head_sha": "b"*40, "conclusion": "success", "code": "VERIFIED", "run_id": 100,
+                           "run_attempt": 1, "review_ids": [7], "check_run_id": 30}}
+    report = publisher.publish(client, bundle["settings"], bundle["gate_policy"], 5, 100, state)
+    assert [(p["conclusion"], p["output"]["summary"]) for p in posts] == [("failure", "API_BUDGET")]
+    assert (report["decision"], report["code"], report["check_run_id"]) == ("BLOCK", "API_BUDGET", 77)
+
+
+@pytest.mark.parametrize("code", ["GITHUB_RATE_LIMIT"])
 def test_throttling_backs_off_without_posting(bundle, monkeypatch, code):
     writes = []
     class Client:
