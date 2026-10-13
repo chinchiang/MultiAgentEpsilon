@@ -121,6 +121,76 @@ def test_janitor_keeps_latest_pointer_on_the_newer_run(tmp_path, monkeypatch):
     assert (tmp_path / 'artifacts/latest.txt').read_text().strip() == newer.data['run_id']
 
 
+class FakeDocker:
+    """Docker CLI 邊界的假實作，只認得 janitor 需要的 ps／inspect／rm。 / Fake Docker CLI boundary for the janitor's ps/inspect/rm."""
+
+    def __init__(self, *containers, rm_fails=False):
+        self.containers = {c['Id']: c for c in containers}
+        self.removed = []
+        self.rm_fails = rm_fails
+
+    def __call__(self, *args, check=True, timeout=45):
+        if args[:2] == ('ps', '-aq') and 'label=epsilon.isolated=true' in args:
+            out = ''.join(i + '\n' for i in self.containers)
+        elif args[0] == 'inspect':
+            out = json.dumps([self.containers[i] for i in args[1:]])
+        elif args[:2] == ('rm', '--force'):
+            if self.rm_fails:
+                raise subprocess.CalledProcessError(1, args)
+            self.removed.extend(args[2:])
+            out = ''
+        else:
+            pytest.fail('unexpected docker call: ' + ' '.join(args))
+        return subprocess.CompletedProcess(args, 0, out, '')
+
+
+def container(identifier, run_id, minutes_old):
+    created = time.strftime('%Y-%m-%dT%H:%M:%S.123456789Z', time.gmtime(time.time() - minutes_old * 60))
+    labels = {'epsilon.isolated': 'true'} | ({'epsilon.run': run_id} if run_id is not None else {})
+    return {'Id': identifier, 'Created': created, 'Config': {'Labels': labels}}
+
+
+def test_janitor_removes_a_container_created_after_its_run_was_cleaned(tmp_path, monkeypatch):
+    # daemon 很慢時，容器可能在 cleanup 刪除 run 目錄之後才出現。 / A slow daemon can create a container after cleanup removed its run.
+    fake = FakeDocker(container('late', 'a' * 32, minutes_old=11))
+    monkeypatch.setattr(isolation, 'docker', fake)
+    assert sweep_stale(tmp_path) == []
+    assert fake.removed == ['late']
+
+
+def test_janitor_keeps_a_young_container_that_another_checkout_may_own(tmp_path, monkeypatch):
+    fake = FakeDocker(container('young', 'b' * 32, minutes_old=9), container('old', 'c' * 32, minutes_old=11))
+    monkeypatch.setattr(isolation, 'docker', fake)
+    sweep_stale(tmp_path)
+    assert fake.removed == ['old']
+
+
+def test_janitor_keeps_an_old_container_of_a_live_run(tmp_path, monkeypatch):
+    from security_harness.lifecycle import prepare_run, cleanup
+    monkeypatch.setattr(isolation, 'cleanup_run', lambda run: None)
+    audit = AuditRun(tmp_path, 'security')
+    prepare_run(tmp_path, audit.data['run_id'])
+    fake = FakeDocker(container('live', audit.data['run_id'], minutes_old=11))
+    monkeypatch.setattr(isolation, 'docker', fake)
+    assert sweep_stale(tmp_path) == []
+    assert fake.removed == []
+    cleanup(tmp_path, audit.data['run_id'])
+
+
+def test_janitor_reports_a_failed_container_sweep_without_losing_reaped_runs(tmp_path, monkeypatch):
+    from security_harness import lifecycle
+    from security_harness.lifecycle import SweepIncomplete
+    monkeypatch.setattr(isolation, 'cleanup_run', lambda run: None)
+    stale = AuditRun(tmp_path, 'security')
+    lifecycle.prepare_run(tmp_path, stale.data['run_id'])
+    monkeypatch.setattr(lifecycle, 'owner_alive', lambda marker: False)
+    monkeypatch.setattr(isolation, 'docker', FakeDocker(container('stuck', 'd' * 32, minutes_old=11), rm_fails=True))
+    with pytest.raises(SweepIncomplete) as raised:
+        sweep_stale(tmp_path)
+    assert raised.value.cleaned == [stale.data['run_id']]
+    assert raised.value.failures == [{'containers': 'epsilon.isolated', 'error_type': 'CalledProcessError'}]
+
+
 def test_required_gates_follow_the_trusted_policy(tmp_path):
     import json as _json
     from security_harness.results import DEFAULT_GATES, required_gate_kinds

@@ -35,6 +35,7 @@
 
 - SIGTERM／SIGINT／deadline：終止整個程序群組，依 run label 刪除容器，再刪除本輪暫存目錄。
 - Supervisor 被 SIGKILL：沒有任何程式能在 SIGKILL 中執行 finally；須由 `scripts/cleanup_runs.py` 回收。它比對 PID、start time、boot ID 與 UID，只回收已死亡 owner，不觸碰其他仍在執行的 run。
+- Docker daemon 很慢時，`docker run` 可能在 CLI 逾時、cleanup 刪除 run 目錄之後才真正建立容器，依 run label 的清理因此找不到它。janitor 最後會列出所有 `epsilon.isolated=true` 容器，移除建立超過 10 分鐘、且不屬於本 root 仍存活之 run 的容器（缺少 run label 者亦同）；未滿 10 分鐘的容器可能屬於同主機另一個 checkout，一律保留。Docker 查詢或移除失敗時，janitor 仍回報其他已回收的 run，並以 exit 1 列出 `containers` 失敗項目。
 - CI 的 always 清理步驟與後續任務可執行 janitor；若 runner 本身也被立即摧毀，需 runner／環境生命週期負責容器銷毀，不能以本機 finally 保證。
 - Worker 的 ALLOW 在清理前只是 pending_decision；對外 decision 維持 BLOCK。supervisor 清理成功後才正式放行，避免先發布綠燈再發現殘留資源。
 
@@ -92,7 +93,7 @@ Coverage separately records selected files/bytes, scanned leaves/bytes, expanded
 
 The larger address-space reservation supports Gitleaks' WebAssembly engine; it is not permission to write 8 GiB of data. RLIMIT_DATA separately constrains data memory. Inventory, expansion, and scanner reports have their own caps. Termination/cleanup has a bounded grace period of approximately 36 seconds. Cleanup errors or Docker timeouts block and retain owner markers for recovery.
 
-The supervisor owns `.state/runs/<run-id>` and short temporary paths suitable for PostgreSQL Unix sockets. The worker runs in its own process group. SIGTERM/SIGINT/deadline kill the group, remove containers by unique run label, and remove owned temporary state. SIGKILL cannot execute `finally`; `cleanup_runs.py` later matches PID, start time, boot ID, and UID and reaps only dead owners. CI `always` cleanup and later tasks can run the janitor. Destruction of the runner itself needs platform lifecycle cleanup. A worker's ALLOW remains pending/BLOCK until cleanup completes.
+The supervisor owns `.state/runs/<run-id>` and short temporary paths suitable for PostgreSQL Unix sockets. The worker runs in its own process group. SIGTERM/SIGINT/deadline kill the group, remove containers by unique run label, and remove owned temporary state. SIGKILL cannot execute `finally`; `cleanup_runs.py` later matches PID, start time, boot ID, and UID and reaps only dead owners. A slow daemon can create a container after the CLI timed out and cleanup removed the run directory, so run-label cleanup misses it; the janitor finally lists every `epsilon.isolated=true` container and removes those older than 10 minutes that do not belong to a live run of this root (including ones without a run label). Younger containers may belong to another checkout on the host and are kept. A failed Docker query or removal still reports the other reaped runs and exits 1 with a `containers` failure entry. CI `always` cleanup and later tasks can run the janitor. Destruction of the runner itself needs platform lifecycle cleanup. A worker's ALLOW remains pending/BLOCK until cleanup completes.
 
 ```bash
 .venv/bin/python -I scripts/cleanup_runs.py

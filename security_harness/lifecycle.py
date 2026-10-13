@@ -9,10 +9,13 @@ import signal
 import subprocess
 import sys
 import time
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from .results import required_gate_kinds, write_json
 
 SOURCE_ROOT = Path(__file__).resolve().parents[1]
+# 遠大於 RoE 的 120 秒執行上限。 / Well beyond the RoE's 120-second run limit.
+ORPHAN_CONTAINER_AGE = timedelta(minutes=10)
 
 
 def group_alive(pid):
@@ -134,6 +137,23 @@ Some stale runs could not be reaped; the others were still processed."""
         self.cleaned, self.failures = cleaned, failures
 
 
+def remove_orphan_containers(root):
+    from . import isolation
+    # daemon 較慢時，容器可能在 cleanup 之後才建立。 / A slow daemon can create a container after its run's cleanup.
+    ids = isolation.docker('ps', '-aq', '--filter', 'label=epsilon.isolated=true', timeout=30).stdout.split()
+    if not ids:
+        return
+    # 較新的容器可能屬於同主機另一個 checkout 仍在進行的執行。 / A younger container may belong to another checkout's live run.
+    cutoff = datetime.now(timezone.utc) - ORPHAN_CONTAINER_AGE
+    # 回收後仍留下目錄的執行，其擁有者仍存活。 / Runs whose directory survived the reaping still have a live owner.
+    live = {work.name for work in (root / '.state' / 'runs').glob('*')}
+    old = [c['Id'] for c in json.loads(isolation.docker('inspect', *ids, timeout=30).stdout)
+           if datetime.fromisoformat(c['Created']) < cutoff
+           and (c['Config']['Labels'] or {}).get('epsilon.run') not in live]
+    if old:
+        isolation.docker('rm', '--force', *old, timeout=30)
+
+
 def sweep_stale(root):
     cleaned = []
     failures = []
@@ -182,6 +202,10 @@ def sweep_stale(root):
         except Exception as exc:
             # 繼續回收其他執行；每個失敗均回報，但不保存原文。 / Keep reaping the remaining runs; report every failure, without its text.
             failures.append({'run_id': work.name, 'error_type': type(exc).__name__})
+    try:
+        remove_orphan_containers(root)
+    except Exception as exc:
+        failures.append({'containers': 'epsilon.isolated', 'error_type': type(exc).__name__})
     if failures:
         raise SweepIncomplete(cleaned, failures)
     return cleaned
