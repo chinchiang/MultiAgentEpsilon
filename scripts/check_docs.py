@@ -58,7 +58,7 @@ def validate(paths, root=ROOT):
     errors = []
     markdown = [root / p for p in paths if p.endswith('.md')]
     for path in markdown:
-        text = path.read_text()
+        text = path.read_text(encoding='utf-8')
         for anchor in ('zh-tw', 'en'):
             if text.count(f'<a id="{anchor}"></a>') != 1:
                 errors.append(f'{path.relative_to(root)}: language anchor / 語言入口 {anchor}')
@@ -76,10 +76,10 @@ def validate(paths, root=ROOT):
             if not destination.is_relative_to(root.resolve()) or not destination.exists():
                 errors.append(f'{path.name}: missing local link / 本機連結不存在 {target}')
             elif (parts.fragment in ('en', 'zh-tw') and
-                  (not destination.is_file() or f'<a id="{parts.fragment}"></a>' not in destination.read_text())):
+                  (not destination.is_file() or f'<a id="{parts.fragment}"></a>' not in destination.read_text(encoding='utf-8'))):
                 errors.append(f'{path.name}: missing linked anchor / 連結錨點不存在 {target}')
     architecture = root / 'docs/architecture-overview.zh-TW.md'
-    text = architecture.read_text() if architecture.is_file() else ''
+    text = architecture.read_text(encoding='utf-8') if architecture.is_file() else ''
     if text.count(START) != 1 or text.count(END) != 1:
         errors.append('repository tree markers missing / 缺少目錄樹標記')
     elif text.split(START, 1)[1].split(END, 1)[0].strip() != repository_tree(paths):
@@ -91,10 +91,10 @@ def validate(paths, root=ROOT):
             if not svg.is_file():
                 errors.append(f'{name}: missing SVG / 缺少 SVG')
                 continue
-            source = path.read_text()
+            source = path.read_text(encoding='utf-8')
             errors.extend(terminology_errors(name, source))
             try:
-                element = ET.fromstring(svg.read_text())
+                element = ET.fromstring(svg.read_text(encoding='utf-8'))
                 if any(e.tag.rsplit('}', 1)[-1] in ('script', 'foreignObject') for e in element.iter()):
                     errors.append(f'{name}: active SVG content / SVG 含主動內容')
                 # 換行可能拆開文字，因此忽略空白後比對。 / Wrapping can split text, so compare without whitespace.
@@ -105,7 +105,7 @@ def validate(paths, root=ROOT):
             except ET.ParseError:
                 errors.append(f'{name}: invalid SVG / SVG 格式錯誤')
         if path.suffix == '.py':
-            for node in ast.walk(ast.parse(path.read_text())):
+            for node in ast.walk(ast.parse(path.read_text(encoding='utf-8'))):
                 if not isinstance(node, (ast.Module, ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)):
                     continue
                 doc = ast.get_docstring(node)
@@ -126,9 +126,9 @@ def main(argv=None):
     paths = inventory(root, untracked=root == ROOT)
     if args.update_tree:
         path = ROOT / 'docs/architecture-overview.zh-TW.md'
-        before, tail = path.read_text().split(START, 1)
+        before, tail = path.read_text(encoding='utf-8').split(START, 1)
         _, after = tail.split(END, 1)
-        path.write_text(before + START + '\n' + repository_tree(paths) + '\n' + END + after)
+        path.write_text(before + START + '\n' + repository_tree(paths) + '\n' + END + after, encoding='utf-8')
     errors = validate(paths, root)
     for error in errors:
         print(error)
