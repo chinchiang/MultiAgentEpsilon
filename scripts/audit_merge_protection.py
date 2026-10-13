@@ -39,6 +39,10 @@ def inspect_configuration(branch, rulesets, pr, collaborators, reviewers, codeow
     rules = [rule for item in active for rule in item.get('rules', [])]
     kinds = {rule['type'] for rule in rules}
     reviews = [r.get('parameters', {}) for r in rules if r['type'] == 'pull_request']
+    # 多個規則集疊加時取交集；缺值視為未限制。 / Layered rulesets intersect; a missing list restricts nothing.
+    merge_methods = {'merge', 'squash', 'rebase'}
+    for p in reviews:
+        merge_methods &= set(p.get('allowed_merge_methods') or ('merge', 'squash', 'rebase'))
     checks = [check for r in rules if r['type'] == 'required_status_checks'
               for check in r.get('parameters', {}).get('required_status_checks', [])]
     # 檢查名稱可偽造，只採計預期整合來源。 / A context name alone is forgeable; only the expected integration counts.
@@ -63,6 +67,10 @@ def inspect_configuration(branch, rulesets, pr, collaborators, reviewers, codeow
         'independent_review_required': any(p.get('required_approving_review_count', 0) >= 1
             and p.get('dismiss_stale_reviews_on_push') and p.get('require_code_owner_review')
             and p.get('require_last_push_approval') for p in reviews),
+        'merge_commit_only': bool(reviews) and merge_methods == {'merge'},
+        'review_thread_resolution_required': any(p.get('required_review_thread_resolution') is True for p in reviews),
+        'unattributed_changes_extra_approval': any(
+            p.get('require_extra_approval_for_unattributed_changes') is True for p in reviews),
         'required_check_present': bool(required),
         'dedicated_app_check_required': bool(dedicated),
         'base_codeowner_independent_reviewer': bool(owner_reviewers),

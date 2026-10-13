@@ -43,6 +43,8 @@ def main_ruleset(**overrides):
     rules = [{'type': 'deletion'}, {'type': 'non_fast_forward'},
              {'type': 'required_status_checks', 'parameters': {'strict_required_status_checks_policy': True,
               'required_status_checks': overrides.pop('checks', [{'context': 'trusted-security-pilot', 'integration_id': 15368}])}}]
+    if 'review' in overrides:
+        rules.append({'type': 'pull_request', 'parameters': overrides.pop('review')})
     ruleset = {'enforcement': 'active', 'target': 'branch', 'bypass_actors': [], 'rules': rules,
                'conditions': {'ref_name': {'include': ['~DEFAULT_BRANCH'], 'exclude': []}}}
     ruleset.update(overrides)
@@ -85,3 +87,41 @@ def test_base_branch_codeowners_must_name_an_independent_writer(codeowners, role
     result = inspect_configuration({'protected': True}, [], {'user': {'login': 'author'}},
                                    [{'login': 'reviewer', 'role_name': role}], ['reviewer'], codeowners)
     assert result['configuration']['base_codeowner_independent_reviewer'] is expected
+
+
+@pytest.mark.parametrize('methods,expected', [
+    ([['merge']], True),
+    ([['merge', 'squash', 'rebase']], False),
+    ([['squash']], False),
+    ([None], False),  # 讀回缺值不能當成已限制。 / A missing readback is not a restriction.
+    ([['merge', 'squash'], ['merge', 'rebase']], True),  # 多個規則集取交集。 / Layered rulesets intersect.
+    ([['merge'], None], True),
+])
+def test_merge_commit_only_reads_back_the_effective_allowed_merge_methods(methods, expected):
+    rulesets = [main_ruleset(review={} if m is None else {'allowed_merge_methods': m}) for m in methods]
+    result = inspect_configuration({'protected': True}, rulesets, {'user': {'login': 'author'}}, [], [])
+    assert result['configuration']['merge_commit_only'] is expected
+
+
+@pytest.mark.parametrize('reviews,expected', [
+    ([{'required_review_thread_resolution': True}], True),
+    ([{'required_review_thread_resolution': False}], False),
+    ([{}], False),
+    ([{}, {'required_review_thread_resolution': True}], True),  # 疊加時以最嚴格者為準。 / The strictest layer applies.
+])
+def test_review_thread_resolution_is_read_back(reviews, expected):
+    rulesets = [main_ruleset(review=r) for r in reviews]
+    result = inspect_configuration({'protected': True}, rulesets, {'user': {'login': 'author'}}, [], [])
+    assert result['configuration']['review_thread_resolution_required'] is expected
+
+
+@pytest.mark.parametrize('reviews,expected', [
+    ([{'require_extra_approval_for_unattributed_changes': True}], True),
+    ([{'require_extra_approval_for_unattributed_changes': False}], False),
+    ([{}], False),
+    ([{}, {'require_extra_approval_for_unattributed_changes': True}], True),
+])
+def test_extra_approval_for_unattributed_changes_is_read_back(reviews, expected):
+    rulesets = [main_ruleset(review=r) for r in reviews]
+    result = inspect_configuration({'protected': True}, rulesets, {'user': {'login': 'author'}}, [], [])
+    assert result['configuration']['unattributed_changes_extra_approval'] is expected

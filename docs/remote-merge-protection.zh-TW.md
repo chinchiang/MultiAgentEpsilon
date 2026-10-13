@@ -52,7 +52,7 @@ App 身分與執行位置尚未提供；已準備受控主機的發布程式與�
 7. 驗收通過後再次完整讀回 main 規則（規則集已啟用，驗收不得為此停用）。區分「隔離分支的行為驗證」與「main 規則讀回」，不以草稿 PR、本地 BLOCK、CI 成功或管理者角色代替普通開發者遠端驗收。
 
 8. （2026-10-11）基準自身失效時採用受控遷移（見 `trusted-execution.zh-TW.md`），遷移後立即恢復規則集並重新執行 `audit_merge_protection.py`；稽核結果記載於 [里程碑狀態](milestone-status.zh-TW.md)。
-9. 規則集目前允許 merge、squash、rebase 三種合併方式；`docs/github-main-ruleset.json` 範本已限定為 `merge`，實際設定由擁有者調整。稽核腳本不讀回合併方式、討論串解決與未歸屬變更額外核准，須人工核對。
+9. 規則集目前允許 merge、squash、rebase 三種合併方式；`docs/github-main-ruleset.json` 範本已限定為 `merge`，實際設定由擁有者調整。稽核腳本以 `merge_commit_only`、`review_thread_resolution_required` 與 `unattributed_changes_extra_approval` 讀回這三項；2026-10-13 讀回時合併方式仍未限定（`merge_commit_only` 為 false），其餘兩項為 true。
 
 遠端行為驗收仍未執行。main 規則讀回與先前 PR #5（草稿，已關閉）顯示 blocked，不能代替普通開發者的負向驗收；先在隔離驗收分支確認規則及來源，避免對 main 做可能真的合併成功的探測。
 
@@ -93,6 +93,6 @@ The controlled-host program and polling templates exist, but App identity/host a
 7. After acceptance, read back main rules. Isolated behavioral acceptance and main configuration readback are distinct; draft PR BLOCK, local refusal, successful CI, or owner/admin access is not a substitute.
 
 8. (October 11) When the baseline itself breaks, use the controlled migration in `trusted-execution.zh-TW.md#en`; restore the ruleset immediately and rerun `audit_merge_protection.py`. Results are in [milestone status](milestone-status.zh-TW.md#en).
-9. The ruleset currently allows merge, squash and rebase; the `docs/github-main-ruleset.json` template restricts methods to `merge` and the owner applies the live setting. The audit script does not read back merge methods, thread resolution or the unattributed-change extra approval; check them by hand.
+9. The ruleset currently allows merge, squash and rebase; the `docs/github-main-ruleset.json` template restricts methods to `merge` and the owner applies the live setting. The audit script reads these back as `merge_commit_only`, `review_thread_resolution_required` and `unattributed_changes_extra_approval`; the October 13 readback still found merge methods unrestricted (`merge_commit_only` false) and the other two true.
 
 Remote behavioral acceptance remains NOT_RUN. Earlier closed draft PR #5 being blocked does not prove ordinary-developer enforcement.
