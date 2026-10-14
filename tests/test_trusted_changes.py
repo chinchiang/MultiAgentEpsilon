@@ -23,6 +23,34 @@ def clear_ci_run_identity(monkeypatch):
     monkeypatch.delenv("GITHUB_RUN_ID", raising=False)
 
 
+class Candidate:
+    """已初始化、尚無 commit 的合成候選 repo。 / A synthetic candidate repository, initialized with no commits yet."""
+
+    def __init__(self, path):
+        self.path = path
+        path.mkdir()
+        self.git("init", "-q")
+        self.git("config", "user.name", "Synthetic fixture")
+        self.git("config", "user.email", "fixture@example.invalid")
+
+    def git(self, *args):
+        return subprocess.check_output(["git", "-C", str(self.path), *args], text=True).strip()
+
+    def commit(self, files, message):
+        """寫入檔案並提交，回傳新 commit。 / Write the files, commit them and return the new commit."""
+        for name, content in files.items():
+            (self.path / name).parent.mkdir(parents=True, exist_ok=True)
+            (self.path / name).write_text(content)
+        self.git("add", ".")
+        self.git("commit", "-qm", message)
+        return self.git("rev-parse", "HEAD")
+
+
+@pytest.fixture
+def candidate(tmp_path):
+    return Candidate(tmp_path / "candidate")
+
+
 def test_candidate_cannot_silently_lower_policy_or_replace_evaluator():
     paths = ["security/policy.json", "security/gitleaks.toml", "scripts/run_security.py",
              "security_harness/results.py", ".github/workflows/security.yml",
@@ -63,9 +91,16 @@ def test_head_commit_identities_only_remove_approvals():
     assert approved_review(pr, [review], "head", "base", ["owner"], {"owner": "write"}, {"web-flow"}) is not None
 
 
-def guarded_repository(monkeypatch, commits, role="write", rules=None, submitted="2026-10-13T07:02:12Z", activity=None):
-    """guard 讀到的 GitHub：PR 7 有一筆名單內審查者的核准。 / The GitHub state the guard reads: PR 7 carries one approval
-    from a listed reviewer."""
+def head_commit_only(_reviewer):
+    # PR 只有 head commit，作者與提交者都不是審查者。 / The PR holds only the head commit, by someone other than the reviewer.
+    return [{"sha": "h" * 40, "author": {"login": "someone-else"}, "committer": {"login": "web-flow"}}]
+
+
+def guarded_repository(monkeypatch, commits=head_commit_only, role="write", rules=None,
+                       submitted="2026-10-13T07:02:12Z", activity=None):
+    """guard 讀到的 GitHub：PR 7 有一筆名單內審查者的核准。回傳假 GitHub 與對 PR 7 執行 live_approval 的函式。 / The
+    GitHub state the guard reads: PR 7 carries one approval from a listed reviewer. Returns the fake GitHub and a
+    function that runs live_approval on PR 7."""
     import scripts.check_trusted_changes as guard
     github = FakeGitHub(POLICY["repository"])
     github.add("pulls/7", PULL)
@@ -77,51 +112,32 @@ def guarded_repository(monkeypatch, commits, role="write", rules=None, submitted
     github.add("rules/branches/main", rules if rules is not None else [PULL_REQUEST_RULE])
     github.cursor_listing("activity?ref=refs/heads/feature", activity if activity is not None else [HEAD_PUSH])
     monkeypatch.setattr(guard, "ReadOnlyGitHub", lambda: github)
-    return github
-
-
-def head_commit_only(reviewer):
-    return [{"sha": "h" * 40, "author": {"login": "someone-else"}, "committer": {"login": "web-flow"}}]
+    return github, lambda: guard.live_approval(7, "h" * 40, "b" * 40)
 
 
 @pytest.mark.parametrize("role,approved", [("write", True), ("read", False)])
 def test_live_approval_resolves_reviewer_permission_through_github(monkeypatch, role, approved):
-    import scripts.check_trusted_changes as guard
-    github = guarded_repository(monkeypatch, head_commit_only, role=role)
-    result = guard.live_approval(7, "h" * 40, "b" * 40)
-    assert (result is not None) is approved
+    github, approve = guarded_repository(monkeypatch, role=role)
+    assert (approve() is not None) is approved
     assert any(path.endswith(f"/collaborators/{REVIEWER}/permission") for _, path, _ in github.requests)
     assert {method for method, _, _ in github.requests} == {"GET"}
 
 
-def test_guard_retains_sha_bound_evidence_even_when_it_blocks(tmp_path):
-    repo = tmp_path / "candidate"
-    repo.mkdir()
-    def git(*args):
-        return subprocess.check_output(["git", "-C", str(repo), *args], text=True).strip()
-    git("init", "-q")
-    git("config", "user.name", "Synthetic fixture")
-    git("config", "user.email", "fixture@example.invalid")
-    (repo / "README.md").write_text("baseline\n")
-    git("add", ".")
-    git("commit", "-qm", "baseline")
-    base = git("rev-parse", "HEAD")
+def test_guard_retains_sha_bound_evidence_even_when_it_blocks(tmp_path, candidate):
+    base = candidate.commit({"README.md": "baseline\n"}, "baseline")
     output = tmp_path / "audit/trusted-guard.json"
     script = Path(__file__).resolve().parents[1] / "scripts/check_trusted_changes.py"
-    command = [sys.executable, str(script), "--base", base, "--candidate", str(repo), "--output", str(output)]
+    command = [sys.executable, str(script), "--base", base, "--candidate", str(candidate.path), "--output", str(output)]
     allowed = subprocess.run(command, capture_output=True)
     assert allowed.returncode == 0
     assert json.loads(output.read_text())["decision"] == "ALLOW"
-    (repo / "security").mkdir()
-    (repo / "security/policy.json").write_text('{}\n')
-    git("add", ".")
-    git("commit", "-qm", "policy change")
+    head = candidate.commit({"security/policy.json": "{}\n"}, "policy change")
     blocked = subprocess.run(command, capture_output=True)
     evidence = json.loads(output.read_text())
     assert blocked.returncode == 1
     assert evidence["decision"] == "BLOCK"
     assert evidence["base_sha"] == base
-    assert evidence["candidate_sha"] == git("rev-parse", "HEAD")
+    assert evidence["candidate_sha"] == head
     assert evidence["protected_changes"] == ["security/policy.json"]
 
 
@@ -130,33 +146,19 @@ def test_guard_retains_sha_bound_evidence_even_when_it_blocks(tmp_path):
     ("fixture_app/app.py", "scripts/evaluator.py", True),
     ("fixture_app/app.py", "fixture_app/moved.py", True),
 ])
-def test_git_rename_checks_both_sides(tmp_path, old, new, blocked):
-    def git(*args):
-        return subprocess.check_output(["git", "-C", str(tmp_path), *args], text=True).strip()
-    git("init", "-q"); git("config", "user.name", "Synthetic")
-    git("config", "user.email", "fixture@example.invalid")
-    git("config", "diff.renames", "true")
-    source, target = tmp_path / old, tmp_path / new
-    source.parent.mkdir(parents=True, exist_ok=True)
-    source.write_text("unchanged content\n")
-    git("add", "."); git("commit", "-qm", "base")
-    base = git("rev-parse", "HEAD")
-    target.parent.mkdir(parents=True, exist_ok=True)
-    git("mv", old, new); git("commit", "-qm", "rename")
-    assert git("diff", "--name-status", base, "HEAD").startswith("R100")
+def test_git_rename_checks_both_sides(candidate, old, new, blocked):
+    candidate.git("config", "diff.renames", "true")
+    base = candidate.commit({old: "unchanged content\n"}, "base")
+    (candidate.path / new).parent.mkdir(parents=True, exist_ok=True)
+    candidate.git("mv", old, new); candidate.git("commit", "-qm", "rename")
+    assert candidate.git("diff", "--name-status", base, "HEAD").startswith("R100")
     script = Path(__file__).resolve().parents[1] / "scripts/check_trusted_changes.py"
-    process = subprocess.run([sys.executable, str(script), "--base", base, "--candidate", str(tmp_path)],
+    process = subprocess.run([sys.executable, str(script), "--base", base, "--candidate", str(candidate.path)],
                              capture_output=True, text=True)
     data = json.loads(process.stdout)
     assert process.returncode == int(blocked)
     assert data["decision"] == ("BLOCK" if blocked else "ALLOW")
     assert data["protected_changes"] == protected_changes(sorted([old, new]))
-
-
-def guard_with_commits(monkeypatch, commits, rules=None, submitted="2026-10-13T07:02:12Z", activity=None):
-    import scripts.check_trusted_changes as guard
-    guarded_repository(monkeypatch, commits, rules=rules, submitted=submitted, activity=activity)
-    return lambda: guard.live_approval(7, "h" * 40, "b" * 40)
 
 
 @pytest.mark.parametrize("rules", [
@@ -169,8 +171,7 @@ def test_valid_approval_is_refused_when_last_push_approval_is_not_enforced(monke
     # 審查者身分可偽造推送者，真正擋下的是規則集的最後推送核准；規則被關掉時不得放行。 / Commit identities are
     # self-asserted, so the ruleset's last-push approval is what really stops self-approval; refuse when it is off.
     from security_harness.trusted_publisher import Denied
-    approve = guard_with_commits(monkeypatch, lambda reviewer: [
-        {"sha": "h" * 40, "author": {"login": "someone-else"}, "committer": {"login": "web-flow"}}], rules=rules)
+    _, approve = guarded_repository(monkeypatch, rules=rules)
     with pytest.raises(Denied, match="^LAST_PUSH_APPROVAL$"):
         approve()
 
@@ -178,17 +179,14 @@ def test_valid_approval_is_refused_when_last_push_approval_is_not_enforced(monke
 def test_approval_submitted_before_the_head_was_pushed_does_not_count(monkeypatch):
     # 只合併 base 的 update-branch 不會讓核准失效，GitHub 還把 commit_id 改指新 head。 / A base-only update-branch keeps
     # the approval and GitHub re-points its commit_id to the new head.
-    approve = guard_with_commits(monkeypatch, lambda reviewer: [
-        {"sha": "h" * 40, "author": {"login": "someone-else"}, "committer": {"login": "web-flow"}}],
-        submitted="2026-10-13T06:44:15Z")
+    _, approve = guarded_repository(monkeypatch, submitted="2026-10-13T06:44:15Z")
     assert approve() is None
 
 
 @pytest.mark.parametrize("activity", [[], [{**HEAD_PUSH, "after": "e" * 40}]], ids=["no-activity", "other-head"])
 def test_unknown_push_time_of_the_head_fails_closed(monkeypatch, activity):
     from security_harness.trusted_publisher import Denied
-    approve = guard_with_commits(monkeypatch, lambda reviewer: [
-        {"sha": "h" * 40, "author": {"login": "someone-else"}, "committer": {"login": "web-flow"}}], activity=activity)
+    _, approve = guarded_repository(monkeypatch, activity=activity)
     with pytest.raises(Denied, match="^LAST_PUSH_UNKNOWN$"):
         approve()
 
@@ -202,9 +200,8 @@ def other_pushes(count, day="2026-10-12"):
 def test_long_branch_history_finds_the_head_push_in_one_read(monkeypatch):
     # activity 以 cursor 分頁、忽略 page；最新的 activity 就是 head 的推送。 / Activity is cursor-paged and ignores page;
     # the newest activity is the head push.
-    import scripts.check_trusted_changes as guard
-    github = guarded_repository(monkeypatch, head_commit_only, activity=[HEAD_PUSH, *other_pushes(149)])
-    assert guard.live_approval(7, "h" * 40, "b" * 40) is not None
+    github, approve = guarded_repository(monkeypatch, activity=[HEAD_PUSH, *other_pushes(149)])
+    assert approve() is not None
     assert sum(path.endswith("/activity") for _, path, _ in github.requests) == 1
 
 
@@ -212,14 +209,14 @@ def test_head_push_beyond_the_newest_activity_page_fails_closed(monkeypatch):
     # head 推送之後還有 34 筆 activity，與 head 未變相矛盾；不翻舊頁，直接視為不明。 / Thirty-four activities after the
     # head push contradict an unchanged head; older pages are not read and the push time counts as unknown.
     from security_harness.trusted_publisher import Denied
-    approve = guard_with_commits(monkeypatch, head_commit_only,
-                                 activity=[*other_pushes(34, day="2026-10-14"), HEAD_PUSH, *other_pushes(5)])
+    _, approve = guarded_repository(monkeypatch,
+                                    activity=[*other_pushes(34, day="2026-10-14"), HEAD_PUSH, *other_pushes(5)])
     with pytest.raises(Denied, match="^LAST_PUSH_UNKNOWN$"):
         approve()
 
 
 def test_reviewer_who_pushed_an_earlier_pr_commit_cannot_approve(monkeypatch):
-    approve = guard_with_commits(monkeypatch, lambda reviewer: [
+    _, approve = guarded_repository(monkeypatch, lambda reviewer: [
         {"sha": "e" * 40, "author": {"login": reviewer}, "committer": {"login": reviewer}},
         {"sha": "h" * 40, "author": {"login": "someone-else"}, "committer": {"login": "web-flow"}}])
     assert approve() is None
@@ -233,7 +230,7 @@ def test_reviewer_who_pushed_an_earlier_pr_commit_cannot_approve(monkeypatch):
 def test_incomplete_pr_commit_listing_fails_closed(monkeypatch, commits):
     from security_harness.trusted_publisher import Denied
     with pytest.raises(Denied, match='^(?:PR_COMMITS_HEAD|PR_COMMITS_TRUNCATED)$'):
-        guard_with_commits(monkeypatch, commits)()
+        guarded_repository(monkeypatch, commits)[1]()
 
 
 @pytest.mark.parametrize("change", [{"require_independent_author": False}, {"require_independent_author": None},
@@ -249,39 +246,30 @@ def test_guard_refuses_trust_policy_it_cannot_enforce(tmp_path, monkeypatch, cha
         guard.live_approval(7, "h" * 40, "b" * 40)
 
 
-def run_guard_command(monkeypatch, tmp_path, github):
+def run_guard_command(monkeypatch, tmp_path, candidate, github):
     import scripts.check_trusted_changes as guard
-    repo = tmp_path / "candidate"
-    repo.mkdir()
-    def git(*args):
-        return subprocess.check_output(["git", "-C", str(repo), *args], text=True).strip()
-    git("init", "-q")
-    git("config", "user.name", "Synthetic fixture")
-    git("config", "user.email", "fixture@example.invalid")
-    (repo / "README.md").write_text("baseline\n")
-    git("add", ".")
-    git("commit", "-qm", "baseline")
+    base = candidate.commit({"README.md": "baseline\n"}, "baseline")
     output = tmp_path / "audit/trusted-guard.json"
     monkeypatch.setattr(guard, "ReadOnlyGitHub", lambda: github)
-    monkeypatch.setattr("sys.argv", ["check_trusted_changes.py", "--base", git("rev-parse", "HEAD"),
-                                     "--candidate", str(repo), "--pr", "7", "--output", str(output)])
+    monkeypatch.setattr("sys.argv", ["check_trusted_changes.py", "--base", base,
+                                     "--candidate", str(candidate.path), "--pr", "7", "--output", str(output)])
     assert guard.main() == 1
     return json.loads(output.read_text())
 
 
-def test_a_refused_github_read_is_recorded_with_its_code(monkeypatch, tmp_path):
+def test_a_refused_github_read_is_recorded_with_its_code(monkeypatch, tmp_path, candidate):
     # 沒有 PR 7 可讀：記下拒絕碼，而不只是例外類型。 / PR 7 cannot be read: record the refusal code, not just the type.
-    evidence = run_guard_command(monkeypatch, tmp_path, FakeGitHub(POLICY["repository"]))
+    evidence = run_guard_command(monkeypatch, tmp_path, candidate, FakeGitHub(POLICY["repository"]))
     assert (evidence["decision"], evidence["approval_error"]) == ("BLOCK", "Denied:GITHUB_HTTP_404")
     assert evidence["baseline_approval"] is None
 
 
-def test_other_failures_are_recorded_by_type_without_their_text(monkeypatch, tmp_path):
+def test_other_failures_are_recorded_by_type_without_their_text(monkeypatch, tmp_path, candidate):
     # 只有 Denied 帶固定診斷碼；其他例外的文字可能含任意內容。 / Only Denied carries a fixed diagnostic code; other
     # exception text could hold anything.
     import scripts.check_trusted_changes as guard
     (tmp_path / "security").mkdir()
     (tmp_path / "security/trust-policy.json").write_text(json.dumps({**POLICY, "schema_version": 2}))
     monkeypatch.setattr(guard, "ROOT", tmp_path)
-    evidence = run_guard_command(monkeypatch, tmp_path, FakeGitHub(POLICY["repository"]))
+    evidence = run_guard_command(monkeypatch, tmp_path, candidate, FakeGitHub(POLICY["repository"]))
     assert (evidence["decision"], evidence["approval_error"]) == ("BLOCK", "ValueError")
