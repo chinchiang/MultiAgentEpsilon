@@ -23,7 +23,7 @@ from security_harness.results import write_json
 TARGETS = {
     'security_harness/results.py': (
         ('validate_cases', 'seeded_defects', 'decide'), ('tests/test_policy.py', 'tests/test_security_properties.py')),
-    'security_harness/trusted_publisher.py': (
+    'security_harness/github_http.py': (
         ('strict_json',), ('tests/test_trusted_publisher.py', 'tests/test_security_properties.py')),
     'security_harness/preflight.py': (
         ('validate_package_policy', 'check_metadata'), ('tests/test_preflight.py',)),

@@ -11,7 +11,7 @@ limit applies. 只能連 api.github.com，因此刻意不支援會重新導向�
 未提供權杖時適用 GitHub 匿名速率限制。
 """
 import os
-from .trusted_publisher import GitHub, need
+from .github_http import GitHub, need
 
 
 class ReadOnlyGitHub(GitHub):
