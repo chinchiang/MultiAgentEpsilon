@@ -1,8 +1,10 @@
-import copy
+import json
 
 import pytest
 
 from scripts import verify_required_check as checker
+from security_harness.github_readonly import GitHubReader
+from tests.fake_github import FakeGitHub
 
 HEAD = "b" * 40
 
@@ -12,106 +14,89 @@ def pull(number=5, base="main", head=HEAD, ref="feature", state="open"):
             "head": {"sha": head, "ref": ref, "repo": {"id": 10, "full_name": "owner/repo"}}}
 
 
-def fake_api(checks, runs_by_suite, pr_state="open", jobs=None):
-    # 未指定時每筆 check 都是其 run 第 1 次 attempt 的 job。 / Unless given, each check is its run's attempt-1 job.
-    if jobs is None:
-        jobs = {c["id"]: job(c["id"], runs_by_suite[c["check_suite"]["id"]][0]["id"])
-                for c in checks if runs_by_suite.get(c["check_suite"]["id"])}
-
-    def api(path):
-        if path.endswith("/pulls/5"):
-            return pull(state=pr_state)
-        if "/check-runs?" in path:
-            assert f"/commits/{HEAD}/" in path and "filter=all" in path
-            return {"total_count": len(checks), "check_runs": checks}
-        if "check_suite_id=" in path:
-            return {"workflow_runs": runs_by_suite[int(path.split("check_suite_id=")[1].split("&")[0])]}
-        if "/actions/jobs/" in path:
-            return jobs[int(path.rsplit("/", 1)[1])]
-        if '/actions/runs/' in path:
-            number = int(path.rsplit('/', 1)[1])
-            return next(r for runs in runs_by_suite.values() for r in runs if r['id'] == number)
-        raise AssertionError(path)
-    return api
+def scenario(*twins, pr_state="open", statuses=()):
+    # PR 5 的 head 上尚無 check；twins 是同一 head 查詢會列出的其他 PR。 / PR 5 with no checks on its head yet; twins
+    # are the other PRs the same-head query lists.
+    github = FakeGitHub("owner/repo")
+    github.add("pulls/5", pull(state=pr_state))
+    github.add(f"commits/{HEAD}/statuses", list(statuses))
+    github.check_runs(HEAD, checker.REQUIRED_CHECK)
+    related = [pull(), *twins]
+    github.add("pulls?state=all&head=owner:feature", related)
+    for p in related:
+        github.add(f"issues/{p['number']}/timeline", [])
+    return github
 
 
-def check(id_, suite, conclusion="success", started="2026-10-06T01:00:00Z", app=15368):
-    return {"id": id_, "name": "trusted-security-pilot", "app": {"id": app}, "head_sha": HEAD,
-            "check_suite": {"id": suite}, "status": "completed", "conclusion": conclusion, "started_at": started}
+def trusted_run(github, run_id=100, suite=10, **fields):
+    trusted = {"event": "pull_request_target", "path": checker.WORKFLOW_PATH, "head_branch": "feature",
+               "head_repository": {"id": 10}}
+    return github.workflow_run(run_id, HEAD, suite, **{**trusted, **fields})
 
 
-def run(id_, event="pull_request_target", path=".github/workflows/security.yml", head=HEAD, branch="feature",
-        attempt=1):
-    # GitHub 的 run 只帶目前的 attempt；重跑沿用同一 run 與 check suite。 / A GitHub run carries only its current
-    # attempt; a rerun keeps the same run and check suite.
-    return {"id": id_, "run_attempt": attempt, "event": event, "path": path, "head_sha": head,
-            "head_branch": branch, "head_repository": {"id": 10},
-            "status": "completed", "conclusion": "success"}
+def evaluate(github, run, conclusion="success"):
+    return github.attempt(run, conclusion=conclusion, name=checker.REQUIRED_CHECK)
 
 
-def job(check_id, run_id, attempt=1, head=HEAD):
-    # Actions 的 check run ID 即其 job ID，job 記錄自己所屬的 attempt。 / An Actions check run's ID is its job ID,
-    # and the job records the attempt it belongs to.
-    return {"id": check_id, "run_id": run_id, "run_attempt": attempt, "head_sha": head,
-            "check_run_url": f"https://api.github.com/repos/owner/repo/check-runs/{check_id}"}
-
-
-def listing(*extra, statuses=()):
-    def pages(path):
-        if "/timeline?" in path:
-            return []
-        if path == f"repos/owner/repo/commits/{HEAD}/statuses":
-            return list(statuses)
-        return [pull(), *extra]
-    return pages
+def verify(github):
+    return checker.verify(GitHubReader(github, "owner/repo"), 5)
 
 
 def test_trusted_pull_request_target_source_allows():
-    result = checker.verify(fake_api([check(1, 10)], {10: [run(100)]}), "owner/repo", 5, listing())
-    assert result["decision"] == "ALLOW" and result["sources"][0]["run_id"] == 100
+    github = scenario()
+    evaluate(github, trusted_run(github))
+    result = verify(github)
+    assert result["decision"] == "ALLOW" and [s["run_id"] for s in result["sources"]] == [100]
 
 
 def test_rerun_labels_each_check_with_its_own_attempt():
-    # PR #46：attempt 1 失敗、attempt 2 成功，兩者同屬一個 run。 / PR #46: attempt 1 failed and attempt 2 passed
-    # within one run.
-    checks = [check(1, 10, conclusion="failure"), check(2, 10)]
-    jobs = {1: job(1, 100, attempt=1), 2: job(2, 100, attempt=2)}
-    result = checker.verify(fake_api(checks, {10: [run(100, attempt=2)]}, jobs=jobs), "owner/repo", 5, listing())
+    # PR #46 實際發生：attempt 1 失敗、attempt 2 成功，兩者同屬一個 run（#48 修正）。 / Seen on PR #46: attempt 1 failed
+    # and attempt 2 passed within one run (fixed in #48).
+    github = scenario()
+    run = trusted_run(github)
+    first, second = evaluate(github, run, "failure"), evaluate(github, run)
+    result = verify(github)
     assert result["decision"] == "ALLOW"
     assert [(s["check_run_id"], s["run_attempt"], s["conclusion"]) for s in result["sources"]] == [
-        (1, 1, "failure"), (2, 2, "success")]
+        (first["id"], 1, "failure"), (second["id"], 2, "success")]
 
 
 def test_latest_check_from_an_older_attempt_cannot_vouch_for_the_run():
     # run 的綠燈屬於 attempt 2，但最新的 check 來自 attempt 1。 / The run's green belongs to attempt 2, but the latest
     # check came from attempt 1.
-    api = fake_api([check(1, 10)], {10: [run(100, attempt=2)]}, jobs={1: job(1, 100, attempt=1)})
-    with pytest.raises(checker.Denied, match="LATEST_CHECK_STALE_ATTEMPT"):
-        checker.verify(api, "owner/repo", 5, listing())
+    github = scenario()
+    run = trusted_run(github)
+    evaluate(github, run)
+    run["run_attempt"] = 2
+    with pytest.raises(checker.Denied, match="^LATEST_CHECK_STALE_ATTEMPT$"):
+        verify(github)
 
 
-@pytest.mark.parametrize("field,value", [
-    ("run_id", 101),
-    ("head_sha", "d" * 40),
-    ("check_run_url", "https://api.github.com/repos/owner/repo/check-runs/2"),
-    ("run_attempt", "1"),
-    ("run_attempt", 0),
-])
-def test_job_that_does_not_match_its_check_leaves_the_attempt_unresolved(field, value):
-    record = job(1, 100)
-    record[field] = value
-    api = fake_api([check(1, 10)], {10: [run(100)]}, jobs={1: record})
-    with pytest.raises(checker.Denied, match="CHECK_ATTEMPT_UNRESOLVED"):
-        checker.verify(api, "owner/repo", 5, listing())
+def test_job_that_does_not_match_its_check_leaves_the_attempt_unresolved():
+    github = scenario()
+    check = evaluate(github, trusted_run(github))
+    github.job(check["id"])["run_id"] = 101
+    with pytest.raises(checker.Denied, match="^CHECK_ATTEMPT_UNRESOLVED$"):
+        verify(github)
+
+
+def test_check_run_listing_whose_total_disagrees_fails_closed():
+    github = scenario()
+    evaluate(github, trusted_run(github))
+    github.check_runs(HEAD, checker.REQUIRED_CHECK).total_count = 2
+    with pytest.raises(checker.Denied, match="^LISTING_TOTAL$"):
+        verify(github)
 
 
 @pytest.mark.parametrize('status,conclusion', [('completed', 'failure'), ('completed', 'cancelled'),
     ('completed', 'timed_out'), ('in_progress', None), (None, 'success'), ('completed', None)])
 def test_green_evaluator_cannot_hide_failed_or_incomplete_signing_workflow(status, conclusion):
-    source = run(100)
-    source.update(status=status, conclusion=conclusion)
-    with pytest.raises(checker.Denied, match='WORKFLOW_NOT_SUCCESS'):
-        checker.verify(fake_api([check(1, 10)], {10: [source]}), 'owner/repo', 5, listing())
+    github = scenario()
+    run = trusted_run(github)
+    evaluate(github, run)
+    run.update(status=status, conclusion=conclusion)
+    with pytest.raises(checker.Denied, match='^WORKFLOW_NOT_SUCCESS$'):
+        verify(github)
 
 
 @pytest.mark.parametrize("attack,code", [
@@ -126,51 +111,51 @@ def test_green_evaluator_cannot_hide_failed_or_incomplete_signing_workflow(statu
     ("extra_forged_success", "UNTRUSTED_CHECK_SOURCE"),
 ])
 def test_forged_or_manual_sources_block(attack, code):
-    checks, runs = [check(1, 10)], {10: [run(100)]}
-    if attack == "manual_run": runs[10] = [run(100, event="workflow_dispatch")]
-    elif attack == "push_run": runs[10] = [run(100, event="push")]
-    elif attack == "other_path": runs[10] = [run(100, path=".github/workflows/copy.yml")]
-    elif attack == "other_head": runs[10] = [run(100, head="d" * 40)]
-    elif attack == "other_app": checks = [check(1, 10, app=999)]
-    elif attack == "missing": checks = []
-    elif attack == "ambiguous": runs[10] = [run(100), run(101)]
+    github = scenario()
+    if attack == "manual_run": evaluate(github, trusted_run(github, event="workflow_dispatch"))
+    elif attack == "push_run": evaluate(github, trusted_run(github, event="push"))
+    elif attack == "other_path": evaluate(github, trusted_run(github, path=".github/workflows/copy.yml"))
+    elif attack == "other_head":
+        run = trusted_run(github)
+        evaluate(github, run)
+        run["head_sha"] = "d" * 40
+    elif attack == "other_app": evaluate(github, trusted_run(github))["app"]["id"] = 999
+    elif attack == "ambiguous":
+        evaluate(github, trusted_run(github))
+        trusted_run(github, 101, suite=10)
     elif attack == "latest_failed":
-        checks = [check(1, 10), check(2, 11, conclusion="failure", started="2026-10-06T02:00:00Z")]
-        runs[11] = [run(101)]
+        evaluate(github, trusted_run(github))
+        evaluate(github, trusted_run(github, 101, suite=11), "failure")
     elif attack == "extra_forged_success":
-        checks = [check(1, 10), copy.deepcopy(check(2, 11))]
-        runs[11] = [run(101, event="push")]
-    with pytest.raises(checker.Denied, match=code):
-        checker.verify(fake_api(checks, runs), "owner/repo", 5, listing())
+        evaluate(github, trusted_run(github))
+        evaluate(github, trusted_run(github, 101, suite=11, event="push"))
+    with pytest.raises(checker.Denied, match=f"^{code}$"):
+        verify(github)
 
 
 def test_queued_rerun_check_is_newer_than_an_earlier_success():
     # 重跑排隊時尚無 started_at；較舊的成功不能代表最新結果。 / A queued rerun has no started_at yet; an older success is not the latest.
-    queued = check(2, 11, conclusion=None, started=None)
-    queued["status"] = "queued"
-    with pytest.raises(checker.Denied, match="LATEST_CHECK_NOT_SUCCESS"):
-        checker.verify(fake_api([check(1, 10), queued], {10: [run(100)], 11: [run(101)]}), "owner/repo", 5, listing())
+    github = scenario()
+    evaluate(github, trusted_run(github))
+    queued = evaluate(github, trusted_run(github, 101, suite=11))
+    queued.update(status="queued", conclusion=None)
+    with pytest.raises(checker.Denied, match="^LATEST_CHECK_NOT_SUCCESS$"):
+        verify(github)
 
 
 def test_same_named_commit_status_on_the_head_blocks():
     # Actions 權杖可送出同名 status，規則集可能把它當成必要檢查。 / An Actions token can post a same-named status the ruleset may count.
-    forged = {"id": 7, "context": "trusted-security-pilot", "state": "success"}
-    with pytest.raises(checker.Denied, match="FOREIGN_STATUS_SOURCE"):
-        checker.verify(fake_api([check(1, 10)], {10: [run(100)]}), "owner/repo", 5, listing(statuses=[forged]))
+    github = scenario(statuses=[{"id": 7, "context": checker.REQUIRED_CHECK, "state": "success"}])
+    evaluate(github, trusted_run(github))
+    with pytest.raises(checker.Denied, match="^FOREIGN_STATUS_SOURCE$"):
+        verify(github)
 
 
 def test_closed_pr_is_not_verified():
-    with pytest.raises(checker.Denied, match="PR_NOT_OPEN"):
-        checker.verify(fake_api([check(1, 10)], {10: [run(100)]}, pr_state="closed"), "owner/repo", 5, listing())
-
-
-def test_reader_preserves_chinese_titles_without_a_locale_subprocess(monkeypatch):
-    class Reader:
-        def api(self, path):
-            assert path == '/repos/owner/repo/pulls/6'
-            return {"title": "可信安全閘門"}
-    monkeypatch.setattr(checker, '_reader', Reader())
-    assert checker.gh_api("repos/owner/repo/pulls/6")["title"] == "可信安全閘門"
+    github = scenario(pr_state="closed")
+    evaluate(github, trusted_run(github))
+    with pytest.raises(checker.Denied, match="^PR_NOT_OPEN$"):
+        verify(github)
 
 
 @pytest.mark.parametrize("twin,branch,code", [
@@ -181,15 +166,33 @@ def test_reader_preserves_chinese_titles_without_a_locale_subprocess(monkeypatch
     (pull(number=6, base="evil", ref="twin", state="closed"), "twin", "RUN_HEAD_BRANCH"),
 ])
 def test_same_head_pr_into_another_base_cannot_vouch_for_the_check(twin, branch, code):
-    with pytest.raises(checker.Denied, match=code):
-        checker.verify(fake_api([check(1, 10)], {10: [run(100, branch=branch)]}), "owner/repo", 5, listing(twin))
+    github = scenario(twin)
+    evaluate(github, trusted_run(github, head_branch=branch))
+    with pytest.raises(checker.Denied, match=f"^{code}$"):
+        verify(github)
 
 
 def test_unrelated_prs_into_other_bases_do_not_block():
-    other = pull(number=6, base="release", head="d" * 40, ref="other", state="closed")
-    assert checker.verify(fake_api([check(1, 10)], {10: [run(100)]}), "owner/repo", 5, listing(other))["decision"] == "ALLOW"
+    github = scenario(pull(number=6, base="release", head="d" * 40, ref="other", state="closed"))
+    evaluate(github, trusted_run(github))
+    assert verify(github)["decision"] == "ALLOW"
 
 
 def test_pr_listing_without_this_pr_fails_closed():
-    with pytest.raises(checker.Denied, match="PR_LISTING_INCOMPLETE"):
-        checker.verify(fake_api([check(1, 10)], {10: [run(100)]}), "owner/repo", 5, lambda path: [])
+    github = scenario()
+    evaluate(github, trusted_run(github))
+    github.add("pulls?state=all&head=owner:feature", [])
+    with pytest.raises(checker.Denied, match="^PR_LISTING_INCOMPLETE$"):
+        verify(github)
+
+
+def test_command_reads_through_the_read_only_client(monkeypatch, capsys):
+    # 指令只經唯讀 client 讀取，不啟動依賴 locale 的子程序。 / The command reads only through the read-only client,
+    # never a locale-dependent subprocess.
+    github = scenario()
+    evaluate(github, trusted_run(github))
+    monkeypatch.setattr(checker, "ReadOnlyGitHub", lambda: github)
+    monkeypatch.setattr("sys.argv", ["verify_required_check.py", "--repo", "owner/repo", "--pr", "5"])
+    assert checker.main() == 0
+    assert json.loads(capsys.readouterr().out)["decision"] == "ALLOW"
+    assert {method for method, _, _ in github.requests} == {"GET"}

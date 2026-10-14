@@ -26,10 +26,11 @@ class FakeGitHub:
         the actual item count unless set to disagree."""
         self.routes[route(self.prefix + path)] = Listing(key, items, total_count)
 
-    def workflow_run(self, run_id, head_sha, check_suite_id):
-        """一個 run 屬於一個 check suite，重跑仍沿用同一個。 / A run belongs to one check suite, kept across reruns."""
+    def workflow_run(self, run_id, head_sha, check_suite_id, **fields):
+        """一個 run 屬於一個 check suite，重跑仍沿用同一個；fields 補上事件、路徑等其他欄位。 / A run belongs to one
+        check suite, kept across reruns; fields supply the event, path and anything else."""
         run = {"id": run_id, "head_sha": head_sha, "check_suite_id": check_suite_id, "run_attempt": 0,
-               "status": "queued", "conclusion": None}
+               "status": "queued", "conclusion": None, **fields}
         self.add(f"actions/runs/{run_id}", run)
         suite = route(self.prefix + f"actions/runs?check_suite_id={check_suite_id}")
         self.routes.setdefault(suite, Listing("workflow_runs", [], None)).items.append(run)
@@ -45,8 +46,15 @@ class FakeGitHub:
             "id": job_id, "run_id": run["id"], "run_attempt": run["run_attempt"], "head_sha": run["head_sha"],
             "name": name, "status": "completed", "conclusion": conclusion,
             "check_run_url": f"https://api.github.com/repos/{self.repo}/check-runs/{job_id}"})
-        return {"id": job_id, "name": name, "head_sha": run["head_sha"], "status": "completed",
-                "conclusion": conclusion, "check_suite": {"id": run["check_suite_id"]}, "app": {"id": ACTIONS_APP_ID}}
+        check = {"id": job_id, "name": name, "head_sha": run["head_sha"], "status": "completed",
+                 "conclusion": conclusion, "check_suite": {"id": run["check_suite_id"]}, "app": {"id": ACTIONS_APP_ID}}
+        self.check_runs(run["head_sha"], name).items.append(check)
+        return check
+
+    def check_runs(self, head_sha, name):
+        """head 上指定名稱的所有 check run（filter=all）。 / Every check run of that name on the head (filter=all)."""
+        path = route(self.prefix + f"commits/{head_sha}/check-runs?check_name={name}&filter=all")
+        return self.routes.setdefault(path, Listing("check_runs", [], None))
 
     def job(self, job_id):
         return self.routes[route(self.prefix + f"actions/jobs/{job_id}")]
