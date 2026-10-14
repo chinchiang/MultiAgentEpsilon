@@ -264,6 +264,7 @@ MultiAgentEpsilon/
 ├── .env.example
 ├── .gitattributes
 ├── .gitignore
+├── GLOSSARY.md
 ├── README.md
 ├── SECURITY.md
 ├── pyproject.toml
