@@ -397,8 +397,8 @@ def test_full_guard_fetches_and_excludes_the_rerun_actor(bundle, monkeypatch):
     github.add('actions/runs/100', bundle['run'])
     github.add('pulls?state=all&head=owner:feature', [bundle['pr']])
     github.add('issues/5/timeline', [])
-    github.add('activity?ref=refs/heads/feature',
-               [{'activity_type': 'push', 'after': 'b'*40, 'timestamp': '2026-10-13T07:00:09Z'}])
+    github.cursor_listing('activity?ref=refs/heads/feature',
+                          [{'activity_type': 'push', 'after': 'b'*40, 'timestamp': '2026-10-13T07:00:09Z'}])
     github.add('rules/branches/main',
                [{'type': 'pull_request', 'ruleset_id': 1, 'parameters': {'require_last_push_approval': True}}])
     monkeypatch.setattr(guard, 'ReadOnlyGitHub', lambda: github)

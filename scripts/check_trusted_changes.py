@@ -71,7 +71,11 @@ def live_approval(number, head, base):
     ref = pr["head"]["ref"]
     if not re.fullmatch(r"[A-Za-z0-9._/-]+", ref):
         raise Denied("HEAD_REF")
-    pushes = [parse_time(a["timestamp"]) for a in reader.items(f"activity?ref=refs/heads/{ref}")
+    # activity 以 cursor 分頁、忽略 page，只讀由新到舊的第一頁。每筆 activity 都會移動分支，head 未變時最新一筆就是
+    # head 的推送；不在第一頁即視為不明。 / Activity is cursor-paged and ignores page, so read only the newest-first
+    # first page. Every activity moves the branch, so while the head is unchanged the newest one is the head push;
+    # a head push beyond the first page counts as unknown.
+    pushes = [parse_time(a["timestamp"]) for a in reader.get(f"activity?ref=refs/heads/{ref}&direction=desc")
               if a.get("after") == head]
     if not pushes:
         raise Denied("LAST_PUSH_UNKNOWN")

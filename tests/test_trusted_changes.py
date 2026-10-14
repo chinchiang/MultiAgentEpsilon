@@ -75,7 +75,7 @@ def guarded_repository(monkeypatch, commits, role="write", rules=None, submitted
                                     "submitted_at": submitted}])
     github.add("pulls/7/commits", commits(REVIEWER))
     github.add("rules/branches/main", rules if rules is not None else [PULL_REQUEST_RULE])
-    github.add("activity?ref=refs/heads/feature", activity if activity is not None else [HEAD_PUSH])
+    github.cursor_listing("activity?ref=refs/heads/feature", activity if activity is not None else [HEAD_PUSH])
     monkeypatch.setattr(guard, "ReadOnlyGitHub", lambda: github)
     return github
 
@@ -189,6 +189,31 @@ def test_unknown_push_time_of_the_head_fails_closed(monkeypatch, activity):
     from security_harness.trusted_publisher import Denied
     approve = guard_with_commits(monkeypatch, lambda reviewer: [
         {"sha": "h" * 40, "author": {"login": "someone-else"}, "committer": {"login": "web-flow"}}], activity=activity)
+    with pytest.raises(Denied, match="^LAST_PUSH_UNKNOWN$"):
+        approve()
+
+
+def other_pushes(count, day="2026-10-12"):
+    # 當天推送其他 commit 的 activity，由新到舊。 / That day's pushes of other commits, newest first.
+    return [{"activity_type": "push", "before": "e" * 40, "after": f"{n:040x}",
+             "timestamp": f"{day}T{n // 60:02d}:{n % 60:02d}:00Z"} for n in range(count - 1, -1, -1)]
+
+
+def test_long_branch_history_finds_the_head_push_in_one_read(monkeypatch):
+    # activity 以 cursor 分頁、忽略 page；最新的 activity 就是 head 的推送。 / Activity is cursor-paged and ignores page;
+    # the newest activity is the head push.
+    import scripts.check_trusted_changes as guard
+    github = guarded_repository(monkeypatch, head_commit_only, activity=[HEAD_PUSH, *other_pushes(149)])
+    assert guard.live_approval(7, "h" * 40, "b" * 40) is not None
+    assert sum(path.endswith("/activity") for _, path, _ in github.requests) == 1
+
+
+def test_head_push_beyond_the_newest_activity_page_fails_closed(monkeypatch):
+    # head 推送之後還有 34 筆 activity，與 head 未變相矛盾；不翻舊頁，直接視為不明。 / Thirty-four activities after the
+    # head push contradict an unchanged head; older pages are not read and the push time counts as unknown.
+    from security_harness.trusted_publisher import Denied
+    approve = guard_with_commits(monkeypatch, head_commit_only,
+                                 activity=[*other_pushes(34, day="2026-10-14"), HEAD_PUSH, *other_pushes(5)])
     with pytest.raises(Denied, match="^LAST_PUSH_UNKNOWN$"):
         approve()
 
