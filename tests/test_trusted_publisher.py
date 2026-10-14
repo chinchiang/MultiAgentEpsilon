@@ -3,6 +3,7 @@ import copy
 import hashlib
 import io
 import json
+import os
 import stat
 import urllib.error
 import zipfile
@@ -13,7 +14,9 @@ import pytest
 
 from security_harness import trusted_publisher as publisher
 from security_harness.results import result, subject_digest
+from security_harness.github_readonly import GitHubReader
 from tests.dependency_evidence import clean_evidence
+from tests.fake_github import FakeGitHub
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -280,13 +283,15 @@ def test_remote_manifest_matches_local_without_executing_source(tmp_path):
         entries.append({"path": path.name, "type": "blob", "mode": "100755" if path.name == "run.sh" else "100644",
                         "size": len(data), "sha": sha})
         blobs[sha] = {"encoding": "base64", "size": len(data), "content": base64.b64encode(data).decode()}
-    class Client:
-        def api(self, path):
-            return {"tree": entries, "truncated": False} if "/trees/" in path else blobs[path.split("/")[-1]]
-    assert publisher.remote_subject(Client(), "owner/repo", "a"*40) == subject_digest(tmp_path)
+    github = FakeGitHub("owner/repo")
+    github.add("git/trees/" + "a"*40 + "?recursive=1", {"tree": entries, "truncated": False})
+    for sha, blob in blobs.items():
+        github.add(f"git/blobs/{sha}", blob)
+    reader = GitHubReader(github, "owner/repo")
+    assert publisher.remote_subject(reader, "a"*40) == subject_digest(tmp_path)
     entries[0]["mode"] = "120000"
     with pytest.raises(publisher.Denied, match="SOURCE_INPUT"):
-        publisher.remote_subject(Client(), "owner/repo", "a"*40)
+        publisher.remote_subject(reader, "a"*40)
 
 
 def test_storage_redirect_never_receives_app_token():
@@ -437,17 +442,15 @@ def test_blob_cache_skips_refetch_without_changing_the_manifest(tmp_path):
     (tmp_path / "README.md").write_text("synthetic\n")
     data = (tmp_path / "README.md").read_bytes()
     sha = hashlib.sha1(b"blob " + str(len(data)).encode() + b"\0" + data).hexdigest()
-    fetched = []
-    class Client:
-        def api(self, path):
-            if "/trees/" in path:
-                return {"tree": [{"path": "README.md", "type": "blob", "mode": "100644", "size": len(data), "sha": sha}],
-                        "truncated": False}
-            fetched.append(path)
-            return {"encoding": "base64", "size": len(data), "content": base64.b64encode(data).decode()}
-    cache = {}
-    first = publisher.remote_subject(Client(), "owner/repo", "a"*40, cache)
-    second = publisher.remote_subject(Client(), "owner/repo", "a"*40, cache)
+    github = FakeGitHub("owner/repo")
+    github.add("git/trees/" + "a"*40 + "?recursive=1", {
+        "tree": [{"path": "README.md", "type": "blob", "mode": "100644", "size": len(data), "sha": sha}],
+        "truncated": False})
+    github.add(f"git/blobs/{sha}", {"encoding": "base64", "size": len(data), "content": base64.b64encode(data).decode()})
+    reader, cache = GitHubReader(github, "owner/repo"), {}
+    first = publisher.remote_subject(reader, "a"*40, cache)
+    second = publisher.remote_subject(reader, "a"*40, cache)
+    fetched = [path for _, path, _ in github.requests if "/git/blobs/" in path]
     assert first == second == subject_digest(tmp_path) and len(fetched) == 1
     assert cache == {sha: hashlib.sha256(data).hexdigest()}
 
@@ -509,9 +512,6 @@ def test_seeded_defect_must_have_real_complete_negative_evidence(bundle, attack)
 @pytest.mark.parametrize("change", ["none", "head", "rerun", "new_run", "review_dismissed", "review_permission",
                                     "foreign_base", "run_branch", "review_repeated"])
 def test_publication_rechecks_mutable_state_before_green(bundle, monkeypatch, change):
-    writes = []
-    gets = 0
-    permission_lookups = []
     run = copy.deepcopy(bundle["run"])
     reviews = copy.deepcopy(bundle["reviews"])
     fresh = copy.deepcopy(bundle["pr"])
@@ -523,36 +523,32 @@ def test_publication_rechecks_mutable_state_before_green(bundle, monkeypatch, ch
     if change == "review_dismissed": reviews.append({**reviews[0], "id": 12, "state": "DISMISSED"})
     # 同一審查者多次核准只查一次權限，才不會耗盡呼叫預算。 / Repeated approvals by one reviewer need one lookup, sparing the call budget.
     if change == "review_repeated": reviews[:0] = [{**reviews[0], "id": i} for i in (8, 9, 10)]
-    class Client:
-        def api(self, path, method="GET", payload=None):
-            nonlocal gets
-            if method != "GET":
-                writes.append(copy.deepcopy(payload))
-                return {"id": 30, "app": {"id": 42}, "head_sha": "b"*40, "conclusion": payload.get("conclusion")}
-            if path.endswith("/pulls/5"):
-                gets += 1
-                return bundle["pr"] if gets == 1 else fresh
-            if "/actions/runs/" in path: return run
-            if "/actions/workflows/" in path:
-                assert "head_sha=" + "b"*40 in path
-                listing = [run, {"id": 101, "head_sha": "b"*40, "head_branch": "feature", "head_repository": {"id": 10}}] if change == "new_run" else [run]
-                return {"total_count": len(listing), "workflow_runs": listing}
-            if "/permission" in path:
-                permission_lookups.append(path)
-                return {"role_name": "read" if change == "review_permission" else "write"}
-            raise AssertionError("unexpected request")
-        def pages(self, path):
-            if "/timeline" in path: return []
-            if "/pulls?state=all&head=" in path:
-                twin = copy.deepcopy(fresh)
-                twin.update(number=6, state="closed")
-                twin["base"]["ref"] = "untrusted"
-                return [fresh, twin] if change == "foreign_base" else [fresh]
-            return reviews
-    monkeypatch.setattr(publisher, "collect", lambda *args: {
-        "head_sha": "b"*40, "base_sha": "a"*40, "run_id": 100, "run_attempt": 1, "review_ids": [11],
-        "excluded_identities": []})
-    report = publisher.publish(Client(), bundle["settings"], bundle["gate_policy"], 5, 100)
+    github = FakeGitHub("owner/repo")
+    github.add("pulls/5", bundle["pr"])
+    github.add("actions/runs/100", run)
+    newer = [run, {"id": 101, "head_sha": "b"*40, "head_branch": "feature", "head_repository": {"id": 10}}]
+    github.listing("actions/workflows/99/runs?event=pull_request_target&head_sha=" + "b"*40, "workflow_runs",
+                   newer if change == "new_run" else [run])
+    github.add("collaborators/reviewer/permission", {"role_name": "read" if change == "review_permission" else "write"})
+    github.add("pulls/5/reviews", reviews)
+    twin = copy.deepcopy(fresh)
+    twin.update(number=6, state="closed")
+    twin["base"]["ref"] = "untrusted"
+    github.add("pulls?state=all&head=owner:feature", [fresh, twin] if change == "foreign_base" else [fresh])
+    for number in (5, 6):
+        github.add(f"issues/{number}/timeline", [])
+    github.post_reply = lambda path, payload: {"id": 30, "app": {"id": 42}, "head_sha": "b"*40,
+                                               "conclusion": payload.get("conclusion")}
+    def collected(*args):
+        # 收集完成後 PR 才改變：發布前的重查必須看到新狀態。 / The PR changes after collection, so the recheck before
+        # publishing must see the new state.
+        github.add("pulls/5", fresh)
+        return {"head_sha": "b"*40, "base_sha": "a"*40, "run_id": 100, "run_attempt": 1, "review_ids": [11],
+                "excluded_identities": []}
+    monkeypatch.setattr(publisher, "collect", collected)
+    report = publisher.publish(github, bundle["settings"], bundle["gate_policy"], 5, 100)
+    writes = [payload for _, payload in github.posts]
+    permission_lookups = [path for _, path, _ in github.requests if path.endswith("/permission")]
     assert len(writes) == 1 and writes[0]["status"] == "completed"
     assert len(permission_lookups) == len(set(permission_lookups))
     assert writes[-1]["conclusion"] == ("success" if change in ("none", "review_repeated") else "failure")
@@ -641,3 +637,86 @@ def test_mutation_job_cannot_be_omitted_or_fail(bundle, state):
         job['conclusion'] = state
     with pytest.raises(publisher.Denied, match='JOB_SOURCE'):
         publisher.validate_bundle(**bundle)
+
+
+def publishable_repository(bundle, tmp_path, monkeypatch):
+    """GitHub 上可發布的 PR 5：source tree、證據 artifact 與其證明彼此對得上。 / PR 5 as GitHub would serve it when it is
+    publishable: the source tree, the evidence artifact and its attestation all agree."""
+    from security_harness import processes
+    from tests.fake_github import FakeGitHub
+    head, settings = "b" * 40, bundle["settings"]
+    source = tmp_path / "source"
+    source.mkdir()
+    (source / "README.md").write_text("synthetic\n")
+    data = (source / "README.md").read_bytes()
+    blob = hashlib.sha1(b"blob " + str(len(data)).encode() + b"\0" + data).hexdigest()
+    subject = subject_digest(source)
+    report = next(p for p in bundle["files"] if p.endswith("/report.json") and "22222222" not in p)
+    def rebind(value):
+        value["subject_digest"] = subject
+        for record in value["records"]:
+            record["subject_digest"] = subject
+    mutate_json(bundle, report, rebind)
+    archive = io.BytesIO()
+    with zipfile.ZipFile(archive, "w") as evidence:
+        for name, content in bundle["files"].items():
+            evidence.writestr(name, content)
+    raw = archive.getvalue()
+    digest = hashlib.sha256(raw).hexdigest()
+
+    github = FakeGitHub("owner/repo")
+    github.add("pulls/5", bundle["pr"])
+    github.add("actions/runs/100", bundle["run"])
+    github.add("actions/workflows/99", {"path": settings["workflow_path"], "state": "active"})
+    github.listing(f"actions/workflows/99/runs?event=pull_request_target&head_sha={head}", "workflow_runs", [bundle["run"]])
+    github.listing("actions/runs/100/attempts/1/jobs", "jobs", bundle["jobs"])
+    github.listing("actions/runs/100/artifacts", "artifacts", [
+        {"id": 1, "name": "trusted-security-100-1", "expired": False, "size_in_bytes": len(raw),
+         "workflow_run": {"id": 100}, "digest": "sha256:" + digest}])
+    github.add("actions/artifacts/1/zip", raw)
+    github.add(f"attestations/sha256:{digest}", {"attestations": [{"bundle": {"synthetic": "signed elsewhere"}}]})
+    github.add("pulls/5/reviews", bundle["reviews"])
+    github.add("collaborators/reviewer/permission", {"role_name": "write"})
+    github.add("pulls?state=all&head=owner:feature", [bundle["pr"]])
+    github.add("issues/5/timeline", [])
+    github.add(f"commits/{head}", {"author": {"login": "author"}, "committer": {"login": "author"}})
+    github.add("pulls/5/commits", [{"sha": head, "author": {"login": "author"}}])
+    github.add(f"git/trees/{head}?recursive=1", {"truncated": False, "tree": [
+        {"path": "README.md", "type": "blob", "mode": "100644", "size": len(data), "sha": blob}]})
+    github.add(f"git/blobs/{blob}", {"encoding": "base64", "size": len(data), "content": base64.b64encode(data).decode()})
+
+    # 證明驗證器是固定的外部執行檔；只在檔案擁有者與子程序邊界替換。 / The attestation verifier is a pinned external
+    # binary; only file ownership and the subprocess boundary are substituted.
+    verifier = tmp_path / "gh"
+    verifier.write_bytes(b"approved-test-verifier")
+    verifier.chmod(0o755)
+    settings.update(attestation_verifier=str(verifier),
+                    attestation_verifier_sha256=hashlib.sha256(verifier.read_bytes()).hexdigest())
+    monkeypatch.setattr(publisher, "open_config", lambda path, owner: os.open(path, os.O_RDONLY))
+    real_fstat = os.fstat
+    monkeypatch.setattr(publisher.os, "fstat", lambda fd: os.stat_result([*real_fstat(fd)][:4] + [0] + [*real_fstat(fd)][5:]))
+    statement = {"predicateType": "https://slsa.dev/provenance/v1", "subject": [{"digest": {"sha256": digest}}],
+                 "predicate": {"runDetails": {"metadata": {
+                     "invocationId": "https://github.com/owner/repo/actions/runs/100/attempts/1"}}}}
+    monkeypatch.setattr(processes, "bounded_output",
+                        lambda *args, **kwargs: json.dumps([{"verificationResult": {"statement": statement}}]).encode())
+    return github, subject
+
+
+def test_collect_verifies_a_publishable_pull_request_end_to_end(bundle, tmp_path, monkeypatch):
+    github, subject = publishable_repository(bundle, tmp_path, monkeypatch)
+    proof = publisher.collect(github, bundle["settings"], 5, 100, bundle["gate_policy"])
+    assert (proof["subject_digest"], proof["review_ids"], proof["run_attempt"], proof["tests"]) == (subject, [11], 1, 360)
+    assert proof["excluded_identities"] == ["author"]
+    assert {method for method, _, _ in github.requests} == {"GET"}
+
+
+@pytest.mark.parametrize("listing", ["actions/workflows/99/runs?event=pull_request_target&head_sha=" + "b"*40,
+                                     "actions/runs/100/attempts/1/jobs", "actions/runs/100/artifacts"])
+def test_collect_refuses_a_listing_whose_total_disagrees(bundle, tmp_path, monkeypatch, listing):
+    github, _ = publishable_repository(bundle, tmp_path, monkeypatch)
+    from tests.fake_github import route
+    served = github.routes[route("/repos/owner/repo/" + listing)]
+    served.total_count = len(served.items) + 1
+    with pytest.raises(publisher.Denied, match="^LISTING_TOTAL$"):
+        publisher.collect(github, bundle["settings"], 5, 100, bundle["gate_policy"])

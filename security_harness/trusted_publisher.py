@@ -24,6 +24,7 @@ from pathlib import Path, PurePosixPath
 from xml.etree import ElementTree
 
 from .github_http import Denied, GitHub, need, strict_json
+from .github_readonly import GitHubReader
 from .inputs import excluded
 from .limits import LIMITS
 from .results import EVIDENCE_VERSION, decide, seeded_defects, validate_cases, validate_policy
@@ -305,12 +306,12 @@ def installation_client(settings, key_file):
     return GitHub(response["token"])
 
 
-def remote_subject(client, repo, sha, blob_cache=None):
+def remote_subject(reader, sha, blob_cache=None):
     """blob_cache 將已驗證 Git blob ID 對應 SHA-256；快取前核對內容定址，命中快取不會改變摘要。
 
 blob_cache maps verified Git blob IDs to SHA-256. Blob IDs are content
     addresses checked below before caching, so a cache hit cannot change a digest."""
-    tree = client.api(f"/repos/{repo}/git/trees/{sha}?recursive=1")
+    tree = reader.get(f"git/trees/{sha}?recursive=1")
     need(tree.get("truncated") is False, "SOURCE_TREE_TRUNCATED")
     contents = {} if blob_cache is None else blob_cache
     files, total = [], 0
@@ -331,7 +332,7 @@ blob_cache maps verified Git blob IDs to SHA-256. Blob IDs are content
         blob_sha = entry["sha"]
         need(SHA.fullmatch(blob_sha), "BLOB_SHA")
         if blob_sha not in contents:
-            blob = client.api(f"/repos/{repo}/git/blobs/{blob_sha}")
+            blob = reader.get(f"git/blobs/{blob_sha}")
             need(blob["encoding"] == "base64" and blob["size"] == size, "BLOB_METADATA")
             data = base64.b64decode(blob["content"].replace("\n", ""), validate=True)
             need(len(data) == size and hashlib.sha1(b"blob " + str(size).encode() + b"\0" + data).hexdigest() == blob_sha, "BLOB_CONTENT")
@@ -344,11 +345,9 @@ blob_cache maps verified Git blob IDs to SHA-256. Blob IDs are content
     return "worktree-manifest-v1:sha256:" + hashlib.sha256(value).hexdigest()
 
 
-def head_runs(client, settings, head):
-    listing = client.api(f"/repos/{settings['repository']}/actions/workflows/{settings['workflow_id']}"
-                         f"/runs?event=pull_request_target&head_sha={head}&per_page=100")
-    need(listing["total_count"] == len(listing["workflow_runs"]), "RUNS_TRUNCATED")
-    return listing["workflow_runs"]
+def head_runs(reader, settings, head):
+    return reader.items(f"actions/workflows/{settings['workflow_id']}/runs?event=pull_request_target&head_sha={head}",
+                        key="workflow_runs")
 
 
 def identities(*people):
@@ -371,8 +370,8 @@ def related_pull_path(prefix, pr):
     return prefix + "/pulls?state=all&head=" + urllib.parse.quote(owner + ":" + pr["head"]["ref"], safe="")
 
 
-def run_base_history(client, prefix, pr, pulls):
-    return {p["number"]: client.pages(f"{prefix}/issues/{p['number']}/timeline")
+def run_base_history(reader, pr, pulls):
+    return {p["number"]: reader.items(f"issues/{p['number']}/timeline")
             for p in pulls if head_scope(p) == head_scope(pr)}
 
 
@@ -447,7 +446,7 @@ Walk trusted directory descriptors; a file's owner alone cannot protect it
         os.close(directory)
 
 
-def verify_artifact_attestation(client, settings, run, raw):
+def verify_artifact_attestation(reader, settings, run, raw):
     """以固定驗證器處理密碼學，再把已驗證 SLSA 綁定精確 run attempt；artifact JSON 本身不是來源身分。離線 bundle 避免子程序取得安裝權杖或模型金鑰。
 
 Use a pinned verifier for cryptography, then bind its verified SLSA statement
@@ -464,7 +463,9 @@ Use a pinned verifier for cryptography, then bind its verified SLSA statement
         need(hashlib.file_digest(stream, "sha256").hexdigest() == settings["attestation_verifier_sha256"],
              "ATTESTATION_VERIFIER_DIGEST")
     digest = hashlib.sha256(raw).hexdigest()
-    response = client.api(f"/repos/{settings['repository']}/attestations/sha256:{digest}?per_page=30")
+    # cursor 分頁的第一頁，GitHub 預設 30 筆；截斷只會少證明，無法多出證明。 / The first cursor page, 30 by GitHub's
+    # default; truncation can only drop attestations, never add one.
+    response = reader.get(f"attestations/sha256:{digest}")
     attestations = response.get("attestations")
     need(isinstance(attestations, list) and 0 < len(attestations) < 30, "ATTESTATION_MISSING_OR_TRUNCATED")
     bundles = b"\n".join(json.dumps(a["bundle"], separators=(",", ":")).encode() for a in attestations)
@@ -502,47 +503,46 @@ Use a pinned verifier for cryptography, then bind its verified SLSA statement
 
 def collect(client, settings, number, run_id, gate_policy, blob_cache=None):
     repo = settings["repository"]
-    prefix = f"/repos/{repo}"
-    pr = client.api(f"{prefix}/pulls/{number}")
+    reader = GitHubReader(client, repo)
+    pr = reader.get(f"pulls/{number}")
     validate_pr(pr, settings)
     head = pr["head"]["sha"]
-    run = client.api(f"{prefix}/actions/runs/{run_id}")
-    workflow = client.api(f"{prefix}/actions/workflows/{settings['workflow_id']}")
+    run = reader.get(f"actions/runs/{run_id}")
+    workflow = reader.get(f"actions/workflows/{settings['workflow_id']}")
     need(workflow["path"] == settings["workflow_path"] and workflow["state"] == "active", "WORKFLOW_IDENTITY")
-    runs = head_runs(client, settings, head)
+    runs = head_runs(reader, settings, head)
     need(any(r["id"] == run_id for r in runs), "RUN_NOT_LISTED")
-    jobs = client.api(f"{prefix}/actions/runs/{run_id}/attempts/{run['run_attempt']}/jobs?per_page=100")
-    need(jobs["total_count"] == len(jobs["jobs"]), "JOBS_TRUNCATED")
-    artifacts = client.api(f"{prefix}/actions/runs/{run_id}/artifacts?per_page=100")
-    need(artifacts["total_count"] == len(artifacts["artifacts"]), "ARTIFACTS_TRUNCATED")
+    jobs = reader.items(f"actions/runs/{run_id}/attempts/{run['run_attempt']}/jobs", key="jobs")
+    artifacts = reader.items(f"actions/runs/{run_id}/artifacts", key="artifacts")
     name = f"trusted-security-{run_id}-{run['run_attempt']}"
-    selected = [a for a in artifacts["artifacts"] if a["name"] == name and not a["expired"]]
+    selected = [a for a in artifacts if a["name"] == name and not a["expired"]]
     need(len(selected) == 1 and selected[0]["size_in_bytes"] <= 16 * 1024**2, "ARTIFACT_IDENTITY")
     artifact = selected[0]
     need(artifact["workflow_run"]["id"] == run_id, "ARTIFACT_RUN")
-    raw = client.raw("https://api.github.com" + prefix + f"/actions/artifacts/{artifact['id']}/zip", limit=16 * 1024**2)
+    # zip 會重新導向至儲存體，只能直接經傳輸層下載。 / The zip redirects to blob storage, so only the transport can fetch it.
+    raw = client.raw(f"https://api.github.com/repos/{repo}/actions/artifacts/{artifact['id']}/zip", limit=16 * 1024**2)
     advertised_digest = artifact.get("digest")
     need(advertised_digest == "sha256:" + hashlib.sha256(raw).hexdigest(), "ARTIFACT_DIGEST")
-    verify_artifact_attestation(client, settings, run, raw)
-    reviews = client.pages(f"{prefix}/pulls/{number}/reviews")
+    verify_artifact_attestation(reader, settings, run, raw)
+    reviews = reader.items(f"pulls/{number}/reviews")
     logins = {r["user"]["login"] for r in reviews if r["state"] in ("APPROVED", "DISMISSED", "CHANGES_REQUESTED")}
-    permissions = {login: client.api(f"{prefix}/collaborators/{urllib.parse.quote(login, safe='')}/permission")["role_name"] for login in logins}
-    twins = client.pages(related_pull_path(prefix, pr))
+    permissions = {login: reader.get(f"collaborators/{urllib.parse.quote(login, safe='')}/permission")["role_name"] for login in logins}
+    twins = reader.items(related_pull_path("", pr).lstrip("/"))
     need([p["number"] for p in twins if p["state"] == "open" and head_scope(p) == head_scope(pr)] == [number], "SHARED_PR_HEAD")
-    validate_run_base(run, pr, twins, settings["base_branch"], run_base_history(client, prefix, pr, twins))
-    commit = client.api(f"{prefix}/commits/{head}")
+    validate_run_base(run, pr, twins, settings["base_branch"], run_base_history(reader, pr, twins))
+    commit = reader.get(f"commits/{head}")
     commit_identities = (identities(commit.get("author"), commit.get("committer"))
-                         | pr_commit_identities(client.pages(f"{prefix}/pulls/{number}/commits"), head))
-    subject = remote_subject(client, repo, head, blob_cache)
-    proof = validate_bundle(settings, gate_policy, pr, run, runs, jobs["jobs"], unpack_evidence(raw), reviews,
+                         | pr_commit_identities(reader.items(f"pulls/{number}/commits"), head))
+    subject = remote_subject(reader, head, blob_cache)
+    proof = validate_bundle(settings, gate_policy, pr, run, runs, jobs, unpack_evidence(raw), reviews,
                             permissions, subject, datetime.now(timezone.utc), commit_identities)
     proof["excluded_identities"] = sorted(commit_identities)
     return proof
 
 
-def discover_run(client, settings, pr):
+def discover_run(reader, settings, pr):
     head = pr["head"]["sha"]
-    runs = [r for r in head_runs(client, settings, head)
+    runs = [r for r in head_runs(reader, settings, head)
             if run_scope(r) == head_scope(pr) and r.get("path") == settings["workflow_path"]]
     need(bool(runs), "RUN_MISSING")
     return max(r["id"] for r in runs)
@@ -574,24 +574,25 @@ Publish one completed check only when the verified outcome changes.
     need(SHA.fullmatch(pr["head"]["sha"]) and pr["base"]["repo"]["id"] == settings["repository_id"], "CHECK_TARGET")
     head = pr["head"]["sha"]
     try:
+        reader = GitHubReader(client, settings["repository"])
         if run_id is None:
-            run_id = discover_run(client, settings, pr)
+            run_id = discover_run(reader, settings, pr)
         proof = collect(client, settings, number, run_id, gate_policy, state.setdefault("blobs", {}))
         need(proof["head_sha"] == head, "HEAD_CHANGED")
         # 發布成功前立即重新查核可變 PR、審查與最新 attempt。 / Recheck mutable PR/reviews/latest attempt immediately before green.
-        fresh = client.api(f"{prefix}/pulls/{number}")
+        fresh = reader.get(f"pulls/{number}")
         validate_pr(fresh, settings)
         need(fresh["head"]["sha"] == head, "HEAD_CHANGED")
-        run = client.api(f"{prefix}/actions/runs/{run_id}")
+        run = reader.get(f"actions/runs/{run_id}")
         need(run["run_attempt"] == proof["run_attempt"] and run["status"] == "completed"
              and run["conclusion"] == "success" and run["head_sha"] == head, "RUN_CHANGED")
-        twins = client.pages(related_pull_path(prefix, fresh))
-        validate_run_base(run, fresh, twins, settings["base_branch"], run_base_history(client, prefix, fresh, twins))
-        reject_newer_runs(run, head_runs(client, settings, head), head)
-        reviews = client.pages(f"{prefix}/pulls/{number}/reviews")
+        twins = reader.items(related_pull_path("", fresh).lstrip("/"))
+        validate_run_base(run, fresh, twins, settings["base_branch"], run_base_history(reader, fresh, twins))
+        reject_newer_runs(run, head_runs(reader, settings, head), head)
+        reviews = reader.items(f"pulls/{number}/reviews")
         # 每個帳號只查一次，重複審查不會耗盡呼叫預算。 / One lookup per login, so repeated reviews cannot exhaust the call budget.
         logins = {r["user"]["login"] for r in reviews if r["state"] in ("APPROVED", "DISMISSED", "CHANGES_REQUESTED")}
-        permissions = {login: client.api(f"{prefix}/collaborators/{urllib.parse.quote(login, safe='')}/permission")["role_name"]
+        permissions = {login: reader.get(f"collaborators/{urllib.parse.quote(login, safe='')}/permission")["role_name"]
                        for login in logins}
         excluded = identities(run.get("actor"), run.get("triggering_actor")) | set(proof["excluded_identities"])
         need(validate_review(fresh, reviews, permissions, settings, excluded) == proof["review_ids"], "REVIEW_CHANGED")

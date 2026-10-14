@@ -4,7 +4,7 @@ reader tests."""
 import json
 import urllib.parse
 
-from security_harness.github_http import Denied
+from security_harness.github_http import Denied, strict_json
 
 PAGING = ("per_page", "page")
 ACTIONS_APP_ID = 15368
@@ -16,7 +16,11 @@ class FakeGitHub:
         self.prefix = f"/repos/{repo}/"
         self.routes = {}
         self.requests = []
+        self.posts = []
         self.next_job_id = 1000
+
+    def post_reply(self, path, payload):
+        raise Denied("GITHUB_HTTP_404")
 
     def add(self, path, value):
         self.routes[route(self.prefix + path)] = value
@@ -56,6 +60,10 @@ class FakeGitHub:
         path = route(self.prefix + f"commits/{head_sha}/check-runs?check_name={name}&filter=all")
         return self.routes.setdefault(path, Listing("check_runs", [], None))
 
+    def api(self, path, method="GET", payload=None):
+        """與 GitHub.api 相同：送出請求並嚴格解析 JSON。 / Same as GitHub.api: send the request and parse strict JSON."""
+        return strict_json(self.raw("https://api.github.com" + path, method, payload))
+
     def job(self, job_id):
         return self.routes[route(self.prefix + f"actions/jobs/{job_id}")]
 
@@ -66,10 +74,16 @@ class FakeGitHub:
         # 重複參數在 GitHub 上靜默生效，這裡直接讓測試失敗。 / GitHub silently accepts repeated parameters; fail the test instead.
         assert len({name for name, _ in query}) == len(query), f"repeated query parameter: {url}"
         self.requests.append((method, parts.path, dict(query)))
+        if method == "POST":
+            # 記錄寫入，回應由測試指定。 / Record the write; the test decides the reply.
+            self.posts.append((parts.path, payload))
+            return json.dumps(self.post_reply(parts.path, payload)).encode()
         key = route(parts.path, query)
         if key not in self.routes:
             raise Denied("GITHUB_HTTP_404")
         value = self.routes[key]
+        if isinstance(value, bytes):
+            return value
         size = min(int(dict(query).get("per_page", 30)), 100)
         start = (int(dict(query).get("page", 1)) - 1) * size
         if isinstance(value, Listing):

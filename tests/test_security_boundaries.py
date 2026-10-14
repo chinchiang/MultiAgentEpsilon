@@ -238,12 +238,13 @@ def test_attestation_verifier_rejects_forged_or_wrong_run_proofs(tmp_path, monke
         if field == 'nonzero': raise RuntimeError('invalid cryptographic signature')
         return json.dumps([] if field == 'missing' else [{'verificationResult': {'statement': statement}}]).encode()
     monkeypatch.setattr(processes, 'bounded_output', verify)
-    class Client:
-        def api(self, path):
-            assert '/attestations/sha256:' in path
-            return {'attestations': [{'bundle': {'synthetic': 'unsigned input'}}]}
+    from security_harness.github_readonly import GitHubReader
+    from tests.fake_github import FakeGitHub
+    github = FakeGitHub('owner/repo')
+    github.add(f'attestations/sha256:{hashlib.sha256(raw).hexdigest()}',
+               {'attestations': [{'bundle': {'synthetic': 'unsigned input'}}]})
     with pytest.raises(publisher.Denied, match='ATTESTATION_'):
-        publisher.verify_artifact_attestation(Client(), settings, run, raw)
+        publisher.verify_artifact_attestation(GitHubReader(github, 'owner/repo'), settings, run, raw)
 
 
 @pytest.mark.parametrize('status,headers,code', [(403, {}, 'GITHUB_HTTP_403'),
