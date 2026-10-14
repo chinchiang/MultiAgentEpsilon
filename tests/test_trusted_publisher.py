@@ -326,16 +326,22 @@ def test_arbitrary_redirect_and_authenticated_non_github_destinations_denied():
         client.raw("https://api.github.com/repos/owner/repo/actions/artifacts/1/zip")
 
 
+def posting_repository(bundle, first_id=30):
+    # 只提供 PR 5 並接受 check run 寫入；回應的 ID 依寫入次數遞增。 / Serves PR 5 and accepts check-run writes, replying
+    # with an ID that grows with each write.
+    github = FakeGitHub("owner/repo")
+    github.add("pulls/5", bundle["pr"])
+    github.post_reply = lambda path, payload: {"id": first_id + len(github.posts), "app": {"id": 42},
+                                               "head_sha": "b"*40, "conclusion": payload.get("conclusion")}
+    return github
+
+
 def test_verification_error_publishes_failure_and_hides_exception_text(bundle, monkeypatch):
-    writes = []
-    class Client:
-        def api(self, path, method="GET", payload=None):
-            if method == "GET": return bundle["pr"]
-            writes.append(copy.deepcopy(payload))
-            return {"id": 30, "app": {"id": 42}, "head_sha": "b"*40, "conclusion": payload.get("conclusion")}
+    github = posting_repository(bundle)
     def fail(*args): raise RuntimeError("credential-like-sensitive-diagnostic")
     monkeypatch.setattr(publisher, "collect", fail)
-    report = publisher.publish(Client(), bundle["settings"], bundle["gate_policy"], 5, 100)
+    report = publisher.publish(github, bundle["settings"], bundle["gate_policy"], 5, 100)
+    writes = [payload for _, payload in github.posts]
     # 每種結果只發布一個 completed 檢查，不用 in_progress 造成閃動。 / One completed check per outcome: no in_progress placeholder that makes the required check flap.
     assert len(writes) == 1 and writes[0]["status"] == "completed" and writes[0]["conclusion"] == "failure"
     assert report["decision"] == "BLOCK" and report["code"] == "VERIFICATION_ERROR"
@@ -343,39 +349,29 @@ def test_verification_error_publishes_failure_and_hides_exception_text(bundle, m
 
 
 def test_unchanged_outcome_is_not_reposted_but_a_change_is(bundle, monkeypatch):
-    writes = []
-    class Client:
-        def api(self, path, method="GET", payload=None):
-            if method == "GET": return bundle["pr"]
-            writes.append(payload)
-            return {"id": 30 + len(writes), "app": {"id": 42}, "head_sha": "b"*40, "conclusion": payload["conclusion"]}
+    github = posting_repository(bundle)
     code = {"value": "RUN_MISSING"}
     def deny(*args): raise publisher.Denied(code["value"])
     monkeypatch.setattr(publisher, "collect", deny)
     state = {}
-    first = publisher.publish(Client(), bundle["settings"], bundle["gate_policy"], 5, 100, state)
-    again = publisher.publish(Client(), bundle["settings"], bundle["gate_policy"], 5, 100, state)
-    assert len(writes) == 1 and first["check_run_id"] == again["check_run_id"] == 31
+    first = publisher.publish(github, bundle["settings"], bundle["gate_policy"], 5, 100, state)
+    again = publisher.publish(github, bundle["settings"], bundle["gate_policy"], 5, 100, state)
+    assert len(github.posts) == 1 and first["check_run_id"] == again["check_run_id"] == 31
     code["value"] = "GATE_REJECTED"
-    publisher.publish(Client(), bundle["settings"], bundle["gate_policy"], 5, 100, state)
-    assert len(writes) == 2 and state["published"]["code"] == "GATE_REJECTED"
+    publisher.publish(github, bundle["settings"], bundle["gate_policy"], 5, 100, state)
+    assert len(github.posts) == 2 and state["published"]["code"] == "GATE_REJECTED"
 
 
 def test_exhausted_call_budget_replaces_an_earlier_success_with_failure(bundle, monkeypatch):
     # 自身預算用完不是 GitHub 限流；舊綠燈不能因此一直留著。 / Running out of our own call budget is not
     # GitHub throttling, so an earlier green must not survive it.
-    writes = []
-    class Client:
-        def api(self, path, method="GET", payload=None):
-            if method == "GET": return bundle["pr"]
-            writes.append(copy.deepcopy(payload))
-            return {"id": 40 + len(writes), "app": {"id": 42}, "head_sha": "b"*40, "conclusion": payload["conclusion"]}
+    github = posting_repository(bundle, first_id=40)
     state = {"published": {"head_sha": "b"*40, "conclusion": "success", "code": "VERIFIED", "run_id": 100,
                            "run_attempt": 1, "review_ids": [7], "check_run_id": 30}}
     def exhausted(*args): raise publisher.Denied("API_BUDGET")
     monkeypatch.setattr(publisher, "collect", exhausted)
-    report = publisher.publish(Client(), bundle["settings"], bundle["gate_policy"], 5, 100, state)
-    assert [(w["conclusion"], w["output"]["summary"]) for w in writes] == [("failure", "API_BUDGET")]
+    report = publisher.publish(github, bundle["settings"], bundle["gate_policy"], 5, 100, state)
+    assert [(w["conclusion"], w["output"]["summary"]) for _, w in github.posts] == [("failure", "API_BUDGET")]
     assert (report["decision"], report["code"], report["check_run_id"]) == ("BLOCK", "API_BUDGET", 41)
     assert state["published"]["conclusion"] == "failure"
 
@@ -416,17 +412,13 @@ def test_real_client_still_posts_the_failure_after_verification_spends_the_whole
 
 @pytest.mark.parametrize("code", ["GITHUB_RATE_LIMIT"])
 def test_throttling_backs_off_without_posting(bundle, monkeypatch, code):
-    writes = []
-    class Client:
-        def api(self, path, method="GET", payload=None):
-            if method == "GET": return bundle["pr"]
-            writes.append(payload)
+    github = posting_repository(bundle)
     def throttled(*args): raise publisher.Denied(code)
     monkeypatch.setattr(publisher, "collect", throttled)
     state = {}
     with pytest.raises(publisher.Denied, match=code):
-        publisher.publish(Client(), bundle["settings"], bundle["gate_policy"], 5, 100, state)
-    assert writes == [] and state["backoff_until"] > datetime.now(timezone.utc).timestamp()
+        publisher.publish(github, bundle["settings"], bundle["gate_policy"], 5, 100, state)
+    assert github.posts == [] and state["backoff_until"] > datetime.now(timezone.utc).timestamp()
 
 
 def test_unrelated_fork_runs_do_not_block_but_a_newer_same_head_run_does(bundle):

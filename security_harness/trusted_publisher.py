@@ -565,8 +565,9 @@ Publish one completed check only when the verified outcome changes.
     """
     state = {} if state is None else state
     prefix = "/repos/" + settings["repository"]
+    reader = GitHubReader(client, settings["repository"])
     try:
-        pr = client.api(f"{prefix}/pulls/{number}")
+        pr = reader.get(f"pulls/{number}")
     except Denied as exc:
         if str(exc) in THROTTLED:
             state["backoff_until"] = int(time.time()) + 900
@@ -574,7 +575,6 @@ Publish one completed check only when the verified outcome changes.
     need(SHA.fullmatch(pr["head"]["sha"]) and pr["base"]["repo"]["id"] == settings["repository_id"], "CHECK_TARGET")
     head = pr["head"]["sha"]
     try:
-        reader = GitHubReader(client, settings["repository"])
         if run_id is None:
             run_id = discover_run(reader, settings, pr)
         proof = collect(client, settings, number, run_id, gate_policy, state.setdefault("blobs", {}))

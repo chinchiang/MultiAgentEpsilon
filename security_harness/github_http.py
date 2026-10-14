@@ -99,15 +99,3 @@ class GitHub:
     def api(self, path, method="GET", payload=None):
         need(path.startswith("/") and not path.startswith("//"), "API_PATH")
         return strict_json(self.raw("https://api.github.com" + path, method, payload))
-
-    def pages(self, path):
-        result = []
-        for page in range(1, 102):
-            separator = "&" if "?" in path else "?"
-            items = self.api(path + separator + f"per_page=100&page={page}")
-            need(isinstance(items, list), "PAGINATION_TYPE")
-            need(len(result) + len(items) <= 10000, "PAGINATION_LIMIT")
-            result.extend(items)
-            if len(items) < 100:
-                return result
-        raise Denied("PAGINATION_LIMIT")

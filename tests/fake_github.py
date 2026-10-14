@@ -76,12 +76,14 @@ class FakeGitHub:
         self.requests.append((method, parts.path, dict(query)))
         if method == "POST":
             # 記錄寫入，回應由測試指定。 / Record the write; the test decides the reply.
-            self.posts.append((parts.path, payload))
+            self.posts.append((parts.path, json.loads(json.dumps(payload))))
             return json.dumps(self.post_reply(parts.path, payload)).encode()
         key = route(parts.path, query)
         if key not in self.routes:
             raise Denied("GITHUB_HTTP_404")
         value = self.routes[key]
+        if isinstance(value, Exception):
+            raise value
         if isinstance(value, bytes):
             return value
         size = min(int(dict(query).get("per_page", 30)), 100)

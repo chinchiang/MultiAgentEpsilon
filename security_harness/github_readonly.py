@@ -1,9 +1,11 @@
-"""使用注入的代理身分或既有權杖唯讀存取 GitHub。不搜尋權杖、不登入、不重新導向或寫入；沿用發布器的回應大小、期限、JSON 與分頁契約，不取得 App 權杖。
+"""使用注入的代理身分或既有權杖唯讀存取 GitHub。不搜尋權杖、不登入、不重新導向或寫入；沿用 GitHub 傳輸層的回應大小、期限與 JSON 契約，不取得 App 權杖。GitHubReader 綁定單一儲存庫，在任何傳輸層上負責分頁與 check 來源。
 
 Read-only GitHub API access with injected proxy identity or an existing token.
 
-No token discovery, login, redirects or mutation. Reuse the publisher's bounded
-response, deadline, JSON and pagination contracts without obtaining an App token.
+No token discovery, login, redirects or mutation. Reuse the GitHub transport's
+bounded response, deadline and JSON contracts without obtaining an App token.
+GitHubReader, bound to one repository, owns paging and check sources over any
+transport.
 
 Only api.github.com is reachable, so artifact downloads (which redirect to blob
 storage) are intentionally unsupported. Without a token, GitHub's anonymous rate
