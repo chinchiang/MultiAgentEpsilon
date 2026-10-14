@@ -114,6 +114,58 @@ def test_aws_cli_child_receives_only_aws_and_basic_process_context(tmp_path, mon
     assert asyncio.run(cli.converse('ap-southeast-1', {'modelId': 'synthetic'})) == {'ok': True}
 
 
+def test_aws_settings_outside_the_allowlist_never_reach_the_cli():
+    # 這些設定會改變 CLI 載入什麼或連到哪裡；白名單之外一律丟掉。 / These change what the CLI loads or where it
+    # connects; anything outside the allowlist is dropped.
+    from security_harness.llm.transport import aws_child_environment
+    dropped = {"AWS_ROLE_ARN": "arn:aws:iam::123456789012:role/synthetic", "AWS_CA_BUNDLE": "/tmp/synthetic-ca.pem",
+               "AWS_DATA_PATH": "/tmp/synthetic-models", "AWS_REGION": "us-east-1",
+               "AWS_ENDPOINT_URL_BEDROCK_RUNTIME": "https://attacker.example.invalid"}
+    assert not set(dropped) & set(aws_child_environment(dropped))
+
+
+AWS_ALLOWED = {"AWS_PROFILE": "synthetic-profile", "AWS_DEFAULT_PROFILE": "synthetic-default",
+               "AWS_CONFIG_FILE": ".state/bedrock/config", "AWS_SHARED_CREDENTIALS_FILE": ".state/bedrock/credentials",
+               "AWS_ACCESS_KEY_ID": "ASIASYNTHETIC", "AWS_SECRET_ACCESS_KEY": "synthetic-secret",
+               "AWS_SESSION_TOKEN": "synthetic-session"}
+AWS_FORCED = {"AWS_EC2_METADATA_DISABLED": "true", "AWS_MAX_ATTEMPTS": "1", "AWS_PAGER": "",
+              "AWS_IGNORE_CONFIGURED_ENDPOINT_URLS": "true", "AWS_CLI_AUTO_PROMPT": "off"}
+
+
+def test_aws_cli_keeps_its_credential_chain_and_forced_settings_but_no_other_secret():
+    # SSO 與臨時憑證需要這 7 個名稱；強制值蓋過操作者的設定。 / SSO and temporary credentials need these seven
+    # names; the forced values override the operator's own.
+    from security_harness.llm.transport import aws_child_environment
+    basic = {"PATH": "/usr/bin", "HOME": "/home/synthetic", "HTTPS_PROXY": "http://proxy.invalid:3128",
+             "SSL_CERT_FILE": "/etc/ssl/synthetic.pem"}
+    environ = {**AWS_ALLOWED, **basic, "AWS_MAX_ATTEMPTS": "5", "AWS_PAGER": "less",
+               "GH_TOKEN": "synthetic-github-token", "GEMINI_API_KEY": "synthetic-gemini-key"}
+    assert aws_child_environment(environ) == {**AWS_ALLOWED, **basic, **AWS_FORCED}
+
+
+def test_gated_aws_cli_receives_the_allowlisted_environment(tmp_path, monkeypatch):
+    # 正式執行經過 model_process 閘門再 exec CLI；在那條路徑上觀察 CLI 實際收到的環境。 / Real runs exec the CLI
+    # through the model_process gate; observe the environment the CLI actually receives on that path.
+    import shutil
+    import uuid
+    from security_harness.lifecycle import prepare_run, run_directory, temporary_directory
+    monkeypatch.setenv("AWS_PROFILE", "synthetic-profile")
+    monkeypatch.setenv("AWS_ROLE_ARN", "arn:aws:iam::123456789012:role/synthetic")
+    monkeypatch.setenv("AWS_MAX_ATTEMPTS", "5")
+    monkeypatch.setenv("GH_TOKEN", "synthetic-github-token")
+    run_id = str(uuid.uuid4())
+    prepare_run(tmp_path, run_id, operation="model-smoke")
+    try:
+        cli = cli_fixture(tmp_path, "import json, os\nprint(json.dumps(dict(os.environ)))\n")
+        cli.run_directory = run_directory(tmp_path, run_id)
+        seen = asyncio.run(cli.converse("ap-southeast-1", {"modelId": "synthetic"}))
+    finally:
+        shutil.rmtree(temporary_directory(run_id), ignore_errors=True)
+    assert seen["AWS_PROFILE"] == "synthetic-profile" and seen["AWS_MAX_ATTEMPTS"] == "1"
+    assert "AWS_ROLE_ARN" not in seen and "GH_TOKEN" not in seen
+    assert list((run_directory(tmp_path, run_id) / "groups").iterdir()), "the CLI must have run through the gate"
+
+
 @pytest.mark.parametrize('stderr,code,detail', [
     ('An error occurred (ValidationException) when calling the Converse operation: The model returned the '
      'following errors: output_config.format: Extra inputs are not permitted', 'PROVIDER_FAILURE', 'OUTPUT_CONFIGURATION'),

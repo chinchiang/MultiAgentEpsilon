@@ -172,6 +172,28 @@ AWS_CHILD_ENV = frozenset({"PATH", "HOME", "USER", "LOGNAME", "LANG", "LC_ALL", 
                            "SSL_CERT_FILE", "SSL_CERT_DIR", "REQUESTS_CA_BUNDLE"})
 
 
+# SSO 與臨時憑證所需的 AWS 名稱；其他 AWS_*（端點、CA、資料路徑、角色）會改變 CLI 載入什麼或連到哪裡。 / The AWS names
+# SSO and temporary credentials need; any other AWS_* (endpoints, CA, data path, roles) changes what the CLI loads or
+# where it connects.
+AWS_ALLOWED_ENV = frozenset({"AWS_PROFILE", "AWS_DEFAULT_PROFILE", "AWS_CONFIG_FILE", "AWS_SHARED_CREDENTIALS_FILE",
+                             "AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_SESSION_TOKEN"})
+# 一律強制：不查 EC2 metadata、不重試、不開 pager、不用設定檔端點、不自動提示。 / Always forced: no EC2 metadata, no
+# retries, no pager, no configured endpoints and no auto-prompt.
+AWS_FORCED_ENV = {"AWS_EC2_METADATA_DISABLED": "true", "AWS_MAX_ATTEMPTS": "1", "AWS_PAGER": "",
+                  "AWS_IGNORE_CONFIGURED_ENDPOINT_URLS": "true", "AWS_CLI_AUTO_PROMPT": "off"}
+
+
+def aws_child_environment(environ=os.environ):
+    """AWS CLI 子程序的環境：白名單內的 AWS 設定與基本程序、代理、CA 變數，再套上強制值。
+
+The AWS CLI child's environment: allowlisted AWS settings and basic process,
+    proxy and CA variables, then the forced values.
+    """
+    env = {k: v for k, v in environ.items() if k in AWS_ALLOWED_ENV or k in AWS_CHILD_ENV}
+    env.update(AWS_FORCED_ENV)
+    return env
+
+
 class AwsCLI:
     """使用設定的 AWS 憑證鏈，不用 shell 或互動登入。JSON 放在封存的匿名 Linux 記憶體檔案，不經命令參數或檔案系統 payload；stdin 只傳登記握手。取消或逾時時終止專用群組並回收 CLI。
 
@@ -187,13 +209,10 @@ Use the configured AWS credential chain. No shell or interactive login.
         self.run_directory = run_directory
 
     async def converse(self, region, payload):
-        # 白名單只讓 CLI 與 credential_process 看見 AWS 設定及基本 / Allowlist: the CLI and any credential_process helper see AWS settings and basic
-        # 程序／代理／CA 環境，不傳入 GH_TOKEN 或其他供應商權杖。 / process/proxy/CA context only, never unrelated tokens (GH_TOKEN, other providers).
-        # 排除端點覆寫，避免已簽署請求被改送其他位置。 / Endpoint overrides are excluded so signed requests cannot be redirected.
-        env = {k: v for k, v in os.environ.items()
-               if (k.startswith("AWS_") and not k.startswith("AWS_ENDPOINT_URL")) or k in AWS_CHILD_ENV}
-        env.update(AWS_EC2_METADATA_DISABLED="true", AWS_MAX_ATTEMPTS="1", AWS_PAGER="",
-                   AWS_IGNORE_CONFIGURED_ENDPOINT_URLS="true", AWS_CLI_AUTO_PROMPT="off")
+        # CLI 與 credential_process 只看見白名單內的 AWS 設定與基本程序／代理／CA 環境，不傳入 GH_TOKEN、其他供應商權杖或端點覆寫。
+        # / The CLI and any credential_process helper see only the allowlisted AWS settings and basic process/proxy/CA
+        # context: never GH_TOKEN, other providers' tokens or endpoint overrides.
+        env = aws_child_environment(os.environ)
         # 此處 AWS CLI v2 無法解析以管線提供的 /dev/stdin JSON。 / AWS CLI v2 cannot parse the JSON from a pipe-backed /dev/stdin here.
         # memfd 提供可 seek 的輸入，封存可防止子程序修改。 / memfd provides a seekable input; seals prevent any child from modifying it.
         # Python 未提供常數名稱時使用 Linux ABI 常數。 / Linux ABI constants are used when the Python build omits their names.
