@@ -23,7 +23,7 @@ python3 -I scripts/install_test_tools.py
 | 目標 | 自動突變範圍 |
 |---|---|
 | `security_harness/results.py` | `validate_cases`、`seeded_defects`、`decide` |
-| `security_harness/trusted_publisher.py` | `strict_json`，不是整個發布器 |
+| `security_harness/github_http.py` | `strict_json`，不是整個 GitHub 傳輸層或發布器 |
 | `security_harness/preflight.py` | `validate_package_policy`、`check_metadata` |
 | `security_harness/authorization.py` | `same`（oracle 的型別嚴格 JSON 比對） |
 | `security_harness/isolation.py` | `verify_container` |
@@ -58,7 +58,7 @@ After the README's Python 3.12 bootstrap, run the three commands in the Chinese 
 
 ## Scope and outcomes
 
-Targets are results.py's validate_cases/seeded_defects/decide, trusted_publisher.py's strict_json, preflight.py's validate_package_policy/check_metadata, authorization.py's typed JSON comparison `same`, isolation.py's verify_container, scope.py's valid_remote_hosts/validate_model_roe, and benchmark.py's bounded_text/validate_review/parse_review. This is not the entire publisher or repository. Operators invert comparisons/membership/identity, change inclusive boundaries, swap and/or, and invert negation. Mutated nodes are located by AST walk position, so nested same-type nodes starting at one column (such as `a and b or c`) are not confused. One mutation is applied at a time to a fixed source/test snapshot; the working checkout stays unchanged.
+Targets are results.py's validate_cases/seeded_defects/decide, github_http.py's strict_json, preflight.py's validate_package_policy/check_metadata, authorization.py's typed JSON comparison `same`, isolation.py's verify_container, scope.py's valid_remote_hosts/validate_model_roe, and benchmark.py's bounded_text/validate_review/parse_review. This is not the entire publisher or repository. Operators invert comparisons/membership/identity, change inclusive boundaries, swap and/or, and invert negation. Mutated nodes are located by AST walk position, so nested same-type nodes starting at one column (such as `a and b or c`) are not confused. One mutation is applied at a time to a fixed source/test snapshot; the working checkout stays unchanged.
 
 The mutation worker selects pure-function tests; the model CLI subprocess integration test remains in full pytest but is deselected inside the process-denying mutation worker.
 

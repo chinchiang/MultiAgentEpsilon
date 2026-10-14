@@ -11,6 +11,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 if __name__ == "__main__":
     sys.path.insert(0, str(ROOT))
+from security_harness.github_readonly import GitHubReader, ReadOnlyGitHub
 from security_harness.results import write_json
 from security_harness.trusted_publisher import GITHUB_ACTIONS_APP_ID as ACTIONS_APP_ID
 
@@ -103,18 +104,13 @@ def main():
     try:
         trust = json.loads((ROOT/'security/trust-policy.json').read_text())
         repo = trust['repository']
-        from security_harness.github_readonly import ReadOnlyGitHub
-        client = ReadOnlyGitHub()
-        def api(path, pages=False):
-            full = f'/repos/{repo}/{path}'
-            return client.pages(full) if pages else client.api(full)
-        branch = api('branches/main')
-        brief = api('rulesets?includes_parents=true&per_page=100', pages=True)
-        rules = [api('rulesets/'+str(r['id'])) for r in brief]
-        pr = api(f'pulls/{args.pr}')
-        collaborators = api('collaborators?per_page=100', pages=True)
+        reader = GitHubReader(ReadOnlyGitHub(), repo)
+        branch = reader.get('branches/main')
+        rules = [reader.get('rulesets/'+str(r['id'])) for r in reader.items('rulesets?includes_parents=true')]
+        pr = reader.get(f'pulls/{args.pr}')
+        collaborators = reader.items('collaborators')
         try:
-            owners_file = api('contents/.github/CODEOWNERS?ref=main')
+            owners_file = reader.get('contents/.github/CODEOWNERS?ref=main')
             codeowners = base64.b64decode(owners_file['content']).decode('utf-8')
         except Exception:
             codeowners = None

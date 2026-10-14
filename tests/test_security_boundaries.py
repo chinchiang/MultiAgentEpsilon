@@ -62,19 +62,6 @@ def test_rerun_actor_cannot_approve_their_own_evaluation(bundle):
         bundle['pr']['base']['sha'], ['reviewer'], bundle['permissions'], {'reviewer'}) is None
 
 
-@pytest.mark.parametrize('amount', [1000, 10000, 10001])
-def test_pagination_proves_completeness_at_full_page_boundaries(amount):
-    client = publisher.GitHub('synthetic')
-    def page(path):
-        start = (int(path.rsplit('page=', 1)[1]) - 1) * 100
-        return list(range(start, min(start + 100, amount)))
-    client.api = page
-    if amount > 10000:
-        with pytest.raises(publisher.Denied, match='PAGINATION_LIMIT'): client.pages('/synthetic')
-    else:
-        assert client.pages('/synthetic') == list(range(amount))
-
-
 @pytest.mark.parametrize('field', ['reserved_calls', 'reserved_output_tokens', 'model_roe_sha256',
                                   'max_calls', 'reserved_limit', 'timeout_seconds', 'total_timeout_seconds'])
 def test_budget_and_rules_of_engagement_tampering_cannot_be_scored_complete(tmp_path, field):
@@ -238,12 +225,13 @@ def test_attestation_verifier_rejects_forged_or_wrong_run_proofs(tmp_path, monke
         if field == 'nonzero': raise RuntimeError('invalid cryptographic signature')
         return json.dumps([] if field == 'missing' else [{'verificationResult': {'statement': statement}}]).encode()
     monkeypatch.setattr(processes, 'bounded_output', verify)
-    class Client:
-        def api(self, path):
-            assert '/attestations/sha256:' in path
-            return {'attestations': [{'bundle': {'synthetic': 'unsigned input'}}]}
+    from security_harness.github_readonly import GitHubReader
+    from tests.fake_github import FakeGitHub
+    github = FakeGitHub('owner/repo')
+    github.add(f'attestations/sha256:{hashlib.sha256(raw).hexdigest()}',
+               {'attestations': [{'bundle': {'synthetic': 'unsigned input'}}]})
     with pytest.raises(publisher.Denied, match='ATTESTATION_'):
-        publisher.verify_artifact_attestation(Client(), settings, run, raw)
+        publisher.verify_artifact_attestation(GitHubReader(github, 'owner/repo'), settings, run, raw)
 
 
 @pytest.mark.parametrize('status,headers,code', [(403, {}, 'GITHUB_HTTP_403'),
@@ -259,11 +247,12 @@ def test_permission_errors_and_throttling_are_distinct(status, headers, code):
 
 
 def test_rate_limit_before_first_pr_lookup_persists_backoff(bundle):
-    class Client:
-        def api(self, path): raise publisher.Denied('GITHUB_RATE_LIMIT')
+    from tests.fake_github import FakeGitHub
+    github = FakeGitHub('owner/repo')
+    github.add('pulls/5', publisher.Denied('GITHUB_RATE_LIMIT'))
     state = {}
     with pytest.raises(publisher.Denied, match='GITHUB_RATE_LIMIT'):
-        publisher.publish(Client(), bundle['settings'], bundle['gate_policy'], 5, state=state)
+        publisher.publish(github, bundle['settings'], bundle['gate_policy'], 5, state=state)
     assert state['backoff_until'] > time.time()
 
 

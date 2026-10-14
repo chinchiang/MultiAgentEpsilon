@@ -204,6 +204,7 @@ MultiAgentEpsilon/
 │   ├── container_http.py
 │   ├── dependencies.py
 │   ├── fixture_database.py
+│   ├── github_http.py
 │   ├── github_readonly.py
 │   ├── inputs.py
 │   ├── isolation.py
@@ -220,6 +221,7 @@ MultiAgentEpsilon/
 │   ├── __init__.py
 │   ├── conftest.py
 │   ├── dependency_evidence.py
+│   ├── fake_github.py
 │   ├── model_evidence.py
 │   ├── test_adversarial_authorization.py
 │   ├── test_authorization.py
@@ -262,6 +264,7 @@ MultiAgentEpsilon/
 ├── .env.example
 ├── .gitattributes
 ├── .gitignore
+├── GLOSSARY.md
 ├── README.md
 ├── SECURITY.md
 ├── pyproject.toml
