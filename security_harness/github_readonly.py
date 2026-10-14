@@ -65,3 +65,20 @@ relative to it."""
                 need(all(total == len(result) for total in totals), "LISTING_TOTAL")
                 return result
         raise Denied("PAGINATION_LIMIT")
+
+    def check_source(self, check):
+        """check run 所屬的 workflow run 與 attempt。重跑沿用 run 的 check suite，但每次 attempt 有自己的 job，
+        其 id 即 check run 的 id；run 本身只帶最新的 attempt。 / The workflow run and attempt a check run came from. A
+        rerun keeps the run's check suite but gives each attempt its own job, whose id is the check run's id; the
+        run itself carries only its latest attempt."""
+        suite = check.get("check_suite")
+        need(isinstance(suite, dict) and type(suite.get("id")) is int, "CHECK_RUN_SOURCE_AMBIGUOUS")
+        need(type(check.get("id")) is int and isinstance(check.get("head_sha"), str), "CHECK_ATTEMPT_UNRESOLVED")
+        runs = self.items(f"actions/runs?check_suite_id={suite['id']}", key="workflow_runs")
+        need(len(runs) == 1, "CHECK_RUN_SOURCE_AMBIGUOUS")
+        job = self.get(f"actions/jobs/{check['id']}")
+        need(job.get("id") == check["id"] and job.get("run_id") == runs[0].get("id")
+             and job.get("head_sha") == check.get("head_sha")
+             and job.get("check_run_url") == self.prefix + f"check-runs/{check['id']}"
+             and type(job.get("run_attempt")) is int and job["run_attempt"] >= 1, "CHECK_ATTEMPT_UNRESOLVED")
+        return {"run": runs[0], "run_attempt": job["run_attempt"]}

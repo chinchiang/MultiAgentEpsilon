@@ -113,3 +113,68 @@ def test_reader_accepts_a_repository_named_with_a_leading_dot():
     github = FakeGitHub('owner/.github')
     github.add('pulls/1', {'number': 1})
     assert GitHubReader(github, 'owner/.github').get('pulls/1') == {'number': 1}
+
+
+HEAD = 'a' * 40
+
+
+def test_each_check_resolves_to_its_own_attempt_after_a_rerun():
+    github = FakeGitHub('owner/repo')
+    run = github.workflow_run(7, HEAD, check_suite_id=70)
+    first = github.attempt(run, conclusion='failure')
+    second = github.attempt(run, conclusion='success')
+    reader = GitHubReader(github, 'owner/repo')
+    assert [reader.check_source(check)['run_attempt'] for check in (first, second)] == [1, 2]
+    assert reader.check_source(first)['run']['id'] == 7
+
+
+@pytest.mark.parametrize('runs_in_suite', [0, 2])
+def test_a_check_whose_suite_is_not_exactly_one_run_is_ambiguous(runs_in_suite):
+    github = FakeGitHub('owner/repo')
+    run = github.workflow_run(7, HEAD, check_suite_id=70)
+    check = github.attempt(run)
+    if runs_in_suite == 0:
+        check['check_suite']['id'] = 71
+        github.listing('actions/runs?check_suite_id=71', 'workflow_runs', [])
+    else:
+        github.workflow_run(8, HEAD, check_suite_id=70)
+    with pytest.raises(Denied, match='^CHECK_RUN_SOURCE_AMBIGUOUS$'):
+        GitHubReader(github, 'owner/repo').check_source(check)
+
+
+@pytest.mark.parametrize('tamper', [
+    {'id': 999}, {'run_id': 8}, {'head_sha': 'b' * 40},
+    {'check_run_url': 'https://api.github.com/repos/other/repo/check-runs/1000'},
+    {'check_run_url': 'https://api.github.com/repos/owner/repo/check-runs/1001'},
+    {'run_attempt': 0}, {'run_attempt': '1'}, {'run_attempt': True}, {'run_attempt': None},
+])
+def test_a_job_that_disagrees_with_its_check_leaves_the_attempt_unresolved(tamper):
+    github = FakeGitHub('owner/repo')
+    check = github.attempt(github.workflow_run(7, HEAD, check_suite_id=70))
+    github.job(check['id']).update(tamper)
+    with pytest.raises(Denied, match='^CHECK_ATTEMPT_UNRESOLVED$'):
+        GitHubReader(github, 'owner/repo').check_source(check)
+
+
+@pytest.mark.parametrize('field, value, code', [
+    ('check_suite', {'id': '70&head_sha=x'}, 'CHECK_RUN_SOURCE_AMBIGUOUS'),
+    ('check_suite', {'id': True}, 'CHECK_RUN_SOURCE_AMBIGUOUS'),
+    ('check_suite', None, 'CHECK_RUN_SOURCE_AMBIGUOUS'),
+    ('id', '1000', 'CHECK_ATTEMPT_UNRESOLVED'),
+    ('id', True, 'CHECK_ATTEMPT_UNRESOLVED'),
+])
+def test_a_malformed_check_is_refused_before_any_request(field, value, code):
+    github = FakeGitHub('owner/repo')
+    check = github.attempt(github.workflow_run(7, HEAD, check_suite_id=70))
+    check[field] = value
+    with pytest.raises(Denied, match=f'^{code}$'):
+        GitHubReader(github, 'owner/repo').check_source(check)
+    assert github.requests == []
+
+
+def test_a_check_and_job_that_both_lack_a_head_are_unresolved():
+    github = FakeGitHub('owner/repo')
+    check = github.attempt(github.workflow_run(7, HEAD, check_suite_id=70))
+    del check['head_sha'], github.job(check['id'])['head_sha']
+    with pytest.raises(Denied, match='^CHECK_ATTEMPT_UNRESOLVED$'):
+        GitHubReader(github, 'owner/repo').check_source(check)
