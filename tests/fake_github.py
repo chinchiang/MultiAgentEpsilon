@@ -7,6 +7,8 @@ import urllib.parse
 from security_harness.github_http import Denied, strict_json
 
 PAGING = ("per_page", "page")
+# cursor 分頁端點以這些參數翻頁與排序，不參與路由。 / Cursor-paged endpoints page and sort with these; they take no part in routing.
+CURSOR = ("direction", "before", "after")
 ACTIONS_APP_ID = 15368
 
 
@@ -29,6 +31,12 @@ class FakeGitHub:
         """帶 total_count 的物件列表；total_count 預設為實際筆數，也可指定成不符。 / An object listing with total_count,
         the actual item count unless set to disagree."""
         self.routes[route(self.prefix + path)] = Listing(key, items, total_count)
+
+    def cursor_listing(self, path, items):
+        """cursor 分頁的陣列，例如 repository activity：items 由新到舊排列，GitHub 忽略 page，每頁都回同一批，
+        per_page 預設 30。 / A cursor-paged array such as repository activity: items run newest first, and GitHub ignores
+        page and answers every page with the same items, per_page defaulting to 30."""
+        self.routes[route(self.prefix + path)] = Cursor(items)
 
     def workflow_run(self, run_id, head_sha, check_suite_id, **fields):
         """一個 run 屬於一個 check suite，重跑仍沿用同一個；fields 補上事件、路徑等其他欄位。 / A run belongs to one
@@ -79,9 +87,15 @@ class FakeGitHub:
             self.posts.append((parts.path, json.loads(json.dumps(payload))))
             return json.dumps(self.post_reply(parts.path, payload)).encode()
         key = route(parts.path, query)
+        cursor_key = route(parts.path, [(name, value) for name, value in query if name not in CURSOR])
+        if key not in self.routes and isinstance(self.routes.get(cursor_key), Cursor):
+            key = cursor_key
         if key not in self.routes:
             raise Denied("GITHUB_HTTP_404")
         value = self.routes[key]
+        if isinstance(value, Cursor):
+            items = value.items if dict(query).get("direction", "desc") == "desc" else value.items[::-1]
+            return json.dumps(items[:min(int(dict(query).get("per_page", 30)), 100)]).encode()
         if isinstance(value, Exception):
             raise value
         if isinstance(value, bytes):
@@ -94,6 +108,11 @@ class FakeGitHub:
         elif isinstance(value, list):
             value = value[start:start + size]
         return json.dumps(value).encode()
+
+
+class Cursor:
+    def __init__(self, items):
+        self.items = items
 
 
 class Listing:

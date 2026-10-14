@@ -387,27 +387,24 @@ def test_full_guard_fetches_and_excludes_the_rerun_actor(bundle, monkeypatch):
     bundle['run']['triggering_actor']['login'] = reviewer
     bundle['reviews'][0]['submitted_at'] = '2026-10-13T07:02:12Z'
     monkeypatch.setenv('GITHUB_RUN_ID', '100')
-    paths = []
-    def api(args, **kwargs):
-        path = args[2].split('/', 3)[3]; paths.append(path)
-        paged = '--paginate' in args
-        if path == 'pulls/5': value = bundle['pr']
-        elif '/reviews?' in path: value = bundle['reviews']
-        elif '/commits?' in path: value = [{'sha': 'b'*40, 'author': {'login': 'author'}, 'committer': None}]
-        elif path.startswith('collaborators/'): value = {'role_name': 'write'}
-        elif path.startswith('commits/'): value = {'author': {'login': 'author'}, 'committer': None}
-        elif path == 'actions/runs/100': value = bundle['run']
-        elif path.startswith('pulls?state=all&head='): value = [bundle['pr']]
-        elif '/timeline?' in path: value = []
-        elif path.startswith('activity?ref=refs/heads/feature&'):
-            value = [{'activity_type': 'push', 'after': 'b'*40, 'timestamp': '2026-10-13T07:00:09Z'}]
-        elif path.startswith('rules/branches/main'):
-            value = [{'type': 'pull_request', 'ruleset_id': 1, 'parameters': {'require_last_push_approval': True}}]
-        else: pytest.fail('unexpected API ' + path)
-        return ''.join(json.dumps(v)+'\n' for v in value) if paged else json.dumps(value)
-    monkeypatch.setattr(guard.subprocess, 'check_output', api)
+    from tests.fake_github import FakeGitHub
+    github = FakeGitHub(json.loads((Path(__file__).resolve().parents[1] / 'security/trust-policy.json').read_text())['repository'])
+    github.add('pulls/5', bundle['pr'])
+    github.add('pulls/5/reviews', bundle['reviews'])
+    github.add('pulls/5/commits', [{'sha': 'b'*40, 'author': {'login': 'author'}, 'committer': None}])
+    github.add(f'collaborators/{reviewer}/permission', {'role_name': 'write'})
+    github.add('commits/' + 'b'*40, {'author': {'login': 'author'}, 'committer': None})
+    github.add('actions/runs/100', bundle['run'])
+    github.add('pulls?state=all&head=owner:feature', [bundle['pr']])
+    github.add('issues/5/timeline', [])
+    github.cursor_listing('activity?ref=refs/heads/feature',
+                          [{'activity_type': 'push', 'after': 'b'*40, 'timestamp': '2026-10-13T07:00:09Z'}])
+    github.add('rules/branches/main',
+               [{'type': 'pull_request', 'ruleset_id': 1, 'parameters': {'require_last_push_approval': True}}])
+    monkeypatch.setattr(guard, 'ReadOnlyGitHub', lambda: github)
     assert guard.live_approval(5, 'b'*40, 'a'*40) is None
-    assert 'actions/runs/100' in paths and any('/timeline?' in p for p in paths)
+    paths = [path for _, path, _ in github.requests]
+    assert any(p.endswith('/actions/runs/100') for p in paths) and any(p.endswith('/issues/5/timeline') for p in paths)
 
 
 def test_glm_blind_review_worker_scoring_and_cleanup_use_mock_transport_only(tmp_path, monkeypatch):
