@@ -6,12 +6,16 @@ import sys
 import pytest
 from pathlib import Path
 
+from tests.fake_github import FakeGitHub
+
 # 目前 main 規則集套用的最後推送核准規則。 / The last-push approval rule the main ruleset currently applies.
 PULL_REQUEST_RULE = {"type": "pull_request", "ruleset_id": 1, "parameters": {"require_last_push_approval": True}}
 PULL = {"state": "open", "head": {"sha": "h" * 40, "ref": "feature"}, "base": {"sha": "b" * 40},
         "user": {"login": "someone-else"}}
 # GitHub 伺服器記錄的推送；commit 日期可自報，不能代表推送時間。 / A server-recorded push; commit dates are self-asserted.
 HEAD_PUSH = {"activity_type": "push", "before": "e" * 40, "after": "h" * 40, "timestamp": "2026-10-13T07:00:09Z"}
+POLICY = json.loads((Path(__file__).resolve().parents[1] / "security/trust-policy.json").read_text())
+REVIEWER = POLICY["baseline_reviewers"][-1]
 
 
 @pytest.fixture(autouse=True)
@@ -59,36 +63,35 @@ def test_head_commit_identities_only_remove_approvals():
     assert approved_review(pr, [review], "head", "base", ["owner"], {"owner": "write"}, {"web-flow"}) is not None
 
 
+def guarded_repository(monkeypatch, commits, role="write", rules=None, submitted="2026-10-13T07:02:12Z", activity=None):
+    """guard 讀到的 GitHub：PR 7 有一筆名單內審查者的核准。 / The GitHub state the guard reads: PR 7 carries one approval
+    from a listed reviewer."""
+    import scripts.check_trusted_changes as guard
+    github = FakeGitHub(POLICY["repository"])
+    github.add("pulls/7", PULL)
+    github.add(f"collaborators/{REVIEWER}/permission", {"role_name": role})
+    github.add("commits/" + "h" * 40, {"author": {"login": "someone-else"}, "committer": {"login": "web-flow"}})
+    github.add("pulls/7/reviews", [{"id": 3, "state": "APPROVED", "commit_id": "h" * 40, "user": {"login": REVIEWER},
+                                    "submitted_at": submitted}])
+    github.add("pulls/7/commits", commits(REVIEWER))
+    github.add("rules/branches/main", rules if rules is not None else [PULL_REQUEST_RULE])
+    github.add("activity?ref=refs/heads/feature", activity if activity is not None else [HEAD_PUSH])
+    monkeypatch.setattr(guard, "ReadOnlyGitHub", lambda: github)
+    return github
+
+
+def head_commit_only(reviewer):
+    return [{"sha": "h" * 40, "author": {"login": "someone-else"}, "committer": {"login": "web-flow"}}]
+
+
 @pytest.mark.parametrize("role,approved", [("write", True), ("read", False)])
 def test_live_approval_resolves_reviewer_permission_through_github(monkeypatch, role, approved):
     import scripts.check_trusted_changes as guard
-    reviewer = json.loads((Path(__file__).resolve().parents[1] / "security/trust-policy.json").read_text())["baseline_reviewers"][-1]
-    responses = {
-        "pulls/7": PULL,
-        f"collaborators/{reviewer}/permission": {"role_name": role},
-        "commits/" + "h" * 40: {"author": {"login": "someone-else"}, "committer": {"login": "web-flow"}},
-    }
-    review = {"id": 3, "state": "APPROVED", "commit_id": "h" * 40, "user": {"login": reviewer},
-              "submitted_at": "2026-10-13T07:02:12Z"}
-    commits = [{"sha": "h" * 40, "author": {"login": "someone-else"}, "committer": {"login": "web-flow"}}]
-    requested = []
-    def fake(args, **kwargs):
-        assert kwargs.get("encoding") == "utf-8" and "text" not in kwargs
-        path = args[2].split("/", 3)[3]
-        requested.append(path)
-        if path.startswith("pulls/7/reviews"):
-            return json.dumps(review) + "\n"
-        if path.startswith("pulls/7/commits"):
-            return "".join(json.dumps(c) + "\n" for c in commits)
-        if path.startswith("rules/branches/main"):
-            return json.dumps(PULL_REQUEST_RULE) + "\n"
-        if path.startswith("activity?"):
-            return json.dumps(HEAD_PUSH) + "\n"
-        return json.dumps(responses[path])
-    monkeypatch.setattr(guard.subprocess, "check_output", fake)
+    github = guarded_repository(monkeypatch, head_commit_only, role=role)
     result = guard.live_approval(7, "h" * 40, "b" * 40)
     assert (result is not None) is approved
-    assert f"collaborators/{reviewer}/permission" in requested
+    assert any(path.endswith(f"/collaborators/{REVIEWER}/permission") for _, path, _ in github.requests)
+    assert {method for method, _, _ in github.requests} == {"GET"}
 
 
 def test_guard_retains_sha_bound_evidence_even_when_it_blocks(tmp_path):
@@ -152,26 +155,7 @@ def test_git_rename_checks_both_sides(tmp_path, old, new, blocked):
 
 def guard_with_commits(monkeypatch, commits, rules=None, submitted="2026-10-13T07:02:12Z", activity=None):
     import scripts.check_trusted_changes as guard
-    reviewer = json.loads((Path(__file__).resolve().parents[1] / "security/trust-policy.json").read_text())["baseline_reviewers"][-1]
-    responses = {
-        "pulls/7": PULL,
-        f"collaborators/{reviewer}/permission": {"role_name": "write"},
-        "commits/" + "h" * 40: {"author": {"login": "someone-else"}, "committer": {"login": "web-flow"}},
-    }
-    review = {"id": 3, "state": "APPROVED", "commit_id": "h" * 40, "user": {"login": reviewer}, "submitted_at": submitted}
-    def fake(args, **kwargs):
-        path = args[2].split("/", 3)[3]
-        if path.startswith("pulls/7/reviews"):
-            return json.dumps(review) + "\n"
-        if path.startswith("pulls/7/commits"):
-            return "".join(json.dumps(c) + "\n" for c in commits(reviewer))
-        if path.startswith("rules/branches/main"):
-            return "".join(json.dumps(r) + "\n" for r in (rules if rules is not None else [PULL_REQUEST_RULE]))
-        if path.startswith("activity?"):
-            assert path.startswith("activity?ref=refs/heads/feature&")
-            return "".join(json.dumps(a) + "\n" for a in (activity if activity is not None else [HEAD_PUSH]))
-        return json.dumps(responses[path])
-    monkeypatch.setattr(guard.subprocess, "check_output", fake)
+    guarded_repository(monkeypatch, commits, rules=rules, submitted=submitted, activity=activity)
     return lambda: guard.live_approval(7, "h" * 40, "b" * 40)
 
 
@@ -235,6 +219,44 @@ def test_guard_refuses_trust_policy_it_cannot_enforce(tmp_path, monkeypatch, cha
     (tmp_path / "security").mkdir()
     (tmp_path / "security/trust-policy.json").write_text(json.dumps({**policy, **change}))
     monkeypatch.setattr(guard, "ROOT", tmp_path)
-    monkeypatch.setattr(guard.subprocess, "check_output", lambda *a, **k: pytest.fail("GitHub must not be queried"))
+    monkeypatch.setattr(guard, "ReadOnlyGitHub", lambda: pytest.fail("GitHub must not be queried"))
     with pytest.raises(ValueError, match="unsupported trust policy"):
         guard.live_approval(7, "h" * 40, "b" * 40)
+
+
+def run_guard_command(monkeypatch, tmp_path, github):
+    import scripts.check_trusted_changes as guard
+    repo = tmp_path / "candidate"
+    repo.mkdir()
+    def git(*args):
+        return subprocess.check_output(["git", "-C", str(repo), *args], text=True).strip()
+    git("init", "-q")
+    git("config", "user.name", "Synthetic fixture")
+    git("config", "user.email", "fixture@example.invalid")
+    (repo / "README.md").write_text("baseline\n")
+    git("add", ".")
+    git("commit", "-qm", "baseline")
+    output = tmp_path / "audit/trusted-guard.json"
+    monkeypatch.setattr(guard, "ReadOnlyGitHub", lambda: github)
+    monkeypatch.setattr("sys.argv", ["check_trusted_changes.py", "--base", git("rev-parse", "HEAD"),
+                                     "--candidate", str(repo), "--pr", "7", "--output", str(output)])
+    assert guard.main() == 1
+    return json.loads(output.read_text())
+
+
+def test_a_refused_github_read_is_recorded_with_its_code(monkeypatch, tmp_path):
+    # 沒有 PR 7 可讀：記下拒絕碼，而不只是例外類型。 / PR 7 cannot be read: record the refusal code, not just the type.
+    evidence = run_guard_command(monkeypatch, tmp_path, FakeGitHub(POLICY["repository"]))
+    assert (evidence["decision"], evidence["approval_error"]) == ("BLOCK", "Denied:GITHUB_HTTP_404")
+    assert evidence["baseline_approval"] is None
+
+
+def test_other_failures_are_recorded_by_type_without_their_text(monkeypatch, tmp_path):
+    # 只有 Denied 帶固定診斷碼；其他例外的文字可能含任意內容。 / Only Denied carries a fixed diagnostic code; other
+    # exception text could hold anything.
+    import scripts.check_trusted_changes as guard
+    (tmp_path / "security").mkdir()
+    (tmp_path / "security/trust-policy.json").write_text(json.dumps({**POLICY, "schema_version": 2}))
+    monkeypatch.setattr(guard, "ROOT", tmp_path)
+    evidence = run_guard_command(monkeypatch, tmp_path, FakeGitHub(POLICY["repository"]))
+    assert (evidence["decision"], evidence["approval_error"]) == ("BLOCK", "ValueError")

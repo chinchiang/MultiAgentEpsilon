@@ -10,7 +10,6 @@ import argparse
 import json
 import os
 import re
-import subprocess
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -19,8 +18,9 @@ ROOT = Path(__file__).resolve().parents[1]
 if __name__ == "__main__":
     sys.path.insert(0, str(ROOT))
 from security_harness import candidate_git
+from security_harness.github_readonly import GitHubReader, ReadOnlyGitHub
 from security_harness.trusted_publisher import (identities, pr_commit_identities, validate_review, Denied,
-                                               validate_run_base, related_pull_path, head_scope)
+                                               validate_run_base, related_pull_path, run_base_history)
 
 
 def protected_changes(names):
@@ -57,28 +57,21 @@ def live_approval(number, head, base):
     repo = policy["repository"]
     if not re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", repo):
         raise ValueError("invalid trusted repository")
-    def api(path, pages=False):
-        args = ["gh", "api", f"repos/{repo}/{path}"]
-        if pages:
-            # 舊雲端 gh 2.46 不支援 --slurp；跨分頁逐行輸出 JSON， / gh 2.46 (the cloud runtime) predates --slurp. Stream one JSON
-            # 審查文字仍維持 JSON 跳脫。 / object per line across all pages; review text remains JSON-escaped.
-            args += ["--paginate", "--jq", ".[] | @json"]
-        output = subprocess.check_output(args, encoding="utf-8", timeout=30, stderr=subprocess.DEVNULL)
-        return [json.loads(line) for line in output.splitlines() if line] if pages else json.loads(output)
-    pr = api(f"pulls/{number}")
+    reader = GitHubReader(ReadOnlyGitHub(), repo)
+    pr = reader.get(f"pulls/{number}")
     # 提交身分可自報，真正擋下審查者自我核准的是規則集的最後推送核准；規則被關掉時不得放行。 / Commit identities
     # are self-asserted, so the ruleset's last-push approval is what stops self-approval; refuse when it is off.
-    rules = api("rules/branches/main?per_page=100", pages=True)
+    rules = reader.items("rules/branches/main")
     if not any(rule.get("type") == "pull_request" and isinstance(rule.get("parameters"), dict)
                and rule["parameters"].get("require_last_push_approval") is True for rule in rules):
         raise Denied("LAST_PUSH_APPROVAL")
-    reviews = api(f"pulls/{number}/reviews?per_page=100", pages=True)
+    reviews = reader.items(f"pulls/{number}/reviews")
     # 只合併 base 的推送不會讓核准失效，GitHub 還會把 commit_id 改指新 head；改以伺服器記錄的推送時間判定。
     # / A base-only push keeps approvals and GitHub re-points their commit_id; judge by the server-recorded push time.
     ref = pr["head"]["ref"]
     if not re.fullmatch(r"[A-Za-z0-9._/-]+", ref):
         raise Denied("HEAD_REF")
-    pushes = [parse_time(a["timestamp"]) for a in api(f"activity?ref=refs/heads/{ref}&per_page=100", pages=True)
+    pushes = [parse_time(a["timestamp"]) for a in reader.items(f"activity?ref=refs/heads/{ref}")
               if a.get("after") == head]
     if not pushes:
         raise Denied("LAST_PUSH_UNKNOWN")
@@ -91,22 +84,20 @@ def live_approval(number, head, base):
     for login in sorted(candidates):
         if not re.fullmatch(r"[A-Za-z0-9-]+", login):
             continue
-        permissions[login] = api(f"collaborators/{login}/permission")["role_name"]
+        permissions[login] = reader.get(f"collaborators/{login}/permission")["role_name"]
     # 提交身分可自報，因此只能排除審查者， / Commit identities are self-asserted, so they are used only to exclude reviewers;
     # 真實推送者仍由規則集原生最後推送核准檢查判定。 / the ruleset's native last-push approval remains the authoritative pusher check.
-    commit = api(f"commits/{head}")
+    commit = reader.get(f"commits/{head}")
     excluded = (identities(commit.get("author"), commit.get("committer"))
-                | pr_commit_identities(api(f"pulls/{number}/commits?per_page=100", pages=True), head))
+                | pr_commit_identities(reader.items(f"pulls/{number}/commits"), head))
     run_id = os.environ.get("GITHUB_RUN_ID")
     if run_id:
         if not re.fullmatch(r"[1-9][0-9]*", run_id):
             raise ValueError("invalid run identity")
-        run = api(f"actions/runs/{run_id}")
+        run = reader.get(f"actions/runs/{run_id}")
         excluded |= identities(run.get("actor"), run.get("triggering_actor"))
-        pulls = api(related_pull_path("", pr).lstrip("/") + "&per_page=100", pages=True)
-        histories = {p["number"]: api(f"issues/{p['number']}/timeline?per_page=100", pages=True)
-                     for p in pulls if head_scope(p) == head_scope(pr)}
-        validate_run_base(run, pr, pulls, "main", histories)
+        pulls = reader.items(related_pull_path("", pr).lstrip("/"))
+        validate_run_base(run, pr, pulls, "main", run_base_history(reader, pr, pulls))
     return approved_review(pr, reviews, head, base, policy["baseline_reviewers"], permissions, excluded)
 
 
@@ -128,6 +119,9 @@ def main():
     if args.pr:
         try:
             approval = live_approval(args.pr, head, args.base)
+        except Denied as exc:
+            # 拒絕碼是固定診斷碼，可記入稽核檔。 / A refusal code is a fixed diagnostic code, safe to record.
+            approval_error = f"Denied:{exc}"
         except Exception as exc:
             approval_error = type(exc).__name__
     blocked = approval_error is not None or (bool(changed) and approval is None)
