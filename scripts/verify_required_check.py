@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""審查者使用的必要 Actions 檢查來源核對工具，暫行且唯讀。專用 App 尚未發布前，其他工作流程也能用共用 App 產生同名 trusted-security-pilot；核准或合併前須從 GitHub 中繼資料確認 head 上每個同名檢查皆來自正確 head 的可信 pull_request_target。任何外來或手動 run，或 head 上的同名 commit status 都阻擋；最新檢查依建立順序判定。該事件使用 PR base 分支 YAML，而 run 未記錄 base，故另綁定 head 分支，拒絕同 SHA／儲存庫／分支的任何狀態 PR 指向其他 base 或曾改 base。這只是暫行中繼資料查核，專用發布器另需密碼學簽章。
+"""審查者使用的必要 Actions 檢查來源核對工具，暫行且唯讀。專用 App 尚未發布前，其他工作流程也能用共用 App 產生同名 trusted-security-pilot；核准或合併前須從 GitHub 中繼資料確認 head 上每個同名檢查皆來自正確 head 的可信 pull_request_target。任何外來或手動 run，或 head 上的同名 commit status 都阻擋；最新檢查依建立順序判定，且須屬於 run 目前的 attempt（每個檢查的 attempt 由其 job 讀回）。該事件使用 PR base 分支 YAML，而 run 未記錄 base，故另綁定 head 分支，拒絕同 SHA／儲存庫／分支的任何狀態 PR 指向其他 base 或曾改 base。這只是暫行中繼資料查核，專用發布器另需密碼學簽章。
 
 Reviewer-side source check for the required Actions check (interim, read-only).
 
@@ -8,7 +8,8 @@ check named trusted-security-pilot from the shared GitHub Actions app. Before
 approving or merging, confirm through GitHub's own run metadata that every such
 check on the PR head came from a pull_request_target run of the trusted workflow
 for exactly that head. One foreign or manual run, or a same-named commit status, on
-the head blocks; the latest check is the newest by creation order.
+the head blocks; the latest check is the newest by creation order and must belong
+to the run's current attempt, read for each check from its own job.
 
 Such a run executes the workflow file from the PR's base branch, which run metadata
 does not record; each run is therefore also bound to this PR's head branch, and any
@@ -67,7 +68,14 @@ def verify(api, repo, number, pages):
             validate_run_base(run, pr, pull_requests, BASE_BRANCH, histories)
         except ValueError as exc:
             raise Denied(str(exc)) from None
-        sources.append({"check_run_id": check["id"], "run_id": run["id"], "run_attempt": run["run_attempt"],
+        # run 只帶目前的 attempt，重跑後舊 check 也會被標成新 attempt；改讀該 check 的 job。 / A run carries only its
+        # current attempt, which would stamp older checks after a rerun; read the check's own job instead.
+        job = api(f"repos/{repo}/actions/jobs/{check['id']}")
+        need(job.get("id") == check["id"] and job.get("run_id") == run["id"]
+             and job.get("head_sha") == head
+             and job.get("check_run_url") == f"https://api.github.com/repos/{repo}/check-runs/{check['id']}"
+             and type(job.get("run_attempt")) is int and job["run_attempt"] >= 1, "CHECK_ATTEMPT_UNRESOLVED")
+        sources.append({"check_run_id": check["id"], "run_id": run["id"], "run_attempt": job["run_attempt"],
                         "status": check["status"], "conclusion": check["conclusion"]})
     # 排隊中的重跑尚無 started_at；依建立順序（ID）取最新。 / A queued rerun has no started_at yet; take the newest by creation order (ID).
     latest = max(checks, key=lambda c: c["id"])
@@ -75,8 +83,10 @@ def verify(api, repo, number, pages):
     latest_source = next(s for s in sources if s['check_run_id'] == latest['id'])
     complete = api(f"repos/{repo}/actions/runs/{latest_source['run_id']}")
     need(complete.get('status') == 'completed' and complete.get('conclusion') == 'success'
-         and complete.get('head_sha') == head
-         and complete.get('run_attempt') == latest_source['run_attempt'], 'WORKFLOW_NOT_SUCCESS')
+         and complete.get('head_sha') == head, 'WORKFLOW_NOT_SUCCESS')
+    # run 的結論屬於其目前 attempt，只能替同一 attempt 的 check 作證。 / A run's conclusion belongs to its current
+    # attempt and vouches only for a check from that attempt.
+    need(complete.get('run_attempt') == latest_source['run_attempt'], 'LATEST_CHECK_STALE_ATTEMPT')
     return {"decision": "ALLOW", "head_sha": head, "sources": sources}
 
 
