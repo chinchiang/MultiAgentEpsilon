@@ -18,9 +18,9 @@ API_SECONDS = 240
 
 
 class Denied(ValueError):
-    """發布器只輸出固定診斷碼。
+    """GitHub 傳輸層、reader 與發布器只對外輸出固定診斷碼。
 
-Only fixed diagnostic codes may leave the publisher."""
+Only fixed diagnostic codes leave the GitHub transport, the reader and the publisher."""
 
 
 def need(condition, code):

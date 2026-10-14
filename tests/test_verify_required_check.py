@@ -186,9 +186,9 @@ def test_pr_listing_without_this_pr_fails_closed():
         verify(github)
 
 
-def test_command_reads_through_the_read_only_client(monkeypatch, capsys):
-    # 指令只經唯讀 client 讀取，不啟動依賴 locale 的子程序。 / The command reads only through the read-only client,
-    # never a locale-dependent subprocess.
+def test_command_reads_through_the_read_only_transport(monkeypatch, capsys):
+    # 指令只經唯讀的 GitHub 傳輸層讀取，不啟動依賴 locale 的子程序。 / The command reads only through the read-only
+    # GitHub transport, never a locale-dependent subprocess.
     github = scenario()
     evaluate(github, trusted_run(github))
     monkeypatch.setattr(checker, "ReadOnlyGitHub", lambda: github)

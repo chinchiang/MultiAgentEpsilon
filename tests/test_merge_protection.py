@@ -157,7 +157,7 @@ def run_audit(monkeypatch, tmp_path, github, pr='50'):
     return json.loads((tmp_path / 'audit.json').read_text())
 
 
-def test_command_reads_every_page_through_the_read_only_client(monkeypatch, tmp_path):
+def test_command_reads_every_page_through_the_read_only_transport(monkeypatch, tmp_path):
     github = audited_repository()
     evidence = run_audit(monkeypatch, tmp_path, github)
     assert evidence['errors'] == []

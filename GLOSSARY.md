@@ -9,7 +9,7 @@
 ## GitHub 讀取
 
 **GitHub 傳輸層**：
-對 GitHub REST API 送出單一請求並取回原始回應的 adapter，受呼叫預算、期限、回應大小上限與權杖目的地限制。
+對 GitHub REST API 送出單一請求並取回原始回應的介接器，受呼叫預算、期限、回應大小上限與權杖目的地限制。
 _避免_：client、GitHub API、gh
 
 **GitHub reader**：
