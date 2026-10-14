@@ -12,7 +12,12 @@ def pull(number=5, base="main", head=HEAD, ref="feature", state="open"):
             "head": {"sha": head, "ref": ref, "repo": {"id": 10, "full_name": "owner/repo"}}}
 
 
-def fake_api(checks, runs_by_suite, pr_state="open"):
+def fake_api(checks, runs_by_suite, pr_state="open", jobs=None):
+    # 未指定時每筆 check 都是其 run 第 1 次 attempt 的 job。 / Unless given, each check is its run's attempt-1 job.
+    if jobs is None:
+        jobs = {c["id"]: job(c["id"], runs_by_suite[c["check_suite"]["id"]][0]["id"])
+                for c in checks if runs_by_suite.get(c["check_suite"]["id"])}
+
     def api(path):
         if path.endswith("/pulls/5"):
             return pull(state=pr_state)
@@ -21,6 +26,8 @@ def fake_api(checks, runs_by_suite, pr_state="open"):
             return {"total_count": len(checks), "check_runs": checks}
         if "check_suite_id=" in path:
             return {"workflow_runs": runs_by_suite[int(path.split("check_suite_id=")[1].split("&")[0])]}
+        if "/actions/jobs/" in path:
+            return jobs[int(path.rsplit("/", 1)[1])]
         if '/actions/runs/' in path:
             number = int(path.rsplit('/', 1)[1])
             return next(r for runs in runs_by_suite.values() for r in runs if r['id'] == number)
@@ -33,10 +40,20 @@ def check(id_, suite, conclusion="success", started="2026-10-06T01:00:00Z", app=
             "check_suite": {"id": suite}, "status": "completed", "conclusion": conclusion, "started_at": started}
 
 
-def run(id_, event="pull_request_target", path=".github/workflows/security.yml", head=HEAD, branch="feature"):
-    return {"id": id_, "run_attempt": 1, "event": event, "path": path, "head_sha": head,
+def run(id_, event="pull_request_target", path=".github/workflows/security.yml", head=HEAD, branch="feature",
+        attempt=1):
+    # GitHub 的 run 只帶目前的 attempt；重跑沿用同一 run 與 check suite。 / A GitHub run carries only its current
+    # attempt; a rerun keeps the same run and check suite.
+    return {"id": id_, "run_attempt": attempt, "event": event, "path": path, "head_sha": head,
             "head_branch": branch, "head_repository": {"id": 10},
             "status": "completed", "conclusion": "success"}
+
+
+def job(check_id, run_id, attempt=1, head=HEAD):
+    # Actions 的 check run ID 即其 job ID，job 記錄自己所屬的 attempt。 / An Actions check run's ID is its job ID,
+    # and the job records the attempt it belongs to.
+    return {"id": check_id, "run_id": run_id, "run_attempt": attempt, "head_sha": head,
+            "check_run_url": f"https://api.github.com/repos/owner/repo/check-runs/{check_id}"}
 
 
 def listing(*extra, statuses=()):
@@ -52,6 +69,40 @@ def listing(*extra, statuses=()):
 def test_trusted_pull_request_target_source_allows():
     result = checker.verify(fake_api([check(1, 10)], {10: [run(100)]}), "owner/repo", 5, listing())
     assert result["decision"] == "ALLOW" and result["sources"][0]["run_id"] == 100
+
+
+def test_rerun_labels_each_check_with_its_own_attempt():
+    # PR #46：attempt 1 失敗、attempt 2 成功，兩者同屬一個 run。 / PR #46: attempt 1 failed and attempt 2 passed
+    # within one run.
+    checks = [check(1, 10, conclusion="failure"), check(2, 10)]
+    jobs = {1: job(1, 100, attempt=1), 2: job(2, 100, attempt=2)}
+    result = checker.verify(fake_api(checks, {10: [run(100, attempt=2)]}, jobs=jobs), "owner/repo", 5, listing())
+    assert result["decision"] == "ALLOW"
+    assert [(s["check_run_id"], s["run_attempt"], s["conclusion"]) for s in result["sources"]] == [
+        (1, 1, "failure"), (2, 2, "success")]
+
+
+def test_latest_check_from_an_older_attempt_cannot_vouch_for_the_run():
+    # run 的綠燈屬於 attempt 2，但最新的 check 來自 attempt 1。 / The run's green belongs to attempt 2, but the latest
+    # check came from attempt 1.
+    api = fake_api([check(1, 10)], {10: [run(100, attempt=2)]}, jobs={1: job(1, 100, attempt=1)})
+    with pytest.raises(checker.Denied, match="LATEST_CHECK_STALE_ATTEMPT"):
+        checker.verify(api, "owner/repo", 5, listing())
+
+
+@pytest.mark.parametrize("field,value", [
+    ("run_id", 101),
+    ("head_sha", "d" * 40),
+    ("check_run_url", "https://api.github.com/repos/owner/repo/check-runs/2"),
+    ("run_attempt", "1"),
+    ("run_attempt", 0),
+])
+def test_job_that_does_not_match_its_check_leaves_the_attempt_unresolved(field, value):
+    record = job(1, 100)
+    record[field] = value
+    api = fake_api([check(1, 10)], {10: [run(100)]}, jobs={1: record})
+    with pytest.raises(checker.Denied, match="CHECK_ATTEMPT_UNRESOLVED"):
+        checker.verify(api, "owner/repo", 5, listing())
 
 
 @pytest.mark.parametrize('status,conclusion', [('completed', 'failure'), ('completed', 'cancelled'),
