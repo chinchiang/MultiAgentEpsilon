@@ -1,3 +1,6 @@
+import base64
+import json
+
 from scripts.audit_merge_protection import inspect_configuration
 import pytest
 
@@ -125,3 +128,56 @@ def test_extra_approval_for_unattributed_changes_is_read_back(reviews, expected)
     rulesets = [main_ruleset(review=r) for r in reviews]
     result = inspect_configuration({'protected': True}, rulesets, {'user': {'login': 'author'}}, [], [])
     assert result['configuration']['unattributed_changes_extra_approval'] is expected
+
+
+TRUSTED_REPO = 'chinchiang/MultiAgentEpsilon'
+
+
+def audited_repository():
+    # 主控台讀取的 GitHub 狀態：main 受 main_ruleset 保護，審查者在協作者清單第 2 頁。 / The GitHub state the
+    # command reads: main is protected by main_ruleset, and the reviewer is on page 2 of the collaborators.
+    from tests.fake_github import FakeGitHub
+    github = FakeGitHub(TRUSTED_REPO)
+    github.add('branches/main', {'protected': True, 'commit': {'sha': 'c' * 40}})
+    github.add('rulesets?includes_parents=true', [{'id': 24512048}])
+    github.add('rulesets/24512048', main_ruleset())
+    github.add('pulls/50', {'user': {'login': 'author'}, 'head': {'sha': 'd' * 40}, 'state': 'open', 'draft': False})
+    github.add('collaborators', [{'login': f'user{n}', 'role_name': 'read'} for n in range(120)]
+               + [{'login': 'd98922036ntu', 'role_name': 'write'}])
+    github.add('contents/.github/CODEOWNERS?ref=main',
+               {'content': base64.b64encode(b'* @d98922036ntu\n').decode()})
+    return github
+
+
+def run_audit(monkeypatch, tmp_path, github, pr='50'):
+    from scripts import audit_merge_protection as audit
+    monkeypatch.setattr(audit, 'ReadOnlyGitHub', lambda: github)
+    monkeypatch.setattr('sys.argv', ['audit_merge_protection.py', '--pr', pr, '--output', str(tmp_path / 'audit.json')])
+    assert audit.main() == 1
+    return json.loads((tmp_path / 'audit.json').read_text())
+
+
+def test_command_reads_every_page_through_the_read_only_client(monkeypatch, tmp_path):
+    github = audited_repository()
+    evidence = run_audit(monkeypatch, tmp_path, github)
+    assert evidence['errors'] == []
+    assert (evidence['repository'], evidence['main_sha'], evidence['candidate_sha']) == (TRUSTED_REPO, 'c' * 40, 'd' * 40)
+    assert evidence['independent_reviewers'] == ['d98922036ntu']
+    assert evidence['configuration']['base_codeowner_independent_reviewer']
+    assert {method for method, _, _ in github.requests} == {'GET'}
+
+
+def test_missing_codeowners_is_no_owner_rather_than_an_error(monkeypatch, tmp_path):
+    github = audited_repository()
+    del github.routes['/repos/chinchiang/MultiAgentEpsilon/contents/.github/CODEOWNERS?ref=main']
+    evidence = run_audit(monkeypatch, tmp_path, github)
+    assert evidence['errors'] == [] and evidence['base_codeowners'] == []
+    assert not evidence['configuration']['base_codeowner_independent_reviewer']
+
+
+def test_unreadable_github_state_is_recorded_and_blocks(monkeypatch, tmp_path):
+    github = audited_repository()
+    del github.routes['/repos/chinchiang/MultiAgentEpsilon/branches/main']
+    evidence = run_audit(monkeypatch, tmp_path, github)
+    assert evidence['errors'] == ['Denied'] and evidence['decision'] == 'BLOCK'
+    assert 'configuration' not in evidence
