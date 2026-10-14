@@ -190,7 +190,8 @@ def test_unknown_provider_is_a_configuration_error(monkeypatch):
     from scripts.model_smoke import configured_adapter
     from security_harness.llm.gateway import ModelError
     monkeypatch.delenv('BEDROCK_MODEL_ID', raising=False)
-    with pytest.raises(ModelError) as failure: configured_adapter('typo')
+    from tests.test_model_hardening import bound_roe_digest
+    with pytest.raises(ModelError) as failure: configured_adapter('typo', bound_roe_digest())
     assert failure.value.code == 'CONFIGURATION'
 
 
@@ -198,7 +199,8 @@ def test_missing_aws_cli_blocks_before_call_reservation(monkeypatch):
     from scripts.model_smoke import configured_adapter
     from security_harness.llm.gateway import ModelError
     monkeypatch.setenv('AWS_CLI_PATH', '/nonexistent/synthetic-aws')
-    with pytest.raises(ModelError) as failure: configured_adapter('bedrock')
+    from tests.test_model_hardening import bound_roe_digest
+    with pytest.raises(ModelError) as failure: configured_adapter('bedrock', bound_roe_digest())
     assert failure.value.code == 'CONFIGURATION'
 
 

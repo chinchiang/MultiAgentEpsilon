@@ -35,8 +35,8 @@ setting = config.setting
 implementation_digest = config.implementation_digest
 
 
-def configured_adapter(provider, work=None, http=None):
-    return config.configured_adapter(provider, work, http)
+def configured_adapter(provider, roe_sha256, work=None, http=None):
+    return config.configured_adapter(provider, roe_sha256, work, http)
 
 
 def initial_report(providers, run_id):
@@ -73,7 +73,7 @@ async def run_worker(root, run_id):
             check['status'] = 'RUNNING'
             persist(output, report)
             try:
-                adapter = config.configured_adapter(provider, run_directory(root, run_id))
+                adapter = config.configured_adapter(provider, report['model_roe_sha256'], run_directory(root, run_id))
             except (KeyError, ModelError):
                 check.update(status='ERROR', code='CONFIGURATION')
                 persist(output, report)
