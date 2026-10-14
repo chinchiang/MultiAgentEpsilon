@@ -1,6 +1,7 @@
 import pytest
-from security_harness.github_readonly import ReadOnlyGitHub
+from security_harness.github_readonly import GitHubReader, ReadOnlyGitHub
 from security_harness.trusted_publisher import Denied
+from tests.fake_github import FakeGitHub
 
 
 def test_proxy_identity_does_not_require_or_manufacture_local_token(monkeypatch):
@@ -29,3 +30,86 @@ def test_readback_cannot_mutate_remote_state(method):
 def test_readback_refuses_other_destinations():
     with pytest.raises(Denied, match='READ_ONLY_DESTINATION'):
         ReadOnlyGitHub().raw('https://other.invalid/')
+
+
+def test_reader_reads_one_object_relative_to_its_repository():
+    github = FakeGitHub('owner/repo')
+    github.add('pulls/50', {'number': 50})
+    assert GitHubReader(github, 'owner/repo').get('pulls/50') == {'number': 50}
+
+
+def test_reader_reads_every_page_of_an_array():
+    github = FakeGitHub('owner/repo')
+    github.add('pulls/50/reviews', [{'id': n} for n in range(250)])
+    assert GitHubReader(github, 'owner/repo').items('pulls/50/reviews') == [{'id': n} for n in range(250)]
+
+
+def test_reader_reads_every_page_of_a_counted_listing():
+    github = FakeGitHub('owner/repo')
+    github.listing('actions/runs/7/artifacts', 'artifacts', [{'id': n} for n in range(150)])
+    assert GitHubReader(github, 'owner/repo').items('actions/runs/7/artifacts', key='artifacts') == [
+        {'id': n} for n in range(150)]
+
+
+@pytest.mark.parametrize('total_count', [149, 151, 250])
+def test_reader_refuses_a_listing_whose_total_disagrees_with_its_items(total_count):
+    github = FakeGitHub('owner/repo')
+    github.listing('actions/runs/7/jobs', 'jobs', [{'id': n} for n in range(150)], total_count=total_count)
+    with pytest.raises(Denied, match='^LISTING_TOTAL$'):
+        GitHubReader(github, 'owner/repo').items('actions/runs/7/jobs', key='jobs')
+
+
+@pytest.mark.parametrize('read', ['get', 'items'])
+@pytest.mark.parametrize('path', ['/repos/owner/repo/pulls', '../../app', 'pulls/../../../app', 'pulls#x',
+                                  'pulls?per_page=100', 'pulls?state=all&page=2', 'pulls?per_page=1&state=all'])
+def test_reader_refuses_paths_outside_its_repository_or_with_paging(read, path):
+    github = FakeGitHub('owner/repo')
+    github.add('pulls', [])
+    with pytest.raises(Denied, match='^API_PATH$'):
+        getattr(GitHubReader(github, 'owner/repo'), read)(path)
+    assert github.requests == []
+
+
+@pytest.mark.parametrize('key', [None, 'jobs'])
+@pytest.mark.parametrize('amount', [10000, 10001])
+def test_reader_stops_at_ten_thousand_items(key, amount):
+    github = FakeGitHub('owner/repo')
+    items = list(range(amount))
+    if key is None:
+        github.add('jobs', items)
+    else:
+        github.listing('jobs', key, items)
+    reader = GitHubReader(github, 'owner/repo')
+    if amount > 10000:
+        with pytest.raises(Denied, match='^PAGINATION_LIMIT$'):
+            reader.items('jobs', key=key)
+    else:
+        assert reader.items('jobs', key=key) == items
+
+
+@pytest.mark.parametrize('key, body', [
+    (None, {'total_count': 1, 'jobs': [{}]}),
+    ('jobs', [{}]),
+    ('jobs', {'total_count': 1, 'artifacts': [{}]}),
+    ('jobs', {'total_count': 1, 'jobs': {'id': 1}}),
+    ('jobs', {'total_count': '1', 'jobs': [{}]}),
+    ('jobs', {'total_count': True, 'jobs': [{}]}),
+])
+def test_reader_refuses_a_page_of_the_wrong_shape(key, body):
+    github = FakeGitHub('owner/repo')
+    github.add('actions/runs/7/jobs', body)
+    with pytest.raises(Denied, match='^PAGINATION_TYPE$'):
+        GitHubReader(github, 'owner/repo').items('actions/runs/7/jobs', key=key)
+
+
+@pytest.mark.parametrize('repo', ['owner', 'owner/repo/extra', 'owner/../app', '../repo', 'owner/..', 'owner/.',
+                                  'owner/re po', ''])
+def test_reader_refuses_a_malformed_repository(repo):
+    with pytest.raises(Denied, match='^REPOSITORY$'):
+        GitHubReader(FakeGitHub(), repo)
+
+
+def test_reader_accepts_a_repository_named_with_a_leading_dot():
+    github = FakeGitHub('owner/.github')
+    github.add('pulls/1', {'number': 1})
+    assert GitHubReader(github, 'owner/.github').get('pulls/1') == {'number': 1}
