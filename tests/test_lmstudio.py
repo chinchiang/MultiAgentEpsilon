@@ -181,7 +181,8 @@ def test_configured_lmstudio_keeps_glm_separate(monkeypatch):
     monkeypatch.setenv('LMSTUDIO_MODEL_ID', MODEL); monkeypatch.setenv('LMSTUDIO_BASE_URL', BASE)
     monkeypatch.delenv('LMSTUDIO_API_KEY', raising=False)
     monkeypatch.setenv('GLM_CHAT_URL', 'invalid-unrelated-setting')
-    adapter = configured_adapter('lmstudio')
+    from tests.test_model_hardening import bound_roe_digest
+    adapter = configured_adapter('lmstudio', bound_roe_digest())
     assert adapter.provider == 'lmstudio' and adapter._api_key is None
 
 
@@ -258,7 +259,7 @@ def test_local_adapter_full_review_scoring_and_cleanup(tmp_path, monkeypatch):
             value = envelope()
             value['choices'][0]['message']['content'] = json.dumps(review)
         return httpx.Response(200, headers={'Content-Type': 'application/json'}, stream=Stream(value))
-    def configured(provider, work, http):
+    def configured(provider, roe_sha256, work, http):
         assert provider == 'lmstudio'
         return LMStudioAdapter(MODEL, BASE, http=LMStudioHTTP(BASE, transport=httpx.MockTransport(handle)))
     monkeypatch.setattr(model_config, 'configured_adapter', configured)

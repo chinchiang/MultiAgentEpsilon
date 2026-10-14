@@ -88,7 +88,7 @@ async def run_worker(root, run_id, plan_digest=None):
             save()
             provider, case = check['provider'], cases[check['case_id']]
             try:
-                adapter = MockReviewer(provider) if provider.startswith('mock-') else config.configured_adapter(provider, run_directory(root, run_id), JsonHTTP(timeout_seconds=30))
+                adapter = MockReviewer(provider) if provider.startswith('mock-') else config.configured_adapter(provider, report['model_roe_sha256'], run_directory(root, run_id), JsonHTTP(timeout_seconds=30))
             except (KeyError, ModelError):
                 check.update(status='ERROR', code='CONFIGURATION')
                 save()

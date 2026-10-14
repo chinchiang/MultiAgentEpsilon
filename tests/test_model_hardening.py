@@ -156,19 +156,21 @@ def test_example_placeholders_are_configuration_errors(monkeypatch, provider, ov
     for name, value in overrides.items():
         monkeypatch.setenv(name, value)
     with pytest.raises(ModelError) as caught:
-        configured_adapter(provider)
+        configured_adapter(provider, bound_roe_digest())
     assert caught.value.code == "CONFIGURATION"
 
 
 @pytest.mark.parametrize("provider,prefix", [("glm", "GLM"), ("deepseek", "DEEPSEEK")])
-def test_empty_optional_chat_key_means_no_key(monkeypatch, provider, prefix):
+def test_empty_optional_chat_key_means_no_key(tmp_path, monkeypatch, provider, prefix):
     from scripts.model_smoke import configured_adapter
-    from security_harness.llm import config
-    monkeypatch.setattr(config, "remote_hosts", lambda provider: {"chat.internal.test"})
+    def allow(roe):
+        roe["allowed_live_providers"] = sorted({*roe["allowed_live_providers"], provider})
+        roe["allowed_remote_hosts"][provider] = ["chat.internal.test"]
+    tampered_roe(tmp_path, monkeypatch, allow)
     monkeypatch.setenv(prefix + "_MODEL_ID", "synthetic-" + provider)
     monkeypatch.setenv(prefix + "_CHAT_URL", "https://chat.internal.test/v1/chat/completions")
     monkeypatch.setenv(prefix + "_API_KEY", "")
-    adapter = configured_adapter(provider)
+    adapter = configured_adapter(provider, bound_roe_digest())
     assert adapter._api_key is None and adapter.provider == adapter.family == provider
 
 
@@ -182,10 +184,10 @@ def test_reviewed_gateway_reaches_glm_but_disabled_deepseek_never_gets_a_key(mon
         monkeypatch.setenv(prefix + "_MODEL_ID", model)
         monkeypatch.setenv(prefix + "_CHAT_URL", url)
         monkeypatch.setenv(prefix + "_API_KEY", key)
-    glm = configured_adapter("glm")
+    glm = configured_adapter("glm", bound_roe_digest())
     assert (glm.provider, glm.model, glm._api_key) == ("glm", "glm", "synthetic-glm-key")
     with pytest.raises(ModelError) as caught:
-        configured_adapter("deepseek")
+        configured_adapter("deepseek", bound_roe_digest())
     assert caught.value.code == "CONFIGURATION"
 
 
@@ -208,8 +210,67 @@ def test_worker_refuses_a_destination_from_an_unvalidated_roe(tmp_path, monkeypa
     monkeypatch.setenv("GLM_CHAT_URL", "https://10.0.0.1/v1/chat/completions")
     monkeypatch.setenv("GLM_API_KEY", "synthetic-glm-key")
     with pytest.raises(ModelError) as caught:
-        configured_adapter("glm")
+        configured_adapter("glm", bound_roe_digest())
     assert caught.value.code == "CONFIGURATION"
+
+
+def bound_roe_digest(root=None):
+    from security_harness.llm import config
+    return hashlib.sha256(((root or config.ROOT) / "security/model-roe.json").read_bytes()).hexdigest()
+
+
+def live_settings(monkeypatch, provider):
+    # 足以建立各 live adapter 的合成設定；不會發出呼叫。 / Synthetic settings that build each live adapter; no call is made.
+    import sys
+    values = {"gemini": {"GEMINI_MODEL_ID": "gemini-synthetic", "GEMINI_API_KEY": "synthetic-gemini-key"},
+              "bedrock": {"BEDROCK_MODEL_ID": "synthetic-bedrock", "BEDROCK_REGION": "ap-southeast-1",
+                          "AWS_CLI_PATH": sys.executable},
+              "glm": {"GLM_MODEL_ID": "glm", "GLM_CHAT_URL": "https://llm.iec.inventec/v1/chat/completions"},
+              "lmstudio": {"LMSTUDIO_MODEL_ID": "synthetic-local", "LMSTUDIO_BASE_URL": "http://127.0.0.1:1234/v1"}}
+    for name, value in values[provider].items():
+        monkeypatch.setenv(name, value)
+
+
+@pytest.mark.parametrize("provider", ["gemini", "bedrock", "glm", "lmstudio"])
+def test_live_adapter_needs_the_roe_its_run_was_bound_to(monkeypatch, provider):
+    # supervisor 驗證並綁定的 RoE 之外，任何 live 供應商都不得建立。 / No live provider is built from an RoE other
+    # than the one the supervisor validated and bound.
+    from security_harness.llm import config
+    live_settings(monkeypatch, provider)
+    assert config.configured_adapter(provider, bound_roe_digest()) is not None
+    with pytest.raises(ModelError) as caught:
+        config.configured_adapter(provider, "0" * 64)
+    assert caught.value.code == "CONFIGURATION"
+
+
+@pytest.mark.parametrize("provider", ["gemini", "bedrock", "glm", "lmstudio"])
+def test_bound_roe_that_does_not_allow_the_provider_builds_no_adapter(tmp_path, monkeypatch, provider):
+    # 綁定的 RoE 本身未授權此供應商時，worker 重讀也須拒絕，含 loopback 的 LM Studio。 / The worker's reread refuses
+    # a provider the bound RoE does not authorize, including loopback LM Studio.
+    from security_harness.llm import config
+    tampered_roe(tmp_path, monkeypatch, lambda roe: roe["allowed_live_providers"].remove(provider))
+    live_settings(monkeypatch, provider)
+    with pytest.raises(ModelError) as caught:
+        config.configured_adapter(provider, bound_roe_digest())
+    assert caught.value.code == "CONFIGURATION"
+
+
+def test_smoke_worker_spends_nothing_after_the_bound_roe_is_swapped(tmp_path, monkeypatch):
+    # supervisor 綁定 RoE 後換成另一份仍有效的 RoE；smoke worker 須拒絕 live 供應商，mock 照常執行。 / After the
+    # supervisor bound the RoE it is swapped for another valid one; the smoke worker refuses the live provider and
+    # still runs the mock.
+    import uuid
+    import scripts.model_smoke as smoke
+    from security_harness.llm.lifecycle import persist
+    report = smoke.initial_report(["mock", "lmstudio"], str(uuid.uuid4()))
+    tampered_roe(tmp_path, monkeypatch, lambda roe: roe.update(max_calls_per_run=15))
+    live_settings(monkeypatch, "lmstudio")
+    persist(tmp_path / "artifacts" / report["run_id"] / "report.json", report)
+    assert asyncio.run(smoke.run_worker(tmp_path, report["run_id"])) == 1
+    data = json.loads((tmp_path / "artifacts" / report["run_id"] / "report.json").read_text())
+    assert [(c["provider"], c["status"], c["code"]) for c in data["checks"]] == [
+        ("mock", "SUCCESS", None), ("lmstudio", "ERROR", "CONFIGURATION")]
+    assert data["reserved_calls"] == 1 and [c["provider"] for c in data["calls"]] == ["mock"]
 
 
 def test_model_roe_no_longer_allows_live_deepseek():
@@ -251,17 +312,17 @@ def test_keyed_providers_only_reach_reviewed_destinations(monkeypatch, provider,
     monkeypatch.setenv("LMSTUDIO_MODEL_ID", "synthetic-local")
     monkeypatch.setenv(variable, url)
     with pytest.raises(ModelError) as caught:
-        configured_adapter(provider)
+        configured_adapter(provider, bound_roe_digest())
     assert caught.value.code == "CONFIGURATION"
 
 
-def test_reviewed_remote_host_and_literal_loopback_are_accepted(monkeypatch):
+def test_reviewed_remote_host_and_literal_loopback_are_accepted(tmp_path, monkeypatch):
     from security_harness.llm import config
-    monkeypatch.setattr(config, "remote_hosts", lambda provider: {"lmstudio.lab.example"})
+    tampered_roe(tmp_path, monkeypatch, lambda roe: roe["allowed_remote_hosts"].update(lmstudio=["lmstudio.lab.example"]))
     monkeypatch.setenv("LMSTUDIO_MODEL_ID", "synthetic-local")
     for url in ("https://lmstudio.lab.example/v1", "http://127.0.0.1:1234/v1"):
         monkeypatch.setenv("LMSTUDIO_BASE_URL", url)
-        assert config.configured_adapter("lmstudio") is not None
+        assert config.configured_adapter("lmstudio", bound_roe_digest()) is not None
 
 
 @pytest.mark.parametrize("value", ["https://[unbalanced/v1", "http://[::1/v1"])

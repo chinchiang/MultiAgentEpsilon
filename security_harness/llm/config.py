@@ -43,18 +43,9 @@ Unset values and the documented .env.example placeholders are configuration
     return value
 
 
-def remote_hosts(provider):
-    """已審查 RoE 中允許該供應商連線的遠端主機。 / Remote hosts the reviewed RoE authorizes for this provider."""
-    roe = json.loads((ROOT / "security/model-roe.json").read_text())
-    # supervisor 驗證後檔案仍可能被換掉，重新讀取時同樣驗證。 / The file can change after the supervisor validated it; validate the reread too.
-    try:
-        validate_model_roe(roe, [provider])
-    except ValueError:
-        raise ModelError("CONFIGURATION") from None
-    return set(roe["allowed_remote_hosts"][provider])
-
-
-def authorize_destination(provider, url):
+def authorize_destination(provider, url, roe):
+    """主機清單取自授權時讀到的同一份 RoE，兩次讀取之間換檔無效。 / Hosts come from the same RoE read that was
+authorized, so swapping the file between reads has no effect."""
     try:
         parts = urlsplit(url)
         host = parts.hostname
@@ -62,23 +53,40 @@ def authorize_destination(provider, url):
         raise ModelError("CONFIGURATION") from None
     if provider == "lmstudio" and parts.scheme == "http" and host in LOOPBACK:
         return
-    if host is None or host.lower() not in remote_hosts(provider):
+    if host is None or host.lower() not in roe["allowed_remote_hosts"][provider]:
         raise ModelError("CONFIGURATION")
 
 
-def configured_adapter(provider, work=None, http=None):
+def authorize_live(provider, roe_sha256):
+    """建立任何 live adapter 前，確認磁碟上的 RoE 正是 supervisor 驗證並綁定的那一份，並重新驗證此供應商。 / Before any
+live adapter is built, confirm the RoE on disk is exactly the one the supervisor validated and bound, and
+revalidate it for this provider; the file can change after the supervisor's check."""
+    try:
+        data = (ROOT / "security/model-roe.json").read_bytes()
+    except OSError:
+        raise ModelError("CONFIGURATION") from None
+    if hashlib.sha256(data).hexdigest() != roe_sha256:
+        raise ModelError("CONFIGURATION")
+    try:
+        return validate_model_roe(json.loads(data), [provider])
+    except ValueError:
+        raise ModelError("CONFIGURATION") from None
+
+
+def configured_adapter(provider, roe_sha256, work=None, http=None):
     if provider == "mock":
         return MockAdapter()
+    roe = authorize_live(provider, roe_sha256)
     if provider == "gemini":
         return GeminiAdapter(setting("GEMINI_MODEL_ID"), setting("GEMINI_API_KEY"), http=http)
     if provider == "lmstudio":
         base = setting("LMSTUDIO_BASE_URL")
-        authorize_destination(provider, base)
+        authorize_destination(provider, base, roe)
         return LMStudioAdapter(setting("LMSTUDIO_MODEL_ID"), base, setting("LMSTUDIO_API_KEY", False), http=http)
     if provider in CHAT_ADAPTERS:
         prefix, adapter = CHAT_ADAPTERS[provider]
         url = setting(prefix + "_CHAT_URL")
-        authorize_destination(provider, url)
+        authorize_destination(provider, url, roe)
         return adapter(setting(prefix + "_MODEL_ID"), url, setting(prefix + "_API_KEY", False), http=http)
     if provider != "bedrock":
         raise ModelError("CONFIGURATION")
