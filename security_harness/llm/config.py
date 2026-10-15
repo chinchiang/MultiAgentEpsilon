@@ -16,13 +16,22 @@ from .adapters import BedrockAdapter, DeepSeekAdapter, GeminiAdapter, GLMAdapter
 from .gateway import MockAdapter, ModelError
 from .lmstudio import LMStudioAdapter
 from ..scope import validate_model_roe
-from .transport import AwsCLI
+from .transport import AWS_ALLOWED_ENV, AwsCLI
 
 ROOT = Path(__file__).resolve().parents[2]
 PLACEHOLDER_HOSTS = {"local.example.invalid"}
 LOOPBACK = ("127.0.0.1", "::1")
 # 地端 OpenAI 相容 chat 供應商與其環境變數前綴。 / On-prem OpenAI-compatible chat providers and their setting prefixes.
 CHAT_ADAPTERS = {"glm": ("GLM", GLMAdapter), "deepseek": ("DEEPSEEK", DeepSeekAdapter)}
+# 各供應商在 configured_adapter 讀取的設定名稱；model worker 只收到所選供應商的這些名稱。 / The settings
+# configured_adapter reads per provider; the model worker receives only those of the selected providers.
+PROVIDER_ENV = {
+    "gemini": frozenset({"GEMINI_MODEL_ID", "GEMINI_API_KEY"}),
+    "lmstudio": frozenset({"LMSTUDIO_BASE_URL", "LMSTUDIO_MODEL_ID", "LMSTUDIO_API_KEY"}),
+    **{provider: frozenset({prefix + "_CHAT_URL", prefix + "_MODEL_ID", prefix + "_API_KEY"})
+       for provider, (prefix, _) in CHAT_ADAPTERS.items()},
+    "bedrock": frozenset({"BEDROCK_MODEL_ID", "BEDROCK_REGION", "AWS_CLI_PATH"}) | AWS_ALLOWED_ENV,
+}
 
 
 def setting(name, required=True):
