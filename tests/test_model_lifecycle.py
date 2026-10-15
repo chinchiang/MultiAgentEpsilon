@@ -19,6 +19,33 @@ from security_harness.llm import lifecycle as life
 ROOT = Path(__file__).resolve().parents[1]
 
 
+MODEL_BASIC = {"PATH": "/usr/bin", "HOME": "/home/synthetic", "HTTPS_PROXY": "http://proxy.invalid:3128",
+               "ALL_PROXY": "socks5://proxy.invalid:1080", "all_proxy": "socks5://proxy.invalid:1080",
+               "SSL_CERT_FILE": "/etc/ssl/synthetic.pem"}
+GEMINI_SETTINGS = {"GEMINI_MODEL_ID": "gemini-synthetic", "GEMINI_API_KEY": "synthetic-gemini-key"}
+BEDROCK_SETTINGS = {"BEDROCK_MODEL_ID": "synthetic-bedrock", "BEDROCK_REGION": "ap-southeast-1",
+                    "AWS_CLI_PATH": "/opt/synthetic/aws", "AWS_PROFILE": "synthetic-profile",
+                    "AWS_DEFAULT_PROFILE": "synthetic-default", "AWS_CONFIG_FILE": ".state/bedrock/config",
+                    "AWS_SHARED_CREDENTIALS_FILE": ".state/bedrock/credentials", "AWS_ACCESS_KEY_ID": "ASIASYNTHETIC",
+                    "AWS_SECRET_ACCESS_KEY": "synthetic-secret", "AWS_SESSION_TOKEN": "synthetic-session"}
+OTHER_SETTINGS = {"GLM_CHAT_URL": "https://llm.iec.inventec/v1/chat/completions", "GLM_MODEL_ID": "glm",
+                  "GLM_API_KEY": "synthetic-glm-key", "LMSTUDIO_BASE_URL": "http://127.0.0.1:1234/v1",
+                  "LMSTUDIO_MODEL_ID": "synthetic-local", "DEEPSEEK_API_KEY": "synthetic-deepseek-key",
+                  "GH_TOKEN": "synthetic-github-token", "AWS_ROLE_ARN": "arn:aws:iam::123456789012:role/synthetic"}
+
+
+@pytest.mark.parametrize("providers,expected", [
+    (["gemini"], {**MODEL_BASIC, **GEMINI_SETTINGS}),
+    (["bedrock", "mock"], {**MODEL_BASIC, **BEDROCK_SETTINGS}),
+    (["mock-review-a", "mock-review-b"], MODEL_BASIC),
+], ids=["gemini", "bedrock", "mock-only"])
+def test_model_worker_receives_only_the_selected_providers_settings(providers, expected):
+    # 只給本次選到的供應商設定；GH_TOKEN 與其他供應商金鑰一律不給。 / Only the selected providers' settings: never
+    # GH_TOKEN or another provider's key.
+    environ = {**MODEL_BASIC, **GEMINI_SETTINGS, **BEDROCK_SETTINGS, **OTHER_SETTINGS}
+    assert life.model_worker_environment(environ, providers) == expected
+
+
 def wait_for(predicate, timeout=8):
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
@@ -303,6 +330,25 @@ def test_cleanup_lock_prevents_two_janitors_from_reaping_same_run(tmp_path):
         assert locked and sweep_stale(tmp_path) == []
         assert work.exists()
     assert sweep_stale(tmp_path) == [run_id]
+
+
+def test_supervised_model_worker_gets_only_the_selected_providers_keys(tmp_path, monkeypatch):
+    # 經過真的 supervise 與閘門，觀察只選 Gemini 的 run 中 worker 實際收到的環境。 / Through the real supervise and the
+    # gate, observe what the worker of a Gemini-only run actually receives.
+    monkeypatch.setenv('GEMINI_API_KEY', 'synthetic-gemini-key')
+    monkeypatch.setenv('GLM_API_KEY', 'synthetic-glm-key')
+    monkeypatch.setenv('GH_TOKEN', 'synthetic-github-token')
+    run_id = str(uuid.uuid4())
+    report = initial_report(['gemini'], run_id)
+    life.persist(tmp_path / 'artifacts' / run_id / 'report.json', report)
+    command = [sys.executable, '-c',
+               'import json,os; from pathlib import Path; Path("worker-env.json").write_text(json.dumps(dict(os.environ)))']
+    data = life.supervise(tmp_path, report, command, 10)
+    seen = json.loads((tmp_path / 'worker-env.json').read_text())
+    assert seen['GEMINI_API_KEY'] == 'synthetic-gemini-key'
+    assert seen['TMPDIR'] == f'/tmp/epsilon-run-{os.getuid()}-{run_id}'
+    assert 'GLM_API_KEY' not in seen and 'GH_TOKEN' not in seen
+    assert_clean(tmp_path, data)
 
 
 def test_signal_during_cleanup_cannot_publish_complete(tmp_path, monkeypatch):
