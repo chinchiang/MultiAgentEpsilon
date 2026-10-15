@@ -211,6 +211,23 @@ def sweep_stale(root):
     return cleaned
 
 
+# security worker 只需找到 docker 與 git，並可讀 docker 設定、語系、代理與 CA；不需權杖、供應商金鑰或 libpq 設定。
+# / The security worker only needs to find docker and git, and may read docker configuration, locale, proxies and
+# CAs; it needs no token, provider key or libpq setting.
+SECURITY_WORKER_ENV = frozenset({
+    "PATH", "HOME", "DOCKER_CONFIG", "LANG", "LC_ALL", "LC_CTYPE", "TZ", "USER", "LOGNAME",
+    "HTTP_PROXY", "HTTPS_PROXY", "NO_PROXY", "ALL_PROXY", "http_proxy", "https_proxy", "no_proxy", "all_proxy",
+    "SSL_CERT_FILE", "SSL_CERT_DIR"})
+
+
+def security_worker_environment(environ=os.environ):
+    """security worker 的環境：只保留白名單內的變數。
+
+The security worker's environment: only the allowlisted variables.
+    """
+    return {k: v for k, v in environ.items() if k in SECURITY_WORKER_ENV}
+
+
 def supervise(root, audit, command, max_seconds):
     work = prepare_run(root, audit.data['run_id'])
     cancelled = []
@@ -228,7 +245,8 @@ def supervise(root, audit, command, max_seconds):
         gated = [sys.executable, '-I', str(SOURCE_ROOT / 'scripts/model_process.py'), *command]
         process = subprocess.Popen(gated, cwd=root, start_new_session=True, stdin=subprocess.PIPE,
                                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-                                   env={**os.environ, 'TMPDIR': str(temporary_directory(audit.data['run_id']))})
+                                   env={**security_worker_environment(os.environ),
+                                        'TMPDIR': str(temporary_directory(audit.data['run_id']))})
         marker = json.loads((work / 'owner.json').read_text())
         marker.update(worker_pid=process.pid, worker_start=identity(process.pid))
         write_json(work / 'owner.json', marker)

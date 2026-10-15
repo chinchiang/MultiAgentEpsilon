@@ -14,6 +14,43 @@ from security_harness.lifecycle import supervise, temporary_directory, sweep_sta
 ROOT = Path(__file__).resolve().parents[1]
 
 
+SECURITY_WORKER_KEPT = {
+    "PATH": "/usr/bin", "HOME": "/home/synthetic", "DOCKER_CONFIG": "/home/synthetic/.docker",
+    "LANG": "C.UTF-8", "LC_ALL": "C.UTF-8", "LC_CTYPE": "C.UTF-8", "TZ": "UTC", "USER": "synthetic",
+    "LOGNAME": "synthetic", "HTTP_PROXY": "http://proxy.invalid:3128", "HTTPS_PROXY": "http://proxy.invalid:3128",
+    "NO_PROXY": "localhost", "ALL_PROXY": "socks5://proxy.invalid:1080", "http_proxy": "http://proxy.invalid:3128",
+    "https_proxy": "http://proxy.invalid:3128", "no_proxy": "localhost", "all_proxy": "socks5://proxy.invalid:1080",
+    "SSL_CERT_FILE": "/etc/ssl/synthetic.pem", "SSL_CERT_DIR": "/etc/ssl/certs"}
+
+
+def test_security_worker_receives_its_allowlist_but_no_secret():
+    # worker 解析候選內容；它用不到任何權杖、供應商金鑰或 libpq 設定。 / The worker parses candidate content and needs
+    # no token, provider key or libpq setting.
+    from security_harness.lifecycle import security_worker_environment
+    secrets = {"GH_TOKEN": "synthetic-github-token", "GITHUB_TOKEN": "synthetic-actions-token",
+               "GEMINI_API_KEY": "synthetic-gemini-key", "PGPASSWORD": "synthetic-pg-password",
+               "PSYCOPG_IMPL": "python", "AWS_ACCESS_KEY_ID": "ASIASYNTHETIC"}
+    assert security_worker_environment({**SECURITY_WORKER_KEPT, **secrets}) == SECURITY_WORKER_KEPT
+
+
+def test_supervised_security_worker_gets_no_token_through_the_gate(tmp_path, monkeypatch):
+    # 經過真的 supervise 與 model_process 閘門，觀察 worker 實際收到的環境。 / Through the real supervise and the
+    # model_process gate, observe the environment the worker actually receives.
+    monkeypatch.setattr(isolation, 'cleanup_run', lambda run: None)
+    monkeypatch.setenv('PATH', '/usr/bin:/bin')
+    monkeypatch.setenv('GH_TOKEN', 'synthetic-github-token')
+    monkeypatch.setenv('GEMINI_API_KEY', 'synthetic-gemini-key')
+    audit = AuditRun(tmp_path, 'security')
+    audit.stage('G1')
+    command = [sys.executable, '-c',
+               'import json,os; from pathlib import Path; Path("worker-env.json").write_text(json.dumps(dict(os.environ)))']
+    supervise(tmp_path, audit, command, 10)
+    seen = json.loads((tmp_path / 'worker-env.json').read_text())
+    assert seen['PATH'] == '/usr/bin:/bin'
+    assert seen['TMPDIR'] == f"/tmp/epsilon-run-{os.getuid()}-{audit.data['run_id']}"
+    assert 'GH_TOKEN' not in seen and 'GEMINI_API_KEY' not in seen
+
+
 def test_deadline_kills_real_child_group_and_removes_tmp(tmp_path, monkeypatch):
     monkeypatch.setattr(isolation, 'cleanup_run', lambda run: None)
     audit = AuditRun(tmp_path, 'security')
