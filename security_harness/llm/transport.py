@@ -11,6 +11,7 @@ from urllib.parse import urlsplit
 
 import httpx
 
+from ..supervision import child_environment
 from .gateway import ModelError
 
 RESPONSE_BYTES = 131072
@@ -167,11 +168,6 @@ Map a failed AWS CLI call to a fixed category. The provider/CLI text itself is
     return ModelError('PROVIDER_FAILURE')
 
 
-AWS_CHILD_ENV = frozenset({"PATH", "HOME", "USER", "LOGNAME", "LANG", "LC_ALL", "LC_CTYPE", "TZ", "TMPDIR",
-                           "HTTP_PROXY", "HTTPS_PROXY", "NO_PROXY", "http_proxy", "https_proxy", "no_proxy",
-                           "SSL_CERT_FILE", "SSL_CERT_DIR", "REQUESTS_CA_BUNDLE"})
-
-
 # SSO 與臨時憑證所需的 AWS 名稱；其他 AWS_*（端點、CA、資料路徑、角色）會改變 CLI 載入什麼或連到哪裡。 / The AWS names
 # SSO and temporary credentials need; any other AWS_* (endpoints, CA, data path, roles) changes what the CLI loads or
 # where it connects.
@@ -189,7 +185,8 @@ def aws_child_environment(environ=os.environ):
 The AWS CLI child's environment: allowlisted AWS settings and basic process,
     proxy and CA variables, then the forced values.
     """
-    env = {k: v for k, v in environ.items() if k in AWS_ALLOWED_ENV or k in AWS_CHILD_ENV}
+    # TMPDIR 沿用 model worker 本次執行的暫存目錄。 / TMPDIR stays the model worker's run temporary directory.
+    env = child_environment(environ, AWS_ALLOWED_ENV | {"TMPDIR"})
     env.update(AWS_FORCED_ENV)
     return env
 

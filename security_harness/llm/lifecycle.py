@@ -17,7 +17,8 @@ from ..lifecycle import (group_alive, identity, owner_alive, plan_digest as fiel
                          run_directory, temporary_directory, terminate_group)
 from ..results import write_json
 from .gateway import ModelError
-from .transport import AWS_CHILD_ENV, strict_json
+from ..supervision import child_environment
+from .transport import strict_json
 
 SOURCE_ROOT = Path(__file__).resolve().parents[2]
 # 最多 16 筆審查乘以 16 KiB 原文，另加中繼資料。 / 16 reviews x 16 KiB bound raw responses, plus metadata.
@@ -264,11 +265,6 @@ def recover(root, run_id):
         return True
 
 
-# httpx 以 trust_env 讀取代理，含 ALL_PROXY；之後再為 AWS CLI 過濾時不會帶下去。 / httpx reads proxies through trust_env,
-# ALL_PROXY included; the later AWS CLI filter does not pass it on.
-MODEL_WORKER_BASIC_ENV = AWS_CHILD_ENV | {"ALL_PROXY", "all_proxy"}
-
-
 def model_worker_environment(environ, providers):
     """model worker 的環境：基本程序、代理與 CA 變數，加上所選供應商的設定；mock 不需要任何設定。
 
@@ -276,8 +272,7 @@ The model worker's environment: basic process, proxy and CA variables plus the
     selected providers' settings. Mock providers need none.
     """
     from .config import PROVIDER_ENV
-    allowed = MODEL_WORKER_BASIC_ENV.union(*(PROVIDER_ENV.get(p, ()) for p in providers))
-    return {k: v for k, v in environ.items() if k in allowed}
+    return child_environment(environ, frozenset().union(*(PROVIDER_ENV.get(p, ()) for p in providers)))
 
 
 def supervise(root, report, command, max_seconds):

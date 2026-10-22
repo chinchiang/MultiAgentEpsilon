@@ -13,6 +13,7 @@ import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from .results import required_gate_kinds, write_json
+from .supervision import child_environment
 
 SOURCE_ROOT = Path(__file__).resolve().parents[1]
 # 遠大於 RoE 的 120 秒執行上限。 / Well beyond the RoE's 120-second run limit.
@@ -212,15 +213,6 @@ def sweep_stale(root):
     return cleaned
 
 
-# security worker 只需找到 docker 與 git，並可讀 docker 設定、語系、代理與 CA；不需權杖、供應商金鑰或 libpq 設定。
-# / The security worker only needs to find docker and git, and may read docker configuration, locale, proxies and
-# CAs; it needs no token, provider key or libpq setting.
-SECURITY_WORKER_ENV = frozenset({
-    "PATH", "HOME", "DOCKER_CONFIG", "LANG", "LC_ALL", "LC_CTYPE", "TZ", "USER", "LOGNAME",
-    "HTTP_PROXY", "HTTPS_PROXY", "NO_PROXY", "ALL_PROXY", "http_proxy", "https_proxy", "no_proxy", "all_proxy",
-    "SSL_CERT_FILE", "SSL_CERT_DIR"})
-
-
 # supervisor 在放行 worker 前決定的計畫欄位；worker 報告中的這些欄位必須與 supervisor 持有的值相同。
 # / The plan fields the supervisor decides before releasing the worker; the worker's report must keep the values
 # the supervisor holds.
@@ -251,12 +243,17 @@ class PlanMismatch(ValueError):
     """worker 報告與 supervisor 的計畫不同。 / The worker's report differs from the supervisor's plan."""
 
 
-def security_worker_environment(environ=os.environ):
-    """security worker 的環境：只保留白名單內的變數。
+# security worker 另需 docker 設定；不需權杖、供應商金鑰或 libpq 設定。 / The security worker also needs the docker
+# configuration; it needs no token, provider key or libpq setting.
+SECURITY_WORKER_EXTRA = frozenset({"DOCKER_CONFIG"})
 
-The security worker's environment: only the allowlisted variables.
+
+def security_worker_environment(environ=os.environ):
+    """security worker 的環境：基本環境加上 docker 設定。
+
+The security worker's environment: the base environment plus the docker configuration.
     """
-    return {k: v for k, v in environ.items() if k in SECURITY_WORKER_ENV}
+    return child_environment(environ, SECURITY_WORKER_EXTRA)
 
 
 def supervise(root, audit, command, max_seconds):

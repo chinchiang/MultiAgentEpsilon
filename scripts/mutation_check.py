@@ -36,6 +36,10 @@ TARGETS = {
         ('tests/test_scope.py', 'tests/test_model_hardening.py::test_model_roe_rejects_malformed_destination_allowlists',
          'tests/test_model_hardening.py::test_model_roe_boundaries_are_inclusive',
          'tests/test_model_hardening.py::test_remote_host_allowlist_size_boundary')),
+    'security_harness/supervision.py': (
+        ('child_environment',),
+        ('tests/test_model_lifecycle.py::test_model_worker_receives_only_the_selected_providers_settings',
+         'tests/test_model_hardening.py::test_aws_cli_keeps_its_credential_chain_and_forced_settings_but_no_other_secret')),
     'scripts/run_security.py': (
         ('planned_configuration',),
         ('tests/test_run_evidence.py::test_configuration_changed_after_planning_blocks_before_any_gate',

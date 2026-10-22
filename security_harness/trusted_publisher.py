@@ -27,6 +27,7 @@ from .github_http import Denied, GitHub, need, strict_json
 from .github_readonly import GitHubReader
 from .inputs import excluded
 from .limits import LIMITS
+from .supervision import child_environment
 from .results import EVIDENCE_VERSION, decide, seeded_defects, validate_cases, validate_policy
 
 # 共用 GitHub Actions App；同名檢查不能單憑此 ID 證明來源。 / The shared GitHub Actions App; this ID alone
@@ -470,9 +471,7 @@ Use a pinned verifier for cryptography, then bind its verified SLSA statement
     need(isinstance(attestations, list) and 0 < len(attestations) < 30, "ATTESTATION_MISSING_OR_TRUNCATED")
     bundles = b"\n".join(json.dumps(a["bundle"], separators=(",", ":")).encode() for a in attestations)
     need(len(bundles) <= 2 * 1024**2, "ATTESTATION_LIMIT")
-    env = {k: v for k, v in os.environ.items() if k.upper() in {
-        "PATH", "HOME", "TMPDIR", "HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "NO_PROXY",
-        "SSL_CERT_FILE", "SSL_CERT_DIR", "REQUESTS_CA_BUNDLE"}}
+    env = child_environment(os.environ, {"TMPDIR"})
     env.update(GH_PROMPT_DISABLED="1", GH_NO_UPDATE_NOTIFIER="1")
     with tempfile.TemporaryDirectory(prefix="epsilon-attestation-") as directory:
         env.update(XDG_CACHE_HOME=directory + "/cache", GH_CONFIG_DIR=directory + "/config")
