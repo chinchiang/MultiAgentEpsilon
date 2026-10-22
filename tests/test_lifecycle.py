@@ -145,6 +145,56 @@ def test_worker_decision_without_cleanup_handoff_is_not_published(tmp_path, monk
     assert audit.data['errors'][-1]['error_type'] == 'RuntimeError'
 
 
+@pytest.mark.parametrize('tampered', [False, True])
+def test_worker_report_that_changes_the_plan_is_blocked_and_restored(tmp_path, monkeypatch, tampered):
+    # worker 照常完成清理交接並回報 ALLOW；只要它改了計畫，supervisor 就不得採用。 / The worker completes the cleanup
+    # handoff and reports ALLOW as usual; if it changed the plan, the supervisor must not adopt it.
+    monkeypatch.setattr(isolation, 'cleanup_run', lambda run: None)
+    audit = AuditRun(tmp_path, 'security')
+    planned = {'total_seconds': 600, 'cpu_seconds': 300}
+    audit.data['resource_limits'] = dict(planned)
+    audit.save()
+    report = audit.output / 'report.json'
+    command = [sys.executable, '-c',
+        'import json,sys; p=sys.argv[1]; d=json.load(open(p)); '
+        'd["records"]=[{"gate": g, "execution": "COMPLETED"} for g in ("G1", "G2", "AUTH")]; '
+        'd.update(execution="AWAITING_CLEANUP", decision="BLOCK", reasons=[], '
+        'pending_decision="ALLOW", pending_execution="RUNNING"); '
+        'd["resource_limits"]["total_seconds"] += int(sys.argv[2]); '
+        'json.dump(d, open(p, "w"))', str(report), str(int(tampered) * 3600)]
+    code = supervise(tmp_path, audit, command, 10)
+    assert audit.data['resource_limits'] == planned
+    if tampered:
+        assert code == 1 and audit.data['decision'] == 'BLOCK' and audit.data['execution'] == 'ERROR'
+        assert audit.data['errors'][-1]['error_type'] == 'PlanMismatch'
+    else:
+        assert code == 0 and audit.data['decision'] == 'ALLOW' and audit.data['execution'] == 'COMPLETED'
+
+
+def test_worker_that_refuses_the_plan_is_recorded_as_a_plan_mismatch(tmp_path, monkeypatch):
+    monkeypatch.setattr(isolation, 'cleanup_run', lambda run: None)
+    audit = AuditRun(tmp_path, 'security')
+    assert supervise(tmp_path, audit, [sys.executable, '-c', 'raise SystemExit(2)'], 10) == 1
+    assert audit.data['decision'] == 'BLOCK' and audit.data['execution'] == 'ERROR'
+    assert audit.data['errors'][-1]['error_type'] == 'PlanMismatch'
+
+
+def test_security_worker_with_another_plan_exits_without_touching_the_report(tmp_path):
+    import shutil
+    # 複製來源樹，讓 worker 的 ROOT 指向暫存目錄。 / Copy the source trees so the worker's ROOT is the temporary directory.
+    for folder in ('scripts', 'security_harness', 'security'):
+        shutil.copytree(ROOT / folder, tmp_path / folder, ignore=shutil.ignore_patterns('__pycache__'))
+    audit = AuditRun(tmp_path, 'security')
+    audit.data['resource_limits'] = {'total_seconds': 600}
+    audit.save()
+    report = audit.output / 'report.json'
+    before = report.read_bytes()
+    result = subprocess.run([sys.executable, '-I', str(tmp_path / 'scripts/security_worker.py'), audit.data['run_id'],
+                             '0' * 64], cwd=tmp_path, capture_output=True, timeout=30)
+    assert result.returncode == 2, result.stderr
+    assert report.read_bytes() == before
+
+
 def test_janitor_keeps_latest_pointer_on_the_newer_run(tmp_path, monkeypatch):
     from security_harness import lifecycle
     monkeypatch.setattr(isolation, 'cleanup_run', lambda run: None)

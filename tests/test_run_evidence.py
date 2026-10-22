@@ -7,6 +7,7 @@ from unittest.mock import patch
 import pytest
 from scripts import bootstrap, preflight, run_security
 from security_harness import isolation
+from security_harness.audit import AuditRun
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -27,16 +28,50 @@ def report(root):
 @pytest.mark.parametrize("cases", [[{"case": "fake", "passed": True}], [{"case": "fake", "passed": True}] * 14])
 def test_orchestrator_blocks_incomplete_worker_output(tmp_path, monkeypatch, cases):
     monkeypatch.setattr(run_security, "ROOT", fixture_root(tmp_path))
-    monkeypatch.setattr(sys, "argv", ["run_security"])
+    audit = AuditRun(tmp_path, "security")
+    run_security.plan(audit, tmp_path, "fixed")
     monkeypatch.setattr(run_security, "verify", lambda *a: ["synthetic"])
     monkeypatch.setattr(run_security, "dependency_scan", lambda *a: {"findings": [], "sbom": {}})
     monkeypatch.setattr(run_security, "scan", lambda *a, **k: {"targets": 1, "findings": []})
     monkeypatch.setattr(isolation, "cleanup_run", lambda *a: None)
     with patch.object(run_security.subprocess, "run", return_value=subprocess.CompletedProcess([], 0, json.dumps({"cases": cases, "isolation": {}}), "")):
-        assert run_security.main() == 1
+        assert run_security.main(audit) == 1
     data = report(tmp_path)
     assert data["decision"] == "BLOCK"
     assert data["records"][-1]["execution"] == "ERROR"
+
+
+@pytest.mark.parametrize("changed", ["roe.json", "policy.json", "tools.lock.json"])
+def test_configuration_changed_after_planning_blocks_before_any_gate(tmp_path, monkeypatch, changed):
+    # 換行不影響 JSON 或 RoE 是否合法，只改變雜湊；tools.lock.json 只屬於評估者摘要。 / A trailing newline keeps the
+    # JSON and the RoE valid and changes only the digest; tools.lock.json is covered by the evaluator digest alone.
+    root = fixture_root(tmp_path)
+    monkeypatch.setattr(run_security, "ROOT", root)
+    audit = AuditRun(root, "security")
+    run_security.plan(audit, root, "fixed")
+    target = root / "security" / changed
+    target.write_bytes(target.read_bytes() + b"\n")
+    assert run_security.main(audit) == 1
+    data = report(root)
+    assert data["decision"] == "BLOCK" and data["execution"] == "ERROR"
+    assert data["errors"] == [{"stage": "configuration", "error_type": "PlanMismatch"}]
+    assert all(r["execution"] == "NOT_RUN" for r in data["records"])
+
+
+@pytest.mark.parametrize("field", ["roe_sha256", "policy_digest"])
+def test_plan_naming_other_configuration_bytes_blocks_before_any_gate(tmp_path, monkeypatch, field):
+    # 評估者摘要仍相符，但 supervisor 規劃時讀到的位元組與 worker 讀到的不同（檔案在兩次讀取之間被換掉）。 / The
+    # evaluator digest still matches, but the bytes the supervisor planned with differ from those the worker reads
+    # (the file was swapped between the two reads).
+    root = fixture_root(tmp_path)
+    monkeypatch.setattr(run_security, "ROOT", root)
+    audit = AuditRun(root, "security")
+    run_security.plan(audit, root, "fixed")
+    audit.data[field] = "0" * 64
+    assert run_security.main(audit) == 1
+    data = report(root)
+    assert data["errors"] == [{"stage": "configuration", "error_type": "PlanMismatch"}]
+    assert all(r["execution"] == "NOT_RUN" for r in data["records"])
 
 
 @pytest.mark.parametrize("module", [run_security, bootstrap, preflight])
@@ -46,7 +81,10 @@ def test_invalid_configuration_retains_redacted_early_evidence(tmp_path, monkeyp
         (tmp_path / "security" / name).write_text('{"secret": "never-print-this"')
     monkeypatch.setattr(module, "ROOT", tmp_path)
     monkeypatch.setattr(sys, "argv", ["command"])
-    assert module.main() != 0
+    # run_security 在規劃時讀取設定；worker 的 main 只接受已規劃的執行。 / run_security reads its configuration while
+    # planning; the worker's main only accepts a planned run.
+    entry = module.supervised_main if module is run_security else module.main
+    assert entry() != 0
     data = report(tmp_path)
     assert data["decision"] == "BLOCK" and data["execution"] == "ERROR"
     assert data["subject_digest"] is None
@@ -66,14 +104,15 @@ def test_cancellation_retains_incomplete_gates(tmp_path, monkeypatch):
 
 def test_timeout_cleans_owned_isolation_and_records_timeout(tmp_path, monkeypatch):
     monkeypatch.setattr(run_security, "ROOT", fixture_root(tmp_path))
-    monkeypatch.setattr(sys, "argv", ["run_security"])
+    audit = AuditRun(tmp_path, "security")
+    run_security.plan(audit, tmp_path, "fixed")
     monkeypatch.setattr(run_security, "verify", lambda *a: ["synthetic"])
     monkeypatch.setattr(run_security, "dependency_scan", lambda *a: {"findings": [], "sbom": {}})
     monkeypatch.setattr(run_security, "scan", lambda *a, **k: {"targets": 1, "findings": []})
     cleaned = []
     monkeypatch.setattr(isolation, "cleanup_run", cleaned.append)
     with patch.object(run_security.subprocess, "run", side_effect=subprocess.TimeoutExpired("worker", 120)):
-        assert run_security.main() == 1
+        assert run_security.main(audit) == 1
     data = report(tmp_path)
     assert cleaned == [data["run_id"]]
     assert data["records"][-1]["execution"] == "TIMEOUT"

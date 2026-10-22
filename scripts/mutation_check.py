@@ -36,6 +36,11 @@ TARGETS = {
         ('tests/test_scope.py', 'tests/test_model_hardening.py::test_model_roe_rejects_malformed_destination_allowlists',
          'tests/test_model_hardening.py::test_model_roe_boundaries_are_inclusive',
          'tests/test_model_hardening.py::test_remote_host_allowlist_size_boundary')),
+    'scripts/run_security.py': (
+        ('planned_configuration',),
+        ('tests/test_run_evidence.py::test_configuration_changed_after_planning_blocks_before_any_gate',
+         'tests/test_run_evidence.py::test_plan_naming_other_configuration_bytes_blocks_before_any_gate',
+         'tests/test_run_evidence.py::test_orchestrator_blocks_incomplete_worker_output')),
     'security_harness/llm/benchmark.py': (
         ('bounded_text', 'validate_review', 'parse_review'), ('tests/test_model_benchmark.py', '--deselect=tests/test_model_benchmark.py::test_review_cli_supervision_and_explicit_live_opt_in',
                                                               '--deselect=tests/test_model_benchmark.py::test_review_cli_accepts_large_budgets_only_within_the_total_cap', 'tests/test_security_properties.py')),
