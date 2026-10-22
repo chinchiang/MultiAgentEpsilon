@@ -42,14 +42,14 @@ def initial_report(providers, case_ids, run_id, output_tokens=OUTPUT_TOKENS, rou
             'cleanup': {'completed': False}, 'analysis': None}
 
 
-async def run_worker(root, run_id, plan_digest=None):
+async def run_worker(root, run_id, plan_digest):
     from . import config
     report = read_report(root, run_id)
     cases = load_cases()
     path = root / 'artifacts' / run_id / 'report.json'
     # 磁碟上的報告與 supervisor 的計畫不同時，一次呼叫都不發。 / Make no call at all when the report on disk
     # differs from the supervisor's plan.
-    if plan_digest is not None and current_plan_digest(report) != plan_digest:
+    if current_plan_digest(report) != plan_digest:
         return 2
     gateway = Gateway(Limits(**report['limits']))
     report['calls'] = gateway.evidence

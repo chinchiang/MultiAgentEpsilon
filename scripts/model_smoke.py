@@ -19,7 +19,7 @@ if __name__ == "__main__":
 
 from security_harness.llm import config
 from security_harness.llm.gateway import Gateway, Limits, ModelError, Request
-from security_harness.llm.lifecycle import persist, read_report, supervise
+from security_harness.llm.lifecycle import persist, read_report, smoke_plan_digest, supervise
 from security_harness.lifecycle import run_directory
 from security_harness.scope import load_model_roe
 
@@ -53,11 +53,15 @@ def initial_report(providers, run_id):
             "cleanup": {"completed": False}}
 
 
-async def run_worker(root, run_id):
+async def run_worker(root, run_id, plan_digest):
     output = root / 'artifacts' / run_id / 'report.json'
     report = read_report(root, run_id)
-    providers = report['providers']
-    gateway = Gateway(Limits(max_calls=len(providers), reserved_output_tokens=256 * len(providers)))
+    # 磁碟上的報告與 supervisor 的計畫不同時，一次呼叫都不發，也不寫報告。 / Make no call and write nothing when the
+    # report on disk differs from the supervisor's plan.
+    if smoke_plan_digest(report) != plan_digest:
+        return 2
+    # 限額只取自計畫，不另行重算。 / The limits come from the plan only and are never recomputed.
+    gateway = Gateway(Limits(**report['limits']))
     report['calls'] = gateway.evidence
     task = asyncio.current_task()
     loop = asyncio.get_running_loop()
@@ -135,7 +139,8 @@ def main():
         with output.open('x') as handle:
             json.dump(report, handle)
     data = supervise(ROOT, report, [sys.executable, '-I', str(ROOT / 'scripts/model_worker.py'),
-                                  str(ROOT), run_id], report['total_timeout_seconds'])
+                                  str(ROOT), run_id, 'smoke', smoke_plan_digest(report)],
+                     report['total_timeout_seconds'])
     if output != canonical:
         persist(output, data)
     print(json.dumps({'status': data['status'], 'checks': data['checks'], 'evidence': str(canonical)}))

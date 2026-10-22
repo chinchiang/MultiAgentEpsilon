@@ -27,6 +27,19 @@ BLIND_REVIEW_IMMUTABLE = ('plan', 'providers', 'selected_providers', 'case_ids',
                           'case_catalog_sha256', 'oracle_sha256', 'model_roe_sha256')
 
 
+# smoke 的計畫：supervisor 決定的供應商、fixture、實作與 RoE 雜湊、限額與時限。 / The smoke plan: the providers,
+# fixture, implementation and RoE digests, limits and deadline the supervisor decided.
+SMOKE_IMMUTABLE = ('schema_version', 'operation', 'run_id', 'started_at', 'providers', 'fixture',
+                   'implementation_sha256', 'model_roe_sha256', 'limits', 'total_timeout_seconds',
+                   'max_output_tokens_per_call')
+
+
+def smoke_plan_digest(report):
+    """smoke 計畫的雜湊；supervisor 經命令列交給 worker。 / Digest of a smoke plan, handed to the worker on the
+    command line."""
+    return fields_digest(report, SMOKE_IMMUTABLE)
+
+
 def plan_digest(report):
     """盲審不可變計畫、預算、身分與逐筆請求摘要的雜湊；supervisor 經命令列交給 worker，不經磁碟。
 
@@ -188,8 +201,6 @@ def finish(root, run_id, *, providers=(), returncode=None, reason=None, recovere
             data.update(analysis=None, code='EVALUATION_INVALID')
     elif expected_report is not None:
         # Smoke worker 也綁定 supervisor 不可變計畫與限額。 / Smoke workers are bound to the supervisor's immutable plan and limits too.
-        immutable = ('providers', 'fixture', 'implementation_sha256', 'model_roe_sha256',
-                     'limits', 'total_timeout_seconds', 'max_output_tokens_per_call')
         calls = data.get('calls', [])
         reservations_valid = (type(data.get('reserved_calls')) is int and
             type(data.get('reserved_output_tokens')) is int and
@@ -198,7 +209,7 @@ def finish(root, run_id, *, providers=(), returncode=None, reason=None, recovere
                 c['reserved_output_tokens'] == expected_report['max_output_tokens_per_call'] for c in calls) and
             data['reserved_calls'] == len(calls) and
             data['reserved_output_tokens'] == len(calls) * expected_report['max_output_tokens_per_call'])
-        if not all(data.get(k) == expected_report.get(k) for k in immutable) or not reservations_valid:
+        if smoke_plan_digest(data) != smoke_plan_digest(expected_report) or not reservations_valid:
             completed = False
             data['code'] = 'EVALUATION_INVALID'
     try:
@@ -226,6 +237,10 @@ def finish(root, run_id, *, providers=(), returncode=None, reason=None, recovere
         data.update(status=reason, code=reason)
     elif completed:
         data.update(status='COMPLETE', code=None)
+    elif returncode == 2:
+        # exit 2 表示 worker 讀回的計畫與命令列摘要不符，一次呼叫都沒發。 / Exit 2 means the plan the worker read back
+        # did not match the digest on its command line, and it made no call.
+        data.update(status='INCOMPLETE', code='EVALUATION_INVALID')
     else:
         data.update(status='INCOMPLETE', code=data.get('code') or
                     ('WORKER_FAILED' if previous_status != 'AWAITING_CLEANUP' else 'PROVIDER_INCOMPLETE'))

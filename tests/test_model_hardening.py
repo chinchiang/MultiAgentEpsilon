@@ -313,12 +313,12 @@ def test_smoke_worker_spends_nothing_after_the_bound_roe_is_swapped(tmp_path, mo
     # still runs the mock.
     import uuid
     import scripts.model_smoke as smoke
-    from security_harness.llm.lifecycle import persist
+    from security_harness.llm.lifecycle import persist, smoke_plan_digest
     report = smoke.initial_report(["mock", "lmstudio"], str(uuid.uuid4()))
     tampered_roe(tmp_path, monkeypatch, lambda roe: roe.update(max_calls_per_run=15))
     live_settings(monkeypatch, "lmstudio")
     persist(tmp_path / "artifacts" / report["run_id"] / "report.json", report)
-    assert asyncio.run(smoke.run_worker(tmp_path, report["run_id"])) == 1
+    assert asyncio.run(smoke.run_worker(tmp_path, report["run_id"], smoke_plan_digest(report))) == 1
     data = json.loads((tmp_path / "artifacts" / report["run_id"] / "report.json").read_text())
     assert [(c["provider"], c["status"], c["code"]) for c in data["checks"]] == [
         ("mock", "SUCCESS", None), ("lmstudio", "ERROR", "CONFIGURATION")]
