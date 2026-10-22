@@ -9,15 +9,22 @@ from pathlib import Path
 import pytest
 from security_harness.audit import AuditRun
 from security_harness import isolation
-from security_harness.lifecycle import supervise, temporary_directory, sweep_stale
+from security_harness import supervision
+from security_harness.janitor import sweep_stale
+from security_harness.lifecycle import supervise
+from security_harness.supervision import temporary_directory
 
 ROOT = Path(__file__).resolve().parents[1]
+
+
+def no_containers(run_id):
+    """這些 worker 不建立容器，容器清理換成什麼都不做。 / These workers create no containers, so container cleanup
+    does nothing."""
 
 
 def test_supervised_security_worker_gets_no_token_through_the_gate(tmp_path, monkeypatch):
     # 經過真的 supervise 與 model_process 閘門，觀察 worker 實際收到的環境。 / Through the real supervise and the
     # model_process gate, observe the environment the worker actually receives.
-    monkeypatch.setattr(isolation, 'cleanup_run', lambda run: None)
     monkeypatch.setenv('PATH', '/usr/bin:/bin')
     monkeypatch.setenv('GH_TOKEN', 'synthetic-github-token')
     monkeypatch.setenv('GEMINI_API_KEY', 'synthetic-gemini-key')
@@ -25,7 +32,7 @@ def test_supervised_security_worker_gets_no_token_through_the_gate(tmp_path, mon
     audit.stage('G1')
     command = [sys.executable, '-c',
                'import json,os; from pathlib import Path; Path("worker-env.json").write_text(json.dumps(dict(os.environ)))']
-    supervise(tmp_path, audit, command, 10)
+    supervise(tmp_path, audit, command, 10, no_containers)
     seen = json.loads((tmp_path / 'worker-env.json').read_text())
     assert seen['PATH'] == '/usr/bin:/bin'
     assert seen['TMPDIR'] == f"/tmp/epsilon-run-{os.getuid()}-{audit.data['run_id']}"
@@ -33,7 +40,6 @@ def test_supervised_security_worker_gets_no_token_through_the_gate(tmp_path, mon
 
 
 def test_deadline_kills_real_child_group_and_removes_tmp(tmp_path, monkeypatch):
-    monkeypatch.setattr(isolation, 'cleanup_run', lambda run: None)
     audit = AuditRun(tmp_path, 'security')
     audit.stage('G1')
     command = [sys.executable, '-c',
@@ -41,7 +47,7 @@ def test_deadline_kills_real_child_group_and_removes_tmp(tmp_path, monkeypatch):
         'p=subprocess.Popen([sys.executable,"-c","import time; time.sleep(60)"]); '
         'Path("child.pid").write_text(str(p.pid)); '
         'Path(tempfile.gettempdir(),"owned.tmp").write_text("synthetic"); time.sleep(60)']
-    assert supervise(tmp_path, audit, command, 0.5) == 1
+    assert supervise(tmp_path, audit, command, 0.5, no_containers) == 1
     assert audit.data['execution'] == 'TIMEOUT'
     assert audit.data['records'][0]['execution'] == 'TIMEOUT'
     assert audit.data['cleanup']['completed']
@@ -103,10 +109,11 @@ raise SystemExit(supervise(root,audit,[sys.executable,str(root/'worker.py'),sys.
 
 
 def test_janitor_never_reaps_live_supervisor(tmp_path, monkeypatch):
-    from security_harness.lifecycle import prepare_run, cleanup
+    from security_harness.lifecycle import cleanup
+    from security_harness.supervision import prepare_run
     monkeypatch.setattr(isolation, 'cleanup_run', lambda run: None)
     audit = AuditRun(tmp_path, 'security')
-    work = prepare_run(tmp_path, audit.data['run_id'])
+    work = prepare_run(tmp_path, audit.data['run_id'], 'security')
     assert sweep_stale(tmp_path) == []
     assert work.exists()
     cleanup(tmp_path, audit.data['run_id'])
@@ -114,14 +121,13 @@ def test_janitor_never_reaps_live_supervisor(tmp_path, monkeypatch):
 
 @pytest.mark.parametrize('execution,code', [('COMPLETED', 0), ('ERROR', 1), ('CANCELLED', 0)])
 def test_worker_decision_without_cleanup_handoff_is_not_published(tmp_path, monkeypatch, execution, code):
-    monkeypatch.setattr(isolation, 'cleanup_run', lambda run: None)
     audit = AuditRun(tmp_path, 'security')
     report = audit.output / 'report.json'
     command = [sys.executable, '-c',
         'import json,sys; p=sys.argv[1]; d=json.load(open(p)); '
         'd.update(execution=sys.argv[2], decision="ALLOW", reasons=[]); '
         'json.dump(d, open(p, "w")); raise SystemExit(int(sys.argv[3]))', str(report), execution, str(code)]
-    assert supervise(tmp_path, audit, command, 10) == 1
+    assert supervise(tmp_path, audit, command, 10, no_containers) == 1
     assert audit.data['decision'] == 'BLOCK' and audit.data['execution'] == 'ERROR'
     assert audit.data['errors'][-1]['error_type'] == 'RuntimeError'
 
@@ -130,7 +136,6 @@ def test_worker_decision_without_cleanup_handoff_is_not_published(tmp_path, monk
 def test_worker_report_that_changes_the_plan_is_blocked_and_restored(tmp_path, monkeypatch, tampered):
     # worker 照常完成清理交接並回報 ALLOW；只要它改了計畫，supervisor 就不得採用。 / The worker completes the cleanup
     # handoff and reports ALLOW as usual; if it changed the plan, the supervisor must not adopt it.
-    monkeypatch.setattr(isolation, 'cleanup_run', lambda run: None)
     audit = AuditRun(tmp_path, 'security')
     planned = {'total_seconds': 600, 'cpu_seconds': 300}
     audit.data['resource_limits'] = dict(planned)
@@ -143,7 +148,7 @@ def test_worker_report_that_changes_the_plan_is_blocked_and_restored(tmp_path, m
         'pending_decision="ALLOW", pending_execution="RUNNING"); '
         'd["resource_limits"]["total_seconds"] += int(sys.argv[2]); '
         'json.dump(d, open(p, "w"))', str(report), str(int(tampered) * 3600)]
-    code = supervise(tmp_path, audit, command, 10)
+    code = supervise(tmp_path, audit, command, 10, no_containers)
     assert audit.data['resource_limits'] == planned
     if tampered:
         assert code == 1 and audit.data['decision'] == 'BLOCK' and audit.data['execution'] == 'ERROR'
@@ -153,9 +158,8 @@ def test_worker_report_that_changes_the_plan_is_blocked_and_restored(tmp_path, m
 
 
 def test_worker_that_refuses_the_plan_is_recorded_as_a_plan_mismatch(tmp_path, monkeypatch):
-    monkeypatch.setattr(isolation, 'cleanup_run', lambda run: None)
     audit = AuditRun(tmp_path, 'security')
-    assert supervise(tmp_path, audit, [sys.executable, '-c', 'raise SystemExit(2)'], 10) == 1
+    assert supervise(tmp_path, audit, [sys.executable, '-c', 'raise SystemExit(2)'], 10, no_containers) == 1
     assert audit.data['decision'] == 'BLOCK' and audit.data['execution'] == 'ERROR'
     assert audit.data['errors'][-1]['error_type'] == 'PlanMismatch'
 
@@ -176,14 +180,51 @@ def test_security_worker_with_another_plan_exits_without_touching_the_report(tmp
     assert report.read_bytes() == before
 
 
+@pytest.mark.parametrize('deadline', [0, -1, True, float('nan'), float('inf'), 601])
+def test_invalid_security_deadline_never_launches(tmp_path, deadline):
+    with pytest.raises(ValueError, match='^invalid supervisor deadline$'):
+        supervise(tmp_path, AuditRun(tmp_path, 'security'), ['must-not-execute'], deadline)
+    assert not (tmp_path / '.state').exists()
+
+
+def test_security_worker_is_registered_durably_before_it_runs(tmp_path, monkeypatch):
+    # worker 一開始就看得到自己的登記；擁有者標記不再記錄 worker。 / The worker already sees its own registration when it
+    # starts; the owner marker no longer records the worker.
+    command = [sys.executable, '-c',
+               'import json,os,pathlib; runs=pathlib.Path(".state/runs"); '
+               'pathlib.Path("seen.json").write_text(json.dumps({"pid": os.getpid(), '
+               '"groups": [json.loads(p.read_text()) for p in runs.glob("*/groups/*.json")], '
+               '"owners": [json.loads(p.read_text()) for p in runs.glob("*/owner.json")]}))']
+    supervise(tmp_path, AuditRun(tmp_path, 'security'), command, 10, no_containers)
+    seen = json.loads((tmp_path / 'seen.json').read_text())
+    assert [(g['pid'], g['role']) for g in seen['groups']] == [(seen['pid'], 'worker')]
+    assert [o['operation'] for o in seen['owners']] == ['security'] and 'worker_pid' not in seen['owners'][0]
+
+
+def test_janitor_stops_the_registered_worker_group_of_a_dead_security_supervisor(tmp_path, monkeypatch):
+    monkeypatch.setattr(isolation, 'cleanup_run', lambda run: None)
+    audit = AuditRun(tmp_path, 'security')
+    work = supervision.prepare_run(tmp_path, audit.data['run_id'], 'security')
+    worker = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(60)'], start_new_session=True)
+    try:
+        supervision.register_group(work, worker.pid, role='worker')
+        monkeypatch.setattr(supervision, 'owner_alive', lambda marker: False)
+        assert sweep_stale(tmp_path) == [audit.data['run_id']]
+        assert worker.wait(timeout=5) is not None
+        assert json.loads((audit.output / 'report.json').read_text())['execution'] == 'CANCELLED'
+    finally:
+        if worker.poll() is None:
+            worker.kill()
+            worker.wait(timeout=5)
+
+
 def test_janitor_keeps_latest_pointer_on_the_newer_run(tmp_path, monkeypatch):
-    from security_harness import lifecycle
     monkeypatch.setattr(isolation, 'cleanup_run', lambda run: None)
     stale = AuditRun(tmp_path, 'security')
-    lifecycle.prepare_run(tmp_path, stale.data['run_id'])
+    supervision.prepare_run(tmp_path, stale.data['run_id'], 'security')
     newer = AuditRun(tmp_path, 'security')
     newer.finish()
-    monkeypatch.setattr(lifecycle, 'owner_alive', lambda marker: False)
+    monkeypatch.setattr(supervision, 'owner_alive', lambda marker: False)
     assert sweep_stale(tmp_path) == [stale.data['run_id']]
     assert json.loads((stale.output / 'report.json').read_text())['execution'] == 'CANCELLED'
     assert (tmp_path / 'artifacts/latest.txt').read_text().strip() == newer.data['run_id']
@@ -234,10 +275,11 @@ def test_janitor_keeps_a_young_container_that_another_checkout_may_own(tmp_path,
 
 
 def test_janitor_keeps_an_old_container_of_a_live_run(tmp_path, monkeypatch):
-    from security_harness.lifecycle import prepare_run, cleanup
+    from security_harness.lifecycle import cleanup
+    from security_harness.supervision import prepare_run
     monkeypatch.setattr(isolation, 'cleanup_run', lambda run: None)
     audit = AuditRun(tmp_path, 'security')
-    prepare_run(tmp_path, audit.data['run_id'])
+    prepare_run(tmp_path, audit.data['run_id'], 'security')
     fake = FakeDocker(container('live', audit.data['run_id'], minutes_old=11))
     monkeypatch.setattr(isolation, 'docker', fake)
     assert sweep_stale(tmp_path) == []
@@ -246,12 +288,11 @@ def test_janitor_keeps_an_old_container_of_a_live_run(tmp_path, monkeypatch):
 
 
 def test_janitor_reports_a_failed_container_sweep_without_losing_reaped_runs(tmp_path, monkeypatch):
-    from security_harness import lifecycle
-    from security_harness.lifecycle import SweepIncomplete
+    from security_harness.janitor import SweepIncomplete
     monkeypatch.setattr(isolation, 'cleanup_run', lambda run: None)
     stale = AuditRun(tmp_path, 'security')
-    lifecycle.prepare_run(tmp_path, stale.data['run_id'])
-    monkeypatch.setattr(lifecycle, 'owner_alive', lambda marker: False)
+    supervision.prepare_run(tmp_path, stale.data['run_id'], 'security')
+    monkeypatch.setattr(supervision, 'owner_alive', lambda marker: False)
     monkeypatch.setattr(isolation, 'docker', FakeDocker(container('stuck', 'd' * 32, minutes_old=11), rm_fails=True))
     with pytest.raises(SweepIncomplete) as raised:
         sweep_stale(tmp_path)
@@ -292,7 +333,7 @@ def test_failure_is_persisted_immediately(tmp_path):
 @pytest.mark.parametrize("run_id", ["-" * 36, "a" * 33, "A" * 32, "../" + "a" * 29, "a" * 8 + "-" * 28, None])
 def test_run_identity_accepts_only_hex_or_canonical_uuid(run_id):
     from security_harness.isolation import cleanup_run
-    from security_harness.lifecycle import run_directory, valid_run_id
+    from security_harness.supervision import run_directory, valid_run_id
     assert not valid_run_id(run_id)
     with pytest.raises((ValueError, TypeError), match='^invalid\\ run\\ identity$'):
         run_directory(Path("/tmp"), run_id)
@@ -303,5 +344,5 @@ def test_run_identity_accepts_only_hex_or_canonical_uuid(run_id):
 def test_generated_run_identities_remain_valid():
     import secrets
     import uuid
-    from security_harness.lifecycle import valid_run_id
+    from security_harness.supervision import valid_run_id
     assert valid_run_id(str(uuid.uuid4())) and valid_run_id(secrets.token_hex(16))

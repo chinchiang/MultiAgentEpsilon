@@ -1,6 +1,26 @@
-"""受監督執行：每個子程序都從同一份基本環境出發，各角色只加上自己需要的名稱。
+"""受監督執行：supervisor 啟動 worker、在放行前持久登記、等待結束、期限或訊號，再停止所有登記的程序群組。
+每個子程序都從同一份基本環境出發，各角色只加上自己需要的名稱；收尾與證據格式留在各角色。
 
-Supervised runs: every child process starts from one base environment, and each role adds only the names it needs."""
+Supervised runs: the supervisor starts a worker, registers it durably before releasing it, waits for its exit, the
+deadline or a signal, then stops every registered process group. Every child starts from one base environment and each
+role adds only the names it needs; finalization and the evidence format stay with each role."""
+import fcntl
+import hashlib
+import json
+import math
+import os
+import re
+import shutil
+import signal
+import subprocess
+import sys
+import time
+from contextlib import contextmanager
+from pathlib import Path
+
+from .results import write_json
+
+SOURCE_ROOT = Path(__file__).resolve().parents[1]
 
 # 找到程式、語系、代理與 CA 所需的名稱；不含任何權杖、金鑰或改變連線目的地的設定。 / The names needed to find
 # programs, locale, proxies and CAs; no token, key or setting that changes where a child connects.
@@ -17,3 +37,315 @@ The base environment plus the role's extra names. Names must match exactly; any
     other casing is dropped.
     """
     return {k: v for k, v in environ.items() if k in BASE_ENV or k in extra}
+
+
+def group_alive(pid):
+    """程序群組是否仍有非殭屍成員。 / Whether a process group still has a non-zombie member."""
+    for path in Path('/proc').glob('[0-9]*/stat'):
+        try:
+            fields = path.read_text().rsplit(')', 1)[1].split()
+            if int(fields[2]) == pid and fields[0] != 'Z':
+                return True
+        except (FileNotFoundError, ProcessLookupError, PermissionError, IndexError, ValueError):
+            # 程序在列舉時消失，或 /proc 受 hidepid 限制。 / The process vanished mid-scan, or /proc is restricted.
+            continue
+    return False
+
+
+def identity(pid):
+    raw = Path(f'/proc/{pid}/stat').read_text()
+    return raw.rsplit(')', 1)[1].split()[19]
+
+
+def current_boot():
+    return Path('/proc/sys/kernel/random/boot_id').read_text().strip()
+
+
+# 32 位十六進位或標準 UUID；與發布器使用的格式一致。 / 32 hex digits or a canonical UUID, as the publisher expects.
+RUN_ID = re.compile(r'[0-9a-f]{32}|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}')
+
+
+def valid_run_id(run_id):
+    return type(run_id) is str and RUN_ID.fullmatch(run_id) is not None
+
+
+def run_directory(root, run_id):
+    if not valid_run_id(run_id):
+        raise ValueError('invalid run identity')
+    return root / '.state' / 'runs' / run_id
+
+
+def temporary_directory(run_id):
+    if not valid_run_id(run_id):
+        raise ValueError('invalid run identity')
+    # PostgreSQL Unix socket 路徑須低於 Linux 的 108 位元組上限。 / Keep PostgreSQL Unix socket paths below Linux's 108-byte limit.
+    return Path('/tmp') / f'epsilon-run-{os.getuid()}-{run_id}'
+
+
+def persist(path, data):
+    write_json(path, data)
+    # 放行子程序前，登記必須能承受擁有者崩潰。 / Registration must survive an owner crash before the child is released.
+    with path.open('rb') as handle:
+        os.fsync(handle.fileno())
+    descriptor = os.open(path.parent, os.O_RDONLY | os.O_DIRECTORY)
+    try:
+        os.fsync(descriptor)
+    finally:
+        os.close(descriptor)
+
+
+def prepare_run(root, run_id, operation):
+    work = run_directory(root, run_id)
+    marker = {'run_id': run_id, 'operation': operation, 'pid': os.getpid(), 'start': identity(os.getpid()),
+              'uid': os.getuid(), 'boot': current_boot()}
+    work.mkdir(parents=True, mode=0o700)
+    try:
+        # 配置外部暫存資源前，先登記可復原的擁有者。 / A recoverable owner precedes external temporary resource allocation.
+        persist(work / 'owner.json', marker)
+        temporary_directory(run_id).mkdir(mode=0o700)
+    except Exception:
+        shutil.rmtree(work)
+        raise
+    return work
+
+
+def owner_alive(marker):
+    if marker['boot'] != current_boot():
+        return False
+    try:
+        raw = Path(f"/proc/{marker['pid']}/stat").read_text().rsplit(')', 1)[1].split()
+        return raw[0] != 'Z' and raw[19] == marker['start']
+    except FileNotFoundError:
+        return False
+
+
+def terminate_group(pid):
+    if type(pid) is not int or pid <= 1 or pid == os.getpgrp():
+        raise ValueError('invalid owned process group')
+    # 即使直接 worker 已退出，也須終止其後代程序。 / Kill descendants even if the immediate worker has already exited.
+    for signum, delay in ((signal.SIGTERM, 0.3), (signal.SIGKILL, 0)):
+        try:
+            os.killpg(pid, signum)
+        except ProcessLookupError:
+            break
+        if delay:
+            time.sleep(delay)
+    deadline = time.monotonic() + 3
+    while group_alive(pid):
+        if time.monotonic() >= deadline:
+            raise TimeoutError('process group cleanup incomplete')
+        time.sleep(0.02)
+
+
+def gated_command(command):
+    # 擁有者在登記前死亡時，閘門讀到 EOF 即退出。 / The gate exits on EOF if the owner dies before registration.
+    return [sys.executable, '-I', str(SOURCE_ROOT / 'scripts/model_process.py'), *command]
+
+
+def register_group(work, pid, role='child'):
+    marker = json.loads((work / 'owner.json').read_text())
+    if marker['uid'] != os.getuid():
+        raise ValueError('invalid run owner')
+    if os.getsid(pid) != pid or os.getpgid(pid) != pid:
+        raise ValueError('supervised child requires a dedicated session')
+    persist(work / 'groups' / f'{pid}.json', {
+        'pid': pid, 'start': identity(pid), 'boot': marker['boot'], 'uid': marker['uid'], 'role': role})
+
+
+def stop_registered(work):
+    boot = current_boot()
+    def stop(path):
+        if path.is_symlink():
+            raise ValueError('invalid process registration')
+        group = json.loads(path.read_text())
+        pid = group['pid']
+        if type(pid) is not int or pid <= 1 or group['uid'] != os.getuid() or path.name != f'{pid}.json':
+            raise ValueError('invalid process identity')
+        if group['boot'] != boot:
+            return  # host 重開機後不可對新開機的程序傳送訊號。 / Host reboot: never signal a new boot's processes.
+        try:
+            if identity(pid) != group['start']:
+                return  # PID 重用時不可對新群組傳送訊號。 / PID reuse: do not signal the new process group.
+        except FileNotFoundError:
+            pass  # 已登記群組可能比原領導程序存活更久。 / A registered group can outlive its original leader.
+        terminate_group(pid)
+    # 先停止產生者再重新列舉；接收 SIGTERM 時仍可能 / Freeze the producer first, then enumerate again: it could register another
+    # 登記新子程序，尚未登記的閘門子程序則讀到 EOF。 / child while receiving SIGTERM. A pre-registration gated child sees EOF.
+    for path in sorted((work / 'groups').glob('*.json')):
+        if path.is_symlink():
+            raise ValueError('invalid process registration')
+        if json.loads(path.read_text()).get('role') == 'worker':
+            stop(path)
+    for path in sorted((work / 'groups').glob('*.json')):
+        stop(path)
+
+
+@contextmanager
+def cleanup_lock(work):
+    # 非阻塞 flock 序列化同時執行的 janitor，不重新建立執行目錄。 / Nonblocking flock serializes concurrent janitors. Never recreate a run.
+    try:
+        fd = os.open(work / 'cleanup.lock', os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, 0o600)
+    except FileNotFoundError:
+        yield False
+        return
+    try:
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            yield False
+        else:
+            yield True
+    finally:
+        os.close(fd)
+
+
+def plan_digest(report, fields):
+    """報告中計畫欄位的雜湊；supervisor 經命令列交給 worker，不經磁碟。 / Digest of a report's plan fields. The
+    supervisor hands it to the worker on the command line, never through the report on disk."""
+    plan = {key: report.get(key) for key in fields}
+    return hashlib.sha256(json.dumps(plan, sort_keys=True, separators=(',', ':')).encode()).hexdigest()
+
+
+def plan_changed(report, planned):
+    """報告中的計畫欄位是否與 supervisor 持有的值不同。 / Whether the report's plan fields differ from the values the
+    supervisor holds."""
+    return any(report.get(key) != value for key, value in planned.items())
+
+
+class PlanMismatch(ValueError):
+    """worker 報告與 supervisor 的計畫不同。 / The worker's report differs from the supervisor's plan."""
+
+
+class SupervisedRun:
+    """一次受監督執行的狀態：收到的訊號、結束原因、例外型別與群組停止結果。
+
+The state of one supervised run: signals received, the stop reason, the exception type
+    and whether every registered group was stopped.
+    """
+
+    def __init__(self, root, run_id, work, max_seconds):
+        self.root, self.run_id, self.work = root, run_id, work
+        self.started = time.monotonic()
+        self.deadline = self.started + max_seconds
+        self.cancelled = []
+        self.process = None
+        self.reason = None
+        self.error_type = None
+        self.stop_error = None
+
+    @property
+    def returncode(self):
+        return self.process.returncode if self.process is not None else None
+
+    def run(self, command, env):
+        """經閘門啟動 worker，持久登記後才放行，等待結束、期限或訊號，最後停止所有登記的群組。
+
+Start the worker through the gate, release it only after durable registration, wait for its
+        exit, the deadline or a signal, then stop every registered group.
+        """
+        try:
+            self.process = subprocess.Popen(
+                gated_command(command), cwd=self.root, start_new_session=True, stdin=subprocess.PIPE,
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                env={**env, 'TMPDIR': str(temporary_directory(self.run_id))})
+            register_group(self.work, self.process.pid, role='worker')
+            self.process.stdin.write(b'G')
+            self.process.stdin.close()
+            while self.process.poll() is None:
+                if self.cancelled:
+                    self.reason = 'CANCELLED'
+                    break
+                if time.monotonic() >= self.deadline:
+                    self.reason = 'TIMEOUT'
+                    break
+                time.sleep(0.02)
+        except Exception as exc:
+            self.reason, self.error_type = 'ERROR', type(exc).__name__
+        finally:
+            self.stop()
+
+    def stop(self):
+        process = self.process
+        # 尚未登記的閘門子程序仍由此 Popen handle 擁有。 / Even an unregistered gated child is owned by this Popen handle.
+        if process is not None:
+            if process.stdin and not process.stdin.closed:
+                process.stdin.close()
+            try:
+                if process.returncode is None:
+                    terminate_group(process.pid)
+            except Exception as exc:
+                self.stop_error = type(exc).__name__
+            try:
+                process.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                # 群組終止後仍存活的 worker 不可略過後續收尾。 / A worker that outlives its group kill must not skip
+                # finalization.
+                self.reason = self.reason or 'ERROR'
+                self.error_type = self.error_type or 'TimeoutExpired'
+                process.kill()
+                try:
+                    process.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    pass
+        try:
+            stop_registered(self.work)
+        except Exception as exc:
+            self.stop_error = self.stop_error or type(exc).__name__
+
+    @property
+    def seconds(self):
+        return round(time.monotonic() - self.started, 3)
+
+
+@contextmanager
+def supervised_run(root, run_id, operation, max_seconds, ceiling):
+    """驗證期限、建立並持久登記執行，於收尾期間安裝訊號處理器；離開時還原。
+
+Validate the deadline, create and durably register the run, and keep signal handlers
+    installed through finalization; restore them on exit.
+    """
+    if (type(max_seconds) not in (int, float) or not math.isfinite(max_seconds)
+            or not 0 < max_seconds <= ceiling):
+        raise ValueError('invalid supervisor deadline')
+    run = SupervisedRun(root, run_id, prepare_run(root, run_id, operation), max_seconds)
+    handlers = {}
+    try:
+        for signum in (signal.SIGTERM, signal.SIGINT):
+            handlers[signum] = signal.signal(signum, lambda number, frame: run.cancelled.append(number))
+        yield run
+    finally:
+        for signum, handler in handlers.items():
+            signal.signal(signum, handler)
+
+
+def sweep_runs(root, recoverers):
+    """依擁有者標記的 operation 回收擁有者已死亡的執行；回傳已回收的 run ID 與失敗清單。
+
+Reap the runs whose owner died, dispatching on the owner marker's operation. Return the
+    reaped run IDs and the failures.
+    """
+    cleaned, failures = [], []
+    for work in sorted((root / '.state' / 'runs').glob('*')):
+        try:
+            if work.is_symlink():
+                raise ValueError('invalid run directory')
+            try:
+                marker = json.loads((work / 'owner.json').read_text())
+            except FileNotFoundError:
+                # 另一 janitor 已移除，或初始化尚未發布擁有者標記； / Another janitor removed it, or initialization has not published
+                # 該標記之前不會建立外部資源。 / ownership yet. No external resources exist before that marker.
+                continue
+            if marker['run_id'] != work.name or marker['uid'] != os.getuid():
+                raise ValueError('invalid run owner')
+            if owner_alive(marker):
+                continue
+            recover = recoverers.get(marker.get('operation'))
+            if recover is None:
+                raise ValueError('unknown run operation')
+            with cleanup_lock(work) as locked:
+                if locked and recover(root, work.name, marker):
+                    cleaned.append(work.name)
+        except Exception as exc:
+            # 繼續回收其他執行；每個失敗均回報，但不保存原文。 / Keep reaping the remaining runs; report every failure, without its text.
+            failures.append({'run_id': work.name, 'error_type': type(exc).__name__})
+    return cleaned, failures

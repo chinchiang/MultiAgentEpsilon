@@ -148,7 +148,7 @@ def test_gated_aws_cli_receives_the_allowlisted_environment(tmp_path, monkeypatc
     # through the model_process gate; observe the environment the CLI actually receives on that path.
     import shutil
     import uuid
-    from security_harness.lifecycle import prepare_run, run_directory, temporary_directory
+    from security_harness.supervision import prepare_run, run_directory, temporary_directory
     monkeypatch.setenv("AWS_PROFILE", "synthetic-profile")
     monkeypatch.setenv("AWS_ROLE_ARN", "arn:aws:iam::123456789012:role/synthetic")
     monkeypatch.setenv("AWS_MAX_ATTEMPTS", "5")

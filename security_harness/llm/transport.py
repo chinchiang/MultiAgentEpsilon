@@ -224,7 +224,7 @@ Use the configured AWS credential chain. No shell or interactive login.
                 "--cli-input-json", input_path, "--output", "json", "--no-cli-pager",
                 "--cli-connect-timeout", "10", "--cli-read-timeout", "20"]
             if self.run_directory is not None:
-                from .lifecycle import gated_command, register_group
+                from ..supervision import gated_command, register_group
                 command = gated_command(command)
             process = await asyncio.create_subprocess_exec(*command,
                 stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE,

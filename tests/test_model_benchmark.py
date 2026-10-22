@@ -18,7 +18,7 @@ from security_harness.llm import benchmark_score as score
 from security_harness.llm import benchmark_runner as runner
 from security_harness.llm import lifecycle as life
 from security_harness.llm.gateway import ModelError, Reply
-from security_harness.lifecycle import prepare_run
+from security_harness.supervision import prepare_run
 
 
 from tests.model_evidence import provider_answer

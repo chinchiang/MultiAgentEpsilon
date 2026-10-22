@@ -1,118 +1,31 @@
-"""父程序管理執行目錄、程序群組與取消後清理。
+"""security 角色的受監督執行：計畫、worker 環境、容器與執行狀態清理、收尾，以及擁有者死亡後的復原。
 
-Parent-owned run directories, process groups and cleanup after cancellation."""
-import hashlib
+The security role of a supervised run: its plan, worker environment, container and run-state cleanup, finalization,
+and recovery after its owner died."""
 import json
 import os
-import re
 import shutil
-import signal
-import subprocess
-import sys
 import time
 from datetime import datetime, timedelta, timezone
-from pathlib import Path
-from .results import required_gate_kinds, write_json
-from .supervision import child_environment
+from .results import required_gate_kinds
+from .supervision import (PlanMismatch, child_environment, current_boot, plan_changed, plan_digest, run_directory,
+                          stop_registered, supervised_run, temporary_directory)
 
-SOURCE_ROOT = Path(__file__).resolve().parents[1]
 # 遠大於 RoE 的 120 秒執行上限。 / Well beyond the RoE's 120-second run limit.
 ORPHAN_CONTAINER_AGE = timedelta(minutes=10)
+# RoE 允許的最長整體期限。 / The longest total deadline the RoE allows.
+MAX_TOTAL_SECONDS = 600
 
 
-def group_alive(pid):
-    """程序群組是否仍有非殭屍成員；模型與安全 supervisor 共用。 / Whether a process group still has a non-zombie
-    member; shared by the model and security supervisors."""
-    for path in Path('/proc').glob('[0-9]*/stat'):
-        try:
-            fields = path.read_text().rsplit(')', 1)[1].split()
-            if int(fields[2]) == pid and fields[0] != 'Z':
-                return True
-        except (FileNotFoundError, ProcessLookupError, PermissionError, IndexError, ValueError):
-            # 程序在列舉時消失，或 /proc 受 hidepid 限制。 / The process vanished mid-scan, or /proc is restricted.
-            continue
-    return False
-
-
-def identity(pid):
-    raw = Path(f'/proc/{pid}/stat').read_text()
-    return raw.rsplit(')', 1)[1].split()[19]
-
-
-# 32 位十六進位或標準 UUID；與發布器使用的格式一致。 / 32 hex digits or a canonical UUID, as the publisher expects.
-RUN_ID = re.compile(r'[0-9a-f]{32}|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}')
-
-
-def valid_run_id(run_id):
-    return type(run_id) is str and RUN_ID.fullmatch(run_id) is not None
-
-
-def run_directory(root, run_id):
-    if not valid_run_id(run_id):
-        raise ValueError('invalid run identity')
-    return root / '.state' / 'runs' / run_id
-
-
-def temporary_directory(run_id):
-    if not valid_run_id(run_id):
-        raise ValueError('invalid run identity')
-    # PostgreSQL Unix socket 路徑須低於 Linux 的 108 位元組上限。 / Keep PostgreSQL Unix socket paths below Linux's 108-byte limit.
-    return Path('/tmp') / f'epsilon-run-{os.getuid()}-{run_id}'
-
-
-def prepare_run(root, run_id, operation='security'):
-    work = run_directory(root, run_id)
-    marker = {'run_id': run_id, 'operation': operation, 'pid': os.getpid(), 'start': identity(os.getpid()),
-              'uid': os.getuid(), 'boot': Path('/proc/sys/kernel/random/boot_id').read_text().strip()}
-    work.mkdir(parents=True, mode=0o700)
-    try:
-        # 配置外部暫存資源前，先登記可復原的擁有者。 / A recoverable owner precedes external temporary resource allocation.
-        write_json(work / 'owner.json', marker)
-        temporary_directory(run_id).mkdir(mode=0o700)
-    except Exception:
-        shutil.rmtree(work)
-        raise
-    return work
-
-
-def owner_alive(marker):
-    if marker['boot'] != Path('/proc/sys/kernel/random/boot_id').read_text().strip():
-        return False
-    try:
-        raw = Path(f"/proc/{marker['pid']}/stat").read_text().rsplit(')', 1)[1].split()
-        return raw[0] != 'Z' and raw[19] == marker['start']
-    except FileNotFoundError:
-        return False
-
-
-def terminate_group(pid):
-    if type(pid) is not int or pid <= 1 or pid == os.getpgrp():
-        raise ValueError('invalid owned process group')
-    # 即使直接 worker 已退出，也須終止其後代程序。 / Kill descendants even if the immediate worker has already exited.
-    for signum, delay in ((signal.SIGTERM, 0.3), (signal.SIGKILL, 0)):
-        try:
-            os.killpg(pid, signum)
-        except ProcessLookupError:
-            break
-        if delay:
-            time.sleep(delay)
-    deadline = time.monotonic() + 3
-    while group_alive(pid):
-        if time.monotonic() >= deadline:
-            raise TimeoutError('process group cleanup incomplete')
-        time.sleep(0.02)
-
-
-def kill_group(process):
-    terminate_group(process.pid)
-    process.wait(timeout=5)
-
-
-def cleanup(root, run_id):
+def remove_run_containers(run_id):
     from .isolation import cleanup_run
+    cleanup_run(run_id)
+
+
+def cleanup(root, run_id, remove_containers=remove_run_containers):
     # CLI 終止後，daemon 仍可能正在完成請求。 / The daemon may still be finishing a request when its CLI is terminated.
     for _ in range(3):
-        cleanup_run(run_id)
+        remove_containers(run_id)
         time.sleep(0.1)
     work = run_directory(root, run_id)
     if work.exists():
@@ -127,16 +40,6 @@ def cleanup(root, run_id):
         if temporary.exists():
             shutil.rmtree(temporary)
         shutil.rmtree(work)
-
-
-class SweepIncomplete(RuntimeError):
-    """部分過期執行無法回收，其他項目仍繼續處理。
-
-Some stale runs could not be reaped; the others were still processed."""
-
-    def __init__(self, cleaned, failures):
-        super().__init__('stale run cleanup incomplete')
-        self.cleaned, self.failures = cleaned, failures
 
 
 def remove_orphan_containers(root):
@@ -156,61 +59,31 @@ def remove_orphan_containers(root):
         isolation.docker('rm', '--force', *old, timeout=30)
 
 
-def sweep_stale(root):
-    cleaned = []
-    failures = []
-    for work in sorted((root / '.state' / 'runs').glob('*')):
-        try:
-            if work.is_symlink():
-                raise ValueError('invalid run directory')
-            try:
-                marker = json.loads((work / 'owner.json').read_text())
-            except FileNotFoundError:
-                # 另一 janitor 已移除，或初始化尚未發布擁有者標記； / Another janitor removed it, or initialization has not published
-                # 該標記之前不會建立外部資源。 / ownership yet. No external resources exist before that marker.
-                continue
-            if marker['run_id'] != work.name or marker['uid'] != os.getuid():
-                raise ValueError('invalid run owner')
-            if not owner_alive(marker):
-                if marker.get('operation') == 'model-smoke':
-                    from .llm.lifecycle import recover
-                    if recover(root, work.name):
-                        cleaned.append(work.name)
-                    continue
-                same_boot = marker['boot'] == Path('/proc/sys/kernel/random/boot_id').read_text().strip()
-                if same_boot and 'worker_pid' in marker:
-                    try:
-                        same_worker = identity(marker['worker_pid']) == marker['worker_start']
-                    except FileNotFoundError:
-                        same_worker = True  # 舊程序群組可能比其領導程序存活更久。 / An extant old process group can outlive its leader.
-                    if same_worker:
-                        terminate_group(marker['worker_pid'])
-                cleanup(root, work.name)
-                report = root / 'artifacts' / work.name / 'report.json'
-                if report.exists():
-                    from .audit import AuditRun
-                    audit = AuditRun.__new__(AuditRun)
-                    audit.output = report.parent
-                    audit.data = json.loads(report.read_text())
-                    audit.data.update(execution='CANCELLED', decision='BLOCK', reasons=['orphaned supervisor reaped'],
-                                      cleanup={'completed': True, 'recovered_by_janitor': True,
-                                               'run_directory_removed': not work.exists(),
-                                               'temporary_directory_removed': not temporary_directory(work.name).exists(),
-                                               'process_group_terminated': True, 'error_type': None,
-                                               'boot_changed': not same_boot})
-                    # 回收舊執行不可覆寫較新執行的索引。 / A reaped old run must not displace the index of a newer run.
-                    audit.finish(required_gate_kinds(root), update_pointer=False)
-                cleaned.append(work.name)
-        except Exception as exc:
-            # 繼續回收其他執行；每個失敗均回報，但不保存原文。 / Keep reaping the remaining runs; report every failure, without its text.
-            failures.append({'run_id': work.name, 'error_type': type(exc).__name__})
-    try:
-        remove_orphan_containers(root)
-    except Exception as exc:
-        failures.append({'containers': 'epsilon.isolated', 'error_type': type(exc).__name__})
-    if failures:
-        raise SweepIncomplete(cleaned, failures)
-    return cleaned
+def recover(root, run_id, marker):
+    """回收擁有者已死亡的 security 執行：停止登記的群組、清除容器與執行狀態，並以 CANCELLED 收尾證據。
+
+Reap a security run whose owner died: stop its registered groups, remove its containers
+    and run state, and close its evidence as CANCELLED.
+    """
+    work = run_directory(root, run_id)
+    same_boot = marker['boot'] == current_boot()
+    stop_registered(work)
+    cleanup(root, run_id)
+    report = root / 'artifacts' / run_id / 'report.json'
+    if report.exists():
+        from .audit import AuditRun
+        audit = AuditRun.__new__(AuditRun)
+        audit.output = report.parent
+        audit.data = json.loads(report.read_text())
+        audit.data.update(execution='CANCELLED', decision='BLOCK', reasons=['orphaned supervisor reaped'],
+                          cleanup={'completed': True, 'recovered_by_janitor': True,
+                                   'run_directory_removed': not work.exists(),
+                                   'temporary_directory_removed': not temporary_directory(run_id).exists(),
+                                   'process_group_terminated': True, 'error_type': None,
+                                   'boot_changed': not same_boot})
+        # 回收舊執行不可覆寫較新執行的索引。 / A reaped old run must not displace the index of a newer run.
+        audit.finish(required_gate_kinds(root), update_pointer=False)
+    return True
 
 
 # supervisor 在放行 worker 前決定的計畫欄位；worker 報告中的這些欄位必須與 supervisor 持有的值相同。
@@ -220,27 +93,10 @@ SECURITY_IMMUTABLE = ('run_id', 'operation', 'created_at', 'variant', 'candidate
                       'policy_digest', 'roe_sha256', 'evaluator_digest')
 
 
-def plan_digest(report, fields):
-    """報告中計畫欄位的雜湊；supervisor 經命令列交給 worker，不經磁碟。 / Digest of a report's plan fields. The
-    supervisor hands it to the worker on the command line, never through the report on disk."""
-    plan = {key: report.get(key) for key in fields}
-    return hashlib.sha256(json.dumps(plan, sort_keys=True, separators=(',', ':')).encode()).hexdigest()
-
-
-def plan_changed(report, planned):
-    """報告中的計畫欄位是否與 supervisor 持有的值不同。 / Whether the report's plan fields differ from the values the
-    supervisor holds."""
-    return any(report.get(key) != value for key, value in planned.items())
-
-
 def matches_plan(report, digest):
     """worker 讀回的報告是否仍是命令列摘要所指的計畫。 / Whether the report the worker read back is still the plan
     its command-line digest names."""
     return plan_digest(report, SECURITY_IMMUTABLE) == digest
-
-
-class PlanMismatch(ValueError):
-    """worker 報告與 supervisor 的計畫不同。 / The worker's report differs from the supervisor's plan."""
 
 
 # security worker 另需 docker 設定；不需權杖、供應商金鑰或 libpq 設定。 / The security worker also needs the docker
@@ -256,57 +112,17 @@ The security worker's environment: the base environment plus the docker configur
     return child_environment(environ, SECURITY_WORKER_EXTRA)
 
 
-def supervise(root, audit, command, max_seconds):
-    work = prepare_run(root, audit.data['run_id'])
-    cancelled = []
-    handlers = {}
-    process = None
-    reason = None
-    cleanup_error = None
-    group_terminated = False
-    supervisor_error = None
-    deadline = time.monotonic() + max_seconds
+def supervise(root, audit, command, max_seconds, remove_containers=remove_run_containers):
+    run_id = audit.data['run_id']
     planned = {key: audit.data.get(key) for key in SECURITY_IMMUTABLE}
-    try:
-        for signum in (signal.SIGTERM, signal.SIGINT):
-            handlers[signum] = signal.signal(signum, lambda number, frame: cancelled.append(number))
-        # supervisor 在登記前死亡時，閘門讀到 EOF 即退出。 / The gate exits on EOF if the supervisor dies before registration.
-        gated = [sys.executable, '-I', str(SOURCE_ROOT / 'scripts/model_process.py'), *command]
-        process = subprocess.Popen(gated, cwd=root, start_new_session=True, stdin=subprocess.PIPE,
-                                   stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-                                   env={**security_worker_environment(os.environ),
-                                        'TMPDIR': str(temporary_directory(audit.data['run_id']))})
-        marker = json.loads((work / 'owner.json').read_text())
-        marker.update(worker_pid=process.pid, worker_start=identity(process.pid))
-        write_json(work / 'owner.json', marker)
-        process.stdin.write(b'G')
-        process.stdin.close()
-        while process.poll() is None:
-            if cancelled:
-                reason = 'CANCELLED'
-                break
-            if time.monotonic() >= deadline:
-                reason = 'TIMEOUT'
-                break
-            time.sleep(0.05)
-    except Exception as exc:
-        reason = 'ERROR'
-        supervisor_error = type(exc).__name__
-    finally:
-        if process is not None:
-            try:
-                if process.stdin and not process.stdin.closed:
-                    process.stdin.close()
-                kill_group(process)
-                group_terminated = True
-            except Exception as exc:
-                cleanup_error = type(exc).__name__
+    with supervised_run(root, run_id, 'security', max_seconds, MAX_TOTAL_SECONDS) as run:
+        run.run(command, security_worker_environment(os.environ))
+        cleanup_error = run.stop_error
         try:
-            cleanup(root, audit.data['run_id'])
+            cleanup(root, run_id, remove_containers)
         except Exception as exc:
             cleanup_error = type(exc).__name__
-        for signum, handler in handlers.items():
-            signal.signal(signum, handler)
+    reason, cancelled, returncode = run.reason, run.cancelled, run.returncode
     # 讀取 worker 最後原子保存的進度，不使用父程序舊副本。 / Read the worker's last atomically persisted progress, not a stale parent copy.
     audit.data = json.loads((audit.output / 'report.json').read_text())
     # 發布的證據只能帶 supervisor 實際使用的計畫，不採用 worker 改過的值。 / Published evidence carries only the plan
@@ -314,31 +130,32 @@ def supervise(root, audit, command, max_seconds):
     changed = plan_changed(audit.data, planned)
     audit.data.update(planned)
     finalized = False
-    if (not changed and reason is None and not cancelled and cleanup_error is None and process is not None
-            and process.returncode in (0, 1) and audit.data['execution'] == 'AWAITING_CLEANUP'):
+    if (not changed and reason is None and not cancelled and cleanup_error is None and returncode in (0, 1)
+            and audit.data['execution'] == 'AWAITING_CLEANUP'):
         finalized = True
         pending = audit.data.pop('pending_decision')
-        if process.returncode != (0 if pending == 'ALLOW' else 1):
+        if returncode != (0 if pending == 'ALLOW' else 1):
             audit.fail(RuntimeError('worker exit/decision mismatch'))
         else:
             audit.data['decision'] = pending
             execution = audit.data.pop('pending_execution')
             audit.data['execution'] = 'COMPLETED' if execution == 'RUNNING' else execution
     audit.data['cleanup'] = {'completed': cleanup_error is None, 'error_type': cleanup_error,
-                             'temporary_directory_removed': not temporary_directory(audit.data['run_id']).exists(),
-                             'run_directory_removed': not work.exists(), 'process_group_terminated': group_terminated}
+                             'temporary_directory_removed': not temporary_directory(run_id).exists(),
+                             'run_directory_removed': not run.work.exists(),
+                             'process_group_terminated': run.stop_error is None}
     if cancelled and reason is None:
         reason = 'CANCELLED'
-    if supervisor_error:
+    if run.error_type:
         # 保留監督程序例外型別，不保存例外文字。 / Keep the supervisor's exception type, never its text.
-        audit.data['errors'].append({'stage': 'supervisor', 'error_type': supervisor_error})
+        audit.data['errors'].append({'stage': 'supervisor', 'error_type': run.error_type})
     if reason:
         stage = audit.data['stage']
         kinds = dict(required_gate_kinds(root))
         if stage in kinds and not any(r['gate'] == stage for r in audit.data['records']):
             audit.add(stage, reason, kinds[stage], 0, 0, 'supervisor stopped run')
         audit.data.update(execution=reason, decision='BLOCK', reasons=['supervisor ' + reason.lower()])
-    elif changed or (process is not None and process.returncode == 2):
+    elif changed or returncode == 2:
         # exit 2 表示 worker 讀回的計畫與命令列摘要不符。 / Exit 2 means the plan the worker read back did not match
         # the digest on its command line.
         audit.fail(PlanMismatch('worker report differs from the plan'))
@@ -347,5 +164,5 @@ def supervise(root, audit, command, max_seconds):
         audit.fail(RuntimeError('worker did not complete'))
     if cleanup_error:
         audit.data.update(execution='ERROR', decision='BLOCK', reasons=['cleanup incomplete'])
-    audit.data['total_seconds'] = round(time.monotonic() - (deadline - max_seconds), 3)
+    audit.data['total_seconds'] = run.seconds
     return audit.finish(required_gate_kinds(root))

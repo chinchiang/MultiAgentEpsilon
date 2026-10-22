@@ -1,28 +1,19 @@
 """使用共用執行清冊管理模型 supervisor 與復原，不使用 Docker。
 
 Model supervisor and recovery using the shared run inventory, without Docker."""
-import fcntl
 import json
-import math
 import os
 import shutil
-import signal
-import subprocess
-import sys
-import time
-from contextlib import contextmanager
-from pathlib import Path
 
-from ..lifecycle import (group_alive, identity, owner_alive, plan_digest as fields_digest, prepare_run,
-                         run_directory, temporary_directory, terminate_group)
-from ..results import write_json
+from ..supervision import (child_environment, cleanup_lock, persist, plan_digest as fields_digest, run_directory,
+                           stop_registered, supervised_run, temporary_directory)
 from .gateway import ModelError
-from ..supervision import child_environment
 from .transport import strict_json
 
-SOURCE_ROOT = Path(__file__).resolve().parents[2]
 # 最多 16 筆審查乘以 16 KiB 原文，另加中繼資料。 / 16 reviews x 16 KiB bound raw responses, plus metadata.
 REPORT_LIMIT = 1024 * 1024
+# 模型 supervisor 的最長整體期限。 / The model supervisor's longest total deadline.
+MAX_TOTAL_SECONDS = 130
 BLIND_REVIEW_IMMUTABLE = ('plan', 'providers', 'selected_providers', 'case_ids', 'rounds', 'limits',
                           'total_timeout_seconds', 'output_tokens_per_review', 'implementation_sha256',
                           'case_catalog_sha256', 'oracle_sha256', 'model_roe_sha256')
@@ -50,32 +41,6 @@ Digest of a blind review's immutable plan, budget, identities and per-request di
     return fields_digest({**report, 'request_sha256': requests}, (*BLIND_REVIEW_IMMUTABLE, 'request_sha256'))
 
 
-def persist(path, data):
-    write_json(path, data)
-    # 放行子程序前，登記必須能承受擁有者崩潰。 / Registration must survive an owner crash before the child is released.
-    with path.open('rb') as handle:
-        os.fsync(handle.fileno())
-    descriptor = os.open(path.parent, os.O_RDONLY | os.O_DIRECTORY)
-    try:
-        os.fsync(descriptor)
-    finally:
-        os.close(descriptor)
-
-
-def gated_command(command):
-    return [sys.executable, '-I', str(SOURCE_ROOT / 'scripts/model_process.py'), *command]
-
-
-def register_group(work, pid, role='child'):
-    marker = json.loads((work / 'owner.json').read_text())
-    if marker['uid'] != os.getuid() or marker['operation'] != 'model-smoke':
-        raise ValueError('invalid model owner')
-    if os.getsid(pid) != pid or os.getpgid(pid) != pid:
-        raise ValueError('model child requires a dedicated session')
-    persist(work / 'groups' / f'{pid}.json', {
-        'pid': pid, 'start': identity(pid), 'boot': marker['boot'], 'uid': marker['uid'], 'role': role})
-
-
 def read_report(root, run_id):
     path = root / 'artifacts' / run_id / 'report.json'
     try:
@@ -99,60 +64,6 @@ def read_report(root, run_id):
                 'advisory_only': True, 'status': 'INCOMPLETE', 'code': 'EVIDENCE_INVALID',
                 'evidence_error': 'EVIDENCE_INVALID',
                 'providers': [], 'checks': [], 'calls': []}
-
-
-def stop_registered(work):
-    current_boot = Path('/proc/sys/kernel/random/boot_id').read_text().strip()
-    def stop(path):
-        if path.is_symlink():
-            raise ValueError('invalid process registration')
-        group = json.loads(path.read_text())
-        pid = group['pid']
-        if type(pid) is not int or pid <= 1 or group['uid'] != os.getuid() or path.name != f'{pid}.json':
-            raise ValueError('invalid process identity')
-        if group['boot'] != current_boot:
-            return  # host 重開機後不可對新開機的程序傳送訊號。 / Host reboot: never signal a new boot's processes.
-        try:
-            if identity(pid) != group['start']:
-                return  # PID 重用時不可對新群組傳送訊號。 / PID reuse: do not signal the new process group.
-        except FileNotFoundError:
-            pass  # 已登記群組可能比原領導程序存活更久。 / A registered group can outlive its original leader.
-        terminate_group(pid)
-        deadline = time.monotonic() + 3
-        while True:
-            if not group_alive(pid):
-                break
-            if time.monotonic() >= deadline:
-                raise TimeoutError('model process cleanup incomplete')
-            time.sleep(0.02)
-    # 先停止產生者再重新列舉；接收 SIGTERM 時仍可能 / Freeze the producer first, then enumerate again: it could register another
-    # 登記新子程序，尚未登記的閘門子程序則讀到 EOF。 / child while receiving SIGTERM. A pre-registration gated child sees EOF.
-    for path in sorted((work / 'groups').glob('*.json')):
-        if path.is_symlink():
-            raise ValueError('invalid process registration')
-        if json.loads(path.read_text()).get('role') == 'worker':
-            stop(path)
-    for path in sorted((work / 'groups').glob('*.json')):
-        stop(path)
-
-
-@contextmanager
-def cleanup_lock(work):
-    # 非阻塞 flock 序列化同時執行的 janitor，不重新建立執行目錄。 / Nonblocking flock serializes concurrent janitors. Never recreate a run.
-    try:
-        fd = os.open(work / 'cleanup.lock', os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, 0o600)
-    except FileNotFoundError:
-        yield False
-        return
-    try:
-        try:
-            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        except BlockingIOError:
-            yield False
-        else:
-            yield True
-    finally:
-        os.close(fd)
 
 
 def complete_worker_report(data, providers, returncode):
@@ -249,20 +160,16 @@ def finish(root, run_id, *, providers=(), returncode=None, reason=None, recovere
     return data
 
 
-def recover(root, run_id):
-    work = run_directory(root, run_id)
-    with cleanup_lock(work) as locked:
-        if not locked:
-            return False
-        marker = json.loads((work / 'owner.json').read_text())
-        if marker['run_id'] != run_id or marker['uid'] != os.getuid() or marker['operation'] != 'model-smoke':
-            raise ValueError('invalid model owner')
-        if owner_alive(marker):
-            return False
-        data = finish(root, run_id, reason='CANCELLED', recovered=True)
-        if not data['cleanup']['completed']:
-            raise RuntimeError('model cleanup incomplete')
-        return True
+def recover(root, run_id, marker):
+    """回收擁有者已死亡的模型執行：停止登記的群組、以 CANCELLED 收尾證據並移除執行狀態。
+
+Reap a model run whose owner died: stop its registered groups, close its evidence as
+    CANCELLED and remove its run state.
+    """
+    data = finish(root, run_id, reason='CANCELLED', recovered=True)
+    if not data['cleanup']['completed']:
+        raise RuntimeError('model cleanup incomplete')
+    return True
 
 
 def model_worker_environment(environ, providers):
@@ -276,60 +183,14 @@ The model worker's environment: basic process, proxy and CA variables plus the
 
 
 def supervise(root, report, command, max_seconds):
-    if (type(max_seconds) not in (int, float) or not math.isfinite(max_seconds)
-            or not 0 < max_seconds <= 130):
-        raise ValueError('invalid model supervisor deadline')
     run_id = report['run_id']
-    work = prepare_run(root, run_id, operation='model-smoke')
-    persist(work / 'owner.json', json.loads((work / 'owner.json').read_text()))
-    cancelled, handlers = [], {}
-    process, reason = None, None
-    deadline = time.monotonic() + max_seconds
-    try:
-        for sig in (signal.SIGTERM, signal.SIGINT):
-            handlers[sig] = signal.signal(sig, lambda number, frame: cancelled.append(number))
-        process = subprocess.Popen(gated_command(command), cwd=root, start_new_session=True,
-                                   stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-                                   env={**model_worker_environment(os.environ, set(report['providers'])),
-                                        'TMPDIR': str(temporary_directory(run_id))})
-        register_group(work, process.pid, role='worker')
-        process.stdin.write(b'G')
-        process.stdin.close()
-        while process.poll() is None:
-            if cancelled:
-                reason = 'CANCELLED'
-                break
-            if time.monotonic() >= deadline:
-                reason = 'TIMEOUT'
-                break
-            time.sleep(0.02)
-    except Exception:
-        reason = 'SUPERVISOR_FAILED'
-    finally:
-        # 尚未登記的閘門子程序仍由此 Popen handle 擁有。 / Even an unregistered gated child is owned by this Popen handle.
-        if process is not None:
-            if process.stdin and not process.stdin.closed:
-                process.stdin.close()
-            if process.returncode is None:
-                terminate_group(process.pid)
-            try:
-                process.wait(timeout=5)
-            except subprocess.TimeoutExpired:
-                # 群組終止後仍存活的 worker 不可略過後續收尾。 / A worker that outlives its group kill must not skip finalization below.
-                reason = reason or 'SUPERVISOR_FAILED'
-                process.kill()
-                try:
-                    process.wait(timeout=5)
-                except subprocess.TimeoutExpired:
-                    pass
-        try:
-            with cleanup_lock(work) as locked:
-                if not locked:
-                    raise RuntimeError('model cleanup lock unavailable')
-                data = finish(root, run_id, providers=report['providers'],
-                              returncode=process.returncode if process else None,
-                              reason='CANCELLED' if cancelled else reason, cancelled=cancelled, expected_report=report)
-        finally:
-            for sig, handler in handlers.items():
-                signal.signal(sig, handler)
-    return data
+    with supervised_run(root, run_id, 'model-smoke', max_seconds, MAX_TOTAL_SECONDS) as run:
+        run.run(command, model_worker_environment(os.environ, set(report['providers'])))
+        # 模型證據把監督程序例外歸為固定分類。 / Model evidence files supervisor exceptions under one fixed code.
+        reason = 'SUPERVISOR_FAILED' if run.reason == 'ERROR' else run.reason
+        with cleanup_lock(run.work) as locked:
+            if not locked:
+                raise RuntimeError('model cleanup lock unavailable')
+            return finish(root, run_id, providers=report['providers'], returncode=run.returncode,
+                          reason='CANCELLED' if run.cancelled else reason, cancelled=run.cancelled,
+                          expected_report=report)

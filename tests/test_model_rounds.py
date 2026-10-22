@@ -15,7 +15,7 @@ from security_harness.llm import lifecycle as life
 from security_harness.llm.gateway import Gateway, ModelError
 from security_harness.llm.adapters import BedrockAdapter
 from security_harness.llm.transport import strict_json
-from security_harness.lifecycle import prepare_run
+from security_harness.supervision import prepare_run
 
 
 from tests.model_evidence import provider_answer

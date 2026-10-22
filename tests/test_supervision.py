@@ -27,12 +27,15 @@ DUMP = [sys.executable, '-c',
         'import json,os; from pathlib import Path; Path("child-env.json").write_text(json.dumps(dict(os.environ)))']
 
 
+def no_containers(run_id):
+    """這些 worker 不建立容器，容器清理換成什麼都不做。 / These workers create no containers, so container cleanup
+    does nothing."""
+
+
 def security_worker(tmp_path, monkeypatch, request):
-    from security_harness import isolation
     from security_harness.audit import AuditRun
     from security_harness.lifecycle import supervise
-    monkeypatch.setattr(isolation, 'cleanup_run', lambda run: None)
-    supervise(tmp_path, AuditRun(tmp_path, 'security'), DUMP, 10)
+    supervise(tmp_path, AuditRun(tmp_path, 'security'), DUMP, 10, no_containers)
     return json.loads((tmp_path / 'child-env.json').read_text())
 
 
@@ -46,7 +49,7 @@ def model_worker(tmp_path, monkeypatch, request):
 
 
 def aws_cli(tmp_path, monkeypatch, request):
-    from security_harness.lifecycle import prepare_run, run_directory, temporary_directory
+    from security_harness.supervision import prepare_run, run_directory, temporary_directory
     from tests.test_model_gateway import cli_fixture
     run_id = str(uuid.uuid4())
     prepare_run(tmp_path, run_id, operation='model-smoke')

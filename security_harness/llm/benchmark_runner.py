@@ -10,9 +10,9 @@ from datetime import datetime, timezone
 from .benchmark import (CASES_PATH, ORACLE_PATH, OUTPUT_BUDGETS, OUTPUT_TOKENS, MockReviewer, load_cases,
                         make_plan, review_request, request_digest, parse_review)
 from .gateway import Gateway, Limits, ModelError, digest
-from .lifecycle import persist, plan_digest as current_plan_digest, read_report
+from .lifecycle import plan_digest as current_plan_digest, read_report
 from .transport import JsonHTTP
-from ..lifecycle import run_directory
+from ..supervision import persist, run_directory
 
 
 def initial_report(providers, case_ids, run_id, output_tokens=OUTPUT_TOKENS, rounds=1):

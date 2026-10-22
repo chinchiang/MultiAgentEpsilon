@@ -77,7 +77,7 @@ PR 使用 `.github/workflows/security.yml` 的 `pull_request_target`：evaluator
 | 隔離與外部 oracle | [`isolation.py`](../security_harness/isolation.py)、[`container_http.py`](../security_harness/container_http.py)、[`authorization.py`](../security_harness/authorization.py)、[`fixture_database.py`](../security_harness/fixture_database.py)、[`fixture_app/app.py`](../fixture_app/app.py) |
 | 突變與性質測試 | [`mutation_check.py`](../scripts/mutation_check.py)、[`mutation_worker.py`](../scripts/mutation_worker.py)、[`test_security_properties.py`](../tests/test_security_properties.py) |
 | 文件與合併保護檢查 | [`check_docs.py`](../scripts/check_docs.py)、[`audit_merge_protection.py`](../scripts/audit_merge_protection.py) |
-| 程序生命週期與回收 | [`lifecycle.py`](../security_harness/lifecycle.py)、[`supervision.py`](../security_harness/supervision.py)（子程序共用的基本環境）、[`limits.py`](../security_harness/limits.py)、[`cleanup_runs.py`](../scripts/cleanup_runs.py)；模型另用 [`llm/lifecycle.py`](../security_harness/llm/lifecycle.py) |
+| 程序生命週期與回收 | [`supervision.py`](../security_harness/supervision.py)（受監督執行：登記、握手、期限、群組停止與共用的基本環境）、[`lifecycle.py`](../security_harness/lifecycle.py)（security 角色）、[`janitor.py`](../security_harness/janitor.py)、[`limits.py`](../security_harness/limits.py)、[`cleanup_runs.py`](../scripts/cleanup_runs.py)；模型另用 [`llm/lifecycle.py`](../security_harness/llm/lifecycle.py) |
 | LM Studio、批次比較與遠端主機授權 | [`lmstudio.py`](../security_harness/llm/lmstudio.py)、[`comparison.py`](../security_harness/llm/comparison.py)、[`config.py`](../security_harness/llm/config.py) |
 | 模型 transport／adapter | [`gateway.py`](../security_harness/llm/gateway.py)、[`adapters.py`](../security_harness/llm/adapters.py)、[`transport.py`](../security_harness/llm/transport.py)、[`output_schema.py`](../security_harness/llm/output_schema.py) |
 | 盲審、評分與註記 | [`model_review.py`](../scripts/model_review.py)、[`benchmark.py`](../security_harness/llm/benchmark.py)、[`benchmark_runner.py`](../security_harness/llm/benchmark_runner.py)、[`benchmark_score.py`](../security_harness/llm/benchmark_score.py)、[`review_adjudicate.py`](../scripts/review_adjudicate.py) |
@@ -208,6 +208,7 @@ MultiAgentEpsilon/
 │   ├── github_readonly.py
 │   ├── inputs.py
 │   ├── isolation.py
+│   ├── janitor.py
 │   ├── lifecycle.py
 │   ├── limits.py
 │   ├── preflight.py
@@ -375,7 +376,7 @@ Main push evaluates its own commit. Manual workflow uses chosen ref and distinct
 
 ## Components and directory structure
 
-The Chinese section's linked component table and complete repository tree use unchanged language-neutral paths and are shared by both editions. Installation: scripts/bootstrap.py/build_runtime.py, requirements.lock/tools.lock. Execution: run_security.py/security_worker.py/audit.py. Scope/input/policy: scope.py/inputs.py/results.py and security JSON. G1/G2: preflight.py/dependencies.py/secrets.py/scan_content.py/candidate_git.py. Isolation/oracle: isolation.py/container_http.py/authorization.py/fixture_database.py/fixture_app. Lifecycle: lifecycle.py/supervision.py (the base environment every child shares)/limits.py/cleanup_runs.py and llm/lifecycle.py. Models: gateway.py/adapters.py/lmstudio.py/transport.py/output_schema.py. Reviews: model_review.py/benchmark*.py/review_adjudicate.py/model_compare.py/comparison.py. CI: check_trusted_changes.py/verify_required_check.py/write_ci_provenance.py/check_publishable_evidence.py. Deployment: trusted_publisher.py/publish_trusted_check.py/prepare_publisher_deployment.py and deploy/trusted-publisher.
+The Chinese section's linked component table and complete repository tree use unchanged language-neutral paths and are shared by both editions. Installation: scripts/bootstrap.py/build_runtime.py, requirements.lock/tools.lock. Execution: run_security.py/security_worker.py/audit.py. Scope/input/policy: scope.py/inputs.py/results.py and security JSON. G1/G2: preflight.py/dependencies.py/secrets.py/scan_content.py/candidate_git.py. Isolation/oracle: isolation.py/container_http.py/authorization.py/fixture_database.py/fixture_app. Lifecycle: supervision.py (supervised runs: registration, handshake, deadline, group stop and the shared base environment)/lifecycle.py (the security role)/janitor.py/limits.py/cleanup_runs.py and llm/lifecycle.py. Models: gateway.py/adapters.py/lmstudio.py/transport.py/output_schema.py. Reviews: model_review.py/benchmark*.py/review_adjudicate.py/model_compare.py/comparison.py. CI: check_trusted_changes.py/verify_required_check.py/write_ci_provenance.py/check_publishable_evidence.py. Deployment: trusted_publisher.py/publish_trusted_check.py/prepare_publisher_deployment.py and deploy/trusted-publisher.
 
 Directory purposes: .github CI/review ownership; deploy production templates; docs architecture/coverage/acceptance; fixture_app synthetic target; scripts operational entries; security protected policy/tools/cases; security_harness trusted core (llm model path); tests contracts/mutations/isolation/recovery. __init__.py marks packages. The tracked tree excludes generated files, caches, Git internals, and private attachments.
 

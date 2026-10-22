@@ -19,8 +19,8 @@ if __name__ == "__main__":
 
 from security_harness.llm import config
 from security_harness.llm.gateway import Gateway, Limits, ModelError, Request
-from security_harness.llm.lifecycle import persist, read_report, smoke_plan_digest, supervise
-from security_harness.lifecycle import run_directory
+from security_harness.llm.lifecycle import read_report, smoke_plan_digest, supervise
+from security_harness.supervision import persist, run_directory
 from security_harness.scope import load_model_roe
 
 FIXTURE = Request(

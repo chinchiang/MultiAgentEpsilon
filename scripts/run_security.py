@@ -14,7 +14,7 @@ if __name__ == "__main__":
     sys.path.insert(0, str(ROOT))
 from security_harness import candidate_git
 from security_harness.audit import AuditRun
-from security_harness.lifecycle import PlanMismatch
+from security_harness.supervision import PlanMismatch
 from security_harness.limits import WORKER_RLIMITS
 from security_harness.results import (decide, required_gate_kinds, subject_digest, validate_cases, validate_policy,
                                       write_json)
@@ -162,7 +162,8 @@ def main(audit, defer_final=False):
 def supervised_main():
     if sys.argv[1:] in (["--help"], ["-h"]):
         argument_parser().parse_args()
-    from security_harness.lifecycle import SECURITY_IMMUTABLE, plan_digest, supervise
+    from security_harness.lifecycle import SECURITY_IMMUTABLE, supervise
+    from security_harness.supervision import plan_digest
     audit = AuditRun(ROOT, "security")
     try:
         audit.stage("arguments")

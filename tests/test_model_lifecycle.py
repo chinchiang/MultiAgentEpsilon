@@ -13,7 +13,9 @@ from pathlib import Path
 import pytest
 
 from scripts.model_smoke import initial_report
-from security_harness.lifecycle import prepare_run, sweep_stale, temporary_directory
+from security_harness import supervision
+from security_harness.janitor import sweep_stale
+from security_harness.supervision import prepare_run, temporary_directory
 from security_harness.llm import lifecycle as life
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -82,12 +84,12 @@ time.sleep(60)
         worker.write_text(f'''import asyncio,sys,time
 from pathlib import Path
 sys.path.insert(0,{str(ROOT)!r})
-from security_harness.llm import lifecycle as life
+from security_harness import supervision
 from scripts.model_smoke import run_worker
 def paused_register(work,pid,role='child'):
     Path('gated-child').write_text(str(pid))
     time.sleep(60)
-life.register_group=paused_register
+supervision.register_group=paused_register
 raise SystemExit(asyncio.run(run_worker(Path.cwd(),sys.argv[2],sys.argv[4])))
 ''')
     driver = tmp_path / 'driver.py'
@@ -95,6 +97,7 @@ raise SystemExit(asyncio.run(run_worker(Path.cwd(),sys.argv[2],sys.argv[4])))
 from pathlib import Path
 sys.path.insert(0,{str(ROOT)!r})
 from scripts.model_smoke import initial_report
+from security_harness import supervision
 from security_harness.llm import lifecycle as life
 root=Path.cwd(); run_id=str(uuid.uuid4())
 report=initial_report(['bedrock','mock'],run_id)
@@ -105,7 +108,7 @@ if pause=='registration':
     def delayed(work,pid,role='child'):
         Path('gated-worker').write_text(str(pid))
         time.sleep(60)
-    life.register_group=delayed
+    supervision.register_group=delayed
 if pause=='finish':
     original=life.finish
     def delayed(*args,**kwargs):
@@ -288,7 +291,7 @@ def test_cleanup_failure_blocks_and_preserves_recovery_inventory(tmp_path, monke
 
 
 def test_one_unrecoverable_run_does_not_strand_the_others(tmp_path, monkeypatch):
-    from security_harness.lifecycle import SweepIncomplete
+    from security_harness.janitor import SweepIncomplete
     runs = sorted([stale_fixture(tmp_path), stale_fixture(tmp_path)])
     (broken, broken_path, broken_work), (healthy, healthy_path, _) = runs  # 依 run ID 順序回收。 / sweep order is by run ID
     original = life.stop_registered
@@ -314,7 +317,7 @@ def test_janitor_does_not_signal_different_boot_or_reused_pid(tmp_path, change):
     run_id, path, work = stale_fixture(tmp_path)
     other = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(60)'], start_new_session=True)
     try:
-        group = {'pid': other.pid, 'uid': os.getuid(), 'start': life.identity(other.pid),
+        group = {'pid': other.pid, 'uid': os.getuid(), 'start': supervision.identity(other.pid),
                  'boot': Path('/proc/sys/kernel/random/boot_id').read_text().strip(), 'role': 'child'}
         group[change] = 'not-the-current-identity'
         life.persist(work / 'groups' / f'{other.pid}.json', group)
@@ -445,7 +448,7 @@ def test_worker_wait_timeout_still_finalizes_evidence(tmp_path, monkeypatch):
 @pytest.mark.parametrize('deadline', [0, -1, True, float('nan'), float('inf'), 131])
 def test_invalid_supervisor_deadline_never_launches(tmp_path, deadline):
     report = initial_report(['mock'], str(uuid.uuid4()))
-    with pytest.raises(ValueError, match='^invalid\\ model\\ supervisor\\ deadline$'):
+    with pytest.raises(ValueError, match='^invalid\\ supervisor\\ deadline$'):
         life.supervise(tmp_path, report, ['must-not-execute'], deadline)
     assert not (tmp_path / '.state').exists()
 
