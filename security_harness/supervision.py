@@ -1,9 +1,14 @@
-"""受監督執行：supervisor 啟動 worker、在放行前持久登記、等待結束、期限或訊號，再停止所有登記的程序群組。
-每個子程序都從同一份基本環境出發，各角色只加上自己需要的名稱；收尾與證據格式留在各角色。
+"""受監督執行：supervisor 啟動 worker、在放行前持久登記、等待結束、期限或訊號，再停止所有登記的程序群組並收尾。
+收尾協定在這裡：持有清理鎖、訊號處理器仍有效時，清除角色的外部資源，先寫阻擋檢查點再刪執行清冊，最後以監督結果寫入
+最終證據；擁有者死亡的執行由 janitor 經同一協定回收。每個子程序都從同一份基本環境出發，各角色只加上自己需要的名稱；
+證據格式留在各角色。
 
 Supervised runs: the supervisor starts a worker, registers it durably before releasing it, waits for its exit, the
-deadline or a signal, then stops every registered process group. Every child starts from one base environment and each
-role adds only the names it needs; finalization and the evidence format stay with each role."""
+deadline or a signal, then stops every registered process group and finalizes the run. The finalization protocol lives
+here: under the cleanup lock and with the signal handlers still installed, it releases the role's external resources,
+writes a blocking checkpoint before removing the run inventory, and writes the final evidence from the supervision
+outcome; a janitor reaps a dead owner's run through the same protocol. Every child starts from one base environment
+and each role adds only the names it needs; the evidence format stays with each role."""
 import fcntl
 import hashlib
 import json
