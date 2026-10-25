@@ -2,14 +2,16 @@
 
 The security role of a supervised run: its plan, worker environment, container and run-state cleanup, finalization,
 and recovery after its owner died."""
+import copy
 import json
 import os
 import shutil
 import time
 from datetime import datetime, timedelta, timezone
+from . import supervision
 from .results import required_gate_kinds
 from .supervision import (PlanMismatch, child_environment, current_boot, plan_changed, plan_digest, run_directory,
-                          stop_registered, supervised_run, temporary_directory)
+                          stop_registered, temporary_directory)
 
 # 遠大於 RoE 的 120 秒執行上限。 / Well beyond the RoE's 120-second run limit.
 ORPHAN_CONTAINER_AGE = timedelta(minutes=10)
@@ -112,57 +114,73 @@ The security worker's environment: the base environment plus the docker configur
     return child_environment(environ, SECURITY_WORKER_EXTRA)
 
 
+class SecurityRun:
+    """security 角色在受監督執行中的宣告：清除這次執行的容器，並把 worker 報告關成發布用的證據。
+
+What the security role declares to a supervised run: remove the run's containers, and close the worker's report
+    into the evidence that is published.
+    """
+    operation, ceiling = 'security', MAX_TOTAL_SECONDS
+
+    def __init__(self, root, audit, remove_containers=remove_run_containers):
+        self.root, self.audit, self.remove_containers = root, audit, remove_containers
+        self.planned = {key: audit.data.get(key) for key in SECURITY_IMMUTABLE}
+
+    def release(self, run_id):
+        # CLI 終止後，daemon 仍可能正在完成請求。 / The daemon may still be finishing a request when its CLI is terminated.
+        for _ in range(3):
+            self.remove_containers(run_id)
+            time.sleep(0.1)
+
+    def read(self):
+        # 讀取 worker 最後原子保存的進度，不使用父程序舊副本。 / Read the worker's last atomically persisted progress, not a stale parent copy.
+        return json.loads((self.audit.output / 'report.json').read_text())
+
+    def close(self, evidence, outcome):
+        audit = self.audit
+        audit.data = copy.deepcopy(evidence)
+        # 發布的證據只能帶 supervisor 實際使用的計畫，不採用 worker 改過的值。 / Published evidence carries only the plan
+        # the supervisor actually used, never values the worker changed.
+        changed = plan_changed(audit.data, self.planned)
+        audit.data.update(self.planned)
+        # 關閉後的證據不留待定結果，即使它沒有被採用。 / Closed evidence keeps no pending result, even one not adopted.
+        pending = audit.data.pop('pending_decision', None)
+        execution = audit.data.pop('pending_execution', None)
+        finalized = False
+        if (outcome.kind == 'EXITED' and not changed and outcome.returncode in (0, 1)
+                and audit.data['execution'] == 'AWAITING_CLEANUP' and pending in ('ALLOW', 'BLOCK')):
+            finalized = True
+            if outcome.returncode != (0 if pending == 'ALLOW' else 1):
+                audit.fail(RuntimeError('worker exit/decision mismatch'))
+            else:
+                audit.data['decision'] = pending
+                audit.data['execution'] = 'COMPLETED' if execution == 'RUNNING' else execution
+        audit.data['cleanup'] = outcome.cleanup
+        if outcome.error_type:
+            # 保留監督程序例外型別，不保存例外文字。 / Keep the supervisor's exception type, never its text.
+            audit.data['errors'].append({'stage': 'supervisor', 'error_type': outcome.error_type})
+        reason = 'ERROR' if outcome.stop == 'SUPERVISOR_FAILED' else outcome.stop
+        if reason:
+            stage = audit.data['stage']
+            kinds = dict(required_gate_kinds(self.root))
+            if stage in kinds and not any(r['gate'] == stage for r in audit.data['records']):
+                audit.add(stage, reason, kinds[stage], 0, 0, 'supervisor stopped run')
+            audit.data.update(execution=reason, decision='BLOCK', reasons=['supervisor ' + reason.lower()])
+        elif changed or outcome.returncode == 2:
+            # exit 2 表示 worker 讀回的計畫與命令列摘要不符。 / Exit 2 means the plan the worker read back did not match
+            # the digest on its command line.
+            audit.fail(PlanMismatch('worker report differs from the plan'))
+        elif not finalized:
+            # 只有完成清理交接後才能發布 worker 判定。 / Only the cleanup-gated handoff may publish a worker decision.
+            audit.fail(RuntimeError('worker did not complete'))
+        if outcome.kind == 'CLEANUP_FAILED':
+            audit.data.update(execution='ERROR', decision='BLOCK', reasons=['cleanup incomplete'])
+        audit.data['total_seconds'] = outcome.seconds
+        # 檢查點也更新最新指標，指標永遠指向已關閉的證據。 / The checkpoint moves the latest pointer too, so it always
+        # names closed evidence.
+        return audit.finish(required_gate_kinds(self.root))
+
+
 def supervise(root, audit, command, max_seconds, remove_containers=remove_run_containers):
-    run_id = audit.data['run_id']
-    planned = {key: audit.data.get(key) for key in SECURITY_IMMUTABLE}
-    with supervised_run(root, run_id, 'security', max_seconds, MAX_TOTAL_SECONDS) as run:
-        run.run(command, security_worker_environment(os.environ))
-        cleanup_error = run.stop_error
-        try:
-            cleanup(root, run_id, remove_containers)
-        except Exception as exc:
-            cleanup_error = type(exc).__name__
-    reason, cancelled, returncode = run.reason, run.cancelled, run.returncode
-    # 讀取 worker 最後原子保存的進度，不使用父程序舊副本。 / Read the worker's last atomically persisted progress, not a stale parent copy.
-    audit.data = json.loads((audit.output / 'report.json').read_text())
-    # 發布的證據只能帶 supervisor 實際使用的計畫，不採用 worker 改過的值。 / Published evidence carries only the plan
-    # the supervisor actually used, never values the worker changed.
-    changed = plan_changed(audit.data, planned)
-    audit.data.update(planned)
-    finalized = False
-    if (not changed and reason is None and not cancelled and cleanup_error is None and returncode in (0, 1)
-            and audit.data['execution'] == 'AWAITING_CLEANUP'):
-        finalized = True
-        pending = audit.data.pop('pending_decision')
-        if returncode != (0 if pending == 'ALLOW' else 1):
-            audit.fail(RuntimeError('worker exit/decision mismatch'))
-        else:
-            audit.data['decision'] = pending
-            execution = audit.data.pop('pending_execution')
-            audit.data['execution'] = 'COMPLETED' if execution == 'RUNNING' else execution
-    audit.data['cleanup'] = {'completed': cleanup_error is None, 'error_type': cleanup_error,
-                             'temporary_directory_removed': not temporary_directory(run_id).exists(),
-                             'run_directory_removed': not run.work.exists(),
-                             'process_group_terminated': run.stop_error is None}
-    if cancelled and reason is None:
-        reason = 'CANCELLED'
-    if run.error_type:
-        # 保留監督程序例外型別，不保存例外文字。 / Keep the supervisor's exception type, never its text.
-        audit.data['errors'].append({'stage': 'supervisor', 'error_type': run.error_type})
-    if reason:
-        stage = audit.data['stage']
-        kinds = dict(required_gate_kinds(root))
-        if stage in kinds and not any(r['gate'] == stage for r in audit.data['records']):
-            audit.add(stage, reason, kinds[stage], 0, 0, 'supervisor stopped run')
-        audit.data.update(execution=reason, decision='BLOCK', reasons=['supervisor ' + reason.lower()])
-    elif changed or returncode == 2:
-        # exit 2 表示 worker 讀回的計畫與命令列摘要不符。 / Exit 2 means the plan the worker read back did not match
-        # the digest on its command line.
-        audit.fail(PlanMismatch('worker report differs from the plan'))
-    elif not finalized:
-        # 只有完成清理交接後才能發布 worker 判定。 / Only the cleanup-gated handoff may publish a worker decision.
-        audit.fail(RuntimeError('worker did not complete'))
-    if cleanup_error:
-        audit.data.update(execution='ERROR', decision='BLOCK', reasons=['cleanup incomplete'])
-    audit.data['total_seconds'] = run.seconds
-    return audit.finish(required_gate_kinds(root))
+    return supervision.supervise(root, audit.data['run_id'], SecurityRun(root, audit, remove_containers), command,
+                                 security_worker_environment(os.environ), max_seconds)

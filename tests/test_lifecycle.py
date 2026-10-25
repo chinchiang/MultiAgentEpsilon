@@ -157,6 +157,41 @@ def test_worker_report_that_changes_the_plan_is_blocked_and_restored(tmp_path, m
         assert code == 0 and audit.data['decision'] == 'ALLOW' and audit.data['execution'] == 'COMPLETED'
 
 
+def test_signal_while_closing_the_evidence_still_closes_it_as_blocking(tmp_path):
+    # 先前證據在訊號處理器還原、執行清冊刪除之後才關閉；此時的 SIGTERM 會讓證據永遠停在 AWAITING_CLEANUP。 / The
+    # evidence used to be closed after the signal handlers were restored and the run inventory removed, so a SIGTERM
+    # then left it at AWAITING_CLEANUP forever.
+    driver = tmp_path / 'driver.py'
+    driver.write_text('''import os,signal,sys
+from pathlib import Path
+sys.path.insert(0,sys.argv[1])
+from security_harness.audit import AuditRun
+from security_harness.lifecycle import supervise
+class SignalledWhileClosing(AuditRun):
+    def finish(self,*args,**kwargs):
+        if not Path('signalled').exists():
+            Path('signalled').touch()
+            os.kill(os.getpid(),signal.SIGTERM)
+        return super().finish(*args,**kwargs)
+root=Path.cwd(); audit=SignalledWhileClosing(root,'security'); audit.stage('AUTH')
+(root/'run-id').write_text(audit.data['run_id'])
+report=audit.output/'report.json'
+worker=[sys.executable,'-c','import json,sys; p=sys.argv[1]; d=json.load(open(p)); '
+    'd["records"]=[{"gate": g, "execution": "COMPLETED"} for g in ("G1", "G2", "AUTH")]; '
+    'd.update(execution="AWAITING_CLEANUP", decision="BLOCK", reasons=[], pending_decision="ALLOW", '
+    'pending_execution="RUNNING"); json.dump(d, open(p, "w"))',str(report)]
+raise SystemExit(supervise(root,audit,worker,10,lambda run_id: None))
+''')
+    result = subprocess.run([sys.executable, str(driver), str(ROOT)], cwd=tmp_path, capture_output=True, timeout=30)
+    assert result.returncode == 1, result.stderr
+    run_id = (tmp_path / 'run-id').read_text()
+    data = json.loads((tmp_path / 'artifacts' / run_id / 'report.json').read_text())
+    assert (data['execution'], data['decision']) == ('CANCELLED', 'BLOCK') and 'pending_decision' not in data
+    assert data['cleanup']['completed'] and data['cleanup']['process_group_terminated']
+    assert (tmp_path / 'artifacts/latest.txt').read_text().strip() == run_id
+    assert not (tmp_path / '.state/runs' / run_id).exists() and not temporary_directory(run_id).exists()
+
+
 def test_worker_that_refuses_the_plan_is_recorded_as_a_plan_mismatch(tmp_path, monkeypatch):
     audit = AuditRun(tmp_path, 'security')
     assert supervise(tmp_path, audit, [sys.executable, '-c', 'raise SystemExit(2)'], 10, no_containers) == 1
