@@ -15,7 +15,7 @@ from security_harness.llm import lifecycle as life
 from security_harness.llm.gateway import Gateway, ModelError
 from security_harness.llm.adapters import BedrockAdapter
 from security_harness.llm.transport import strict_json
-from security_harness.lifecycle import prepare_run
+from security_harness.supervision import prepare_run
 
 
 from tests.model_evidence import provider_answer
@@ -67,7 +67,7 @@ def collect(tmp_path, monkeypatch=None):
     report = runner.initial_report(['mock-review-a','mock-review-b'], ['B01','B02'], str(uuid.uuid4()), 512, 2)
     path = tmp_path/'artifacts'/report['run_id']/'report.json'
     life.persist(path,report);prepare_run(tmp_path,report['run_id'],operation='model-smoke')
-    result = asyncio.run(runner.run_worker(tmp_path,report['run_id']))
+    result = asyncio.run(runner.run_worker(tmp_path,report['run_id'],life.plan_digest(report)))
     return life.finish(tmp_path,report['run_id'],providers=report['providers'],returncode=result,expected_report=report)
 
 
@@ -182,7 +182,7 @@ def test_changed_case_catalog_spends_no_calls(tmp_path, monkeypatch):
     life.persist(path, report); prepare_run(tmp_path, report['run_id'], operation='model-smoke')
     async def forbidden(self, request): raise AssertionError('call spent against an unbound catalog')
     monkeypatch.setattr(bench.MockReviewer, 'generate', forbidden)
-    assert asyncio.run(runner.run_worker(tmp_path, report['run_id'])) == 1
+    assert asyncio.run(runner.run_worker(tmp_path, report['run_id'], life.plan_digest(report))) == 1
     data = json.loads(path.read_text())
     assert data['code'] == 'CONFIGURATION' and data['calls'] == []
     assert [c['code'] for c in data['checks']] == ['CONFIGURATION']
@@ -197,7 +197,7 @@ def test_changed_model_roe_spends_no_calls(tmp_path, monkeypatch):
     life.persist(path, report); prepare_run(tmp_path, report['run_id'], operation='model-smoke')
     async def forbidden(self, request): raise AssertionError('call spent against an unbound RoE')
     monkeypatch.setattr(bench.MockReviewer, 'generate', forbidden)
-    assert asyncio.run(runner.run_worker(tmp_path, report['run_id'])) == 1
+    assert asyncio.run(runner.run_worker(tmp_path, report['run_id'], life.plan_digest(report))) == 1
     data = json.loads(path.read_text())
     assert data['code'] == 'CONFIGURATION' and data['calls'] == []
     assert [c['code'] for c in data['checks']] == ['CONFIGURATION']

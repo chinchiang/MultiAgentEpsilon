@@ -13,7 +13,9 @@ from pathlib import Path
 import pytest
 
 from scripts.model_smoke import initial_report
-from security_harness.lifecycle import prepare_run, sweep_stale, temporary_directory
+from security_harness import supervision
+from security_harness.janitor import sweep_stale
+from security_harness.supervision import prepare_run, temporary_directory
 from security_harness.llm import lifecycle as life
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -82,19 +84,20 @@ time.sleep(60)
         worker.write_text(f'''import asyncio,sys,time
 from pathlib import Path
 sys.path.insert(0,{str(ROOT)!r})
-from security_harness.llm import lifecycle as life
+from security_harness import supervision
 from scripts.model_smoke import run_worker
 def paused_register(work,pid,role='child'):
     Path('gated-child').write_text(str(pid))
     time.sleep(60)
-life.register_group=paused_register
-raise SystemExit(asyncio.run(run_worker(Path.cwd(),sys.argv[2])))
+supervision.register_group=paused_register
+raise SystemExit(asyncio.run(run_worker(Path.cwd(),sys.argv[2],sys.argv[4])))
 ''')
     driver = tmp_path / 'driver.py'
     driver.write_text(f'''import os,sys,time,uuid
 from pathlib import Path
 sys.path.insert(0,{str(ROOT)!r})
 from scripts.model_smoke import initial_report
+from security_harness import supervision
 from security_harness.llm import lifecycle as life
 root=Path.cwd(); run_id=str(uuid.uuid4())
 report=initial_report(['bedrock','mock'],run_id)
@@ -105,15 +108,15 @@ if pause=='registration':
     def delayed(work,pid,role='child'):
         Path('gated-worker').write_text(str(pid))
         time.sleep(60)
-    life.register_group=delayed
+    supervision.register_group=delayed
 if pause=='finish':
-    original=life.finish
-    def delayed(*args,**kwargs):
+    original=life.ModelRun.read
+    def delayed(self):
         Path('awaiting-cleanup').touch()
         time.sleep(60)
-        return original(*args,**kwargs)
-    life.finish=delayed
-data=life.supervise(root,report,[sys.executable,'-I',{str(worker)!r},str(root),run_id],{timeout})
+        return original(self)
+    life.ModelRun.read=delayed
+data=life.supervise(root,report,[sys.executable,'-I',{str(worker)!r},str(root),run_id,'smoke',life.smoke_plan_digest(report)],{timeout})
 raise SystemExit(0 if data['status']=='COMPLETE' else 1)
 ''')
     env = {**os.environ, 'BEDROCK_MODEL_ID': 'synthetic-profile', 'BEDROCK_REGION': 'ap-southeast-1',
@@ -128,9 +131,13 @@ def report_at(root):
     return json.loads((root / 'artifacts' / run_id / 'report.json').read_text())
 
 
+def report_at_run(root, run_id):
+    return json.loads((root / 'artifacts' / run_id / 'report.json').read_text())
+
+
 def assert_clean(root, data):
     assert data['cleanup']['completed']
-    assert data['cleanup']['process_groups_terminated']
+    assert data['cleanup']['process_group_terminated']
     assert not (root / '.state/runs' / data['run_id']).exists()
     assert not temporary_directory(data['run_id']).exists()
     for name in ('aws-pids', 'gated-child', 'gated-worker'):
@@ -270,33 +277,34 @@ def test_missing_or_corrupt_evidence_recovered_as_cancelled(tmp_path, corruption
     assert_clean(tmp_path, data)
 
 
-def test_cleanup_failure_blocks_and_preserves_recovery_inventory(tmp_path, monkeypatch):
+def unstoppable(work):
+    # 指向別處的登記使群組無法停止；移除即可恢復。 / A registration that points elsewhere keeps the groups from
+    # being stopped; removing it repairs the run.
+    (work / 'groups').mkdir(exist_ok=True)
+    registration = work / 'groups' / '4242.json'
+    registration.symlink_to(work / 'owner.json')
+    return registration
+
+
+def test_cleanup_failure_blocks_and_preserves_recovery_inventory(tmp_path):
     run_id, path, work = stale_fixture(tmp_path)
-    original = life.stop_registered
-    def failure(_):
-        raise RuntimeError('sensitive CLI diagnostics')
-    monkeypatch.setattr(life, 'stop_registered', failure)
+    registration = unstoppable(work)
     with pytest.raises(RuntimeError, match='^stale\\ run\\ cleanup\\ incomplete$'):
         sweep_stale(tmp_path)
     data = json.loads(path.read_text())
     assert data['status'] == 'ERROR' and data['code'] == 'CLEANUP_FAILED'
-    assert not data['cleanup']['completed'] and work.exists()
-    assert 'sensitive CLI' not in path.read_text()
-    monkeypatch.setattr(life, 'stop_registered', original)
+    assert not data['cleanup']['completed'] and not data['cleanup']['process_group_terminated'] and work.exists()
+    assert data['cleanup']['error_type'] == 'ValueError'
+    registration.unlink()
     assert sweep_stale(tmp_path) == [run_id]
     assert_clean(tmp_path, json.loads(path.read_text()))
 
 
-def test_one_unrecoverable_run_does_not_strand_the_others(tmp_path, monkeypatch):
-    from security_harness.lifecycle import SweepIncomplete
+def test_one_unrecoverable_run_does_not_strand_the_others(tmp_path):
+    from security_harness.janitor import SweepIncomplete
     runs = sorted([stale_fixture(tmp_path), stale_fixture(tmp_path)])
     (broken, broken_path, broken_work), (healthy, healthy_path, _) = runs  # 依 run ID 順序回收。 / sweep order is by run ID
-    original = life.stop_registered
-    def selective(work):
-        if work.name == broken:
-            raise RuntimeError('sensitive CLI diagnostics')
-        return original(work)
-    monkeypatch.setattr(life, 'stop_registered', selective)
+    registration = unstoppable(broken_work)
     with pytest.raises(SweepIncomplete) as raised:
         sweep_stale(tmp_path)
     assert raised.value.cleaned == [healthy]
@@ -304,7 +312,7 @@ def test_one_unrecoverable_run_does_not_strand_the_others(tmp_path, monkeypatch)
     assert 'sensitive' not in str(raised.value.failures)
     assert_clean(tmp_path, json.loads(healthy_path.read_text()))
     assert broken_work.exists() and json.loads(broken_path.read_text())['code'] == 'CLEANUP_FAILED'
-    monkeypatch.setattr(life, 'stop_registered', original)
+    registration.unlink()
     assert sweep_stale(tmp_path) == [broken]
     assert_clean(tmp_path, json.loads(broken_path.read_text()))
 
@@ -314,7 +322,7 @@ def test_janitor_does_not_signal_different_boot_or_reused_pid(tmp_path, change):
     run_id, path, work = stale_fixture(tmp_path)
     other = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(60)'], start_new_session=True)
     try:
-        group = {'pid': other.pid, 'uid': os.getuid(), 'start': life.identity(other.pid),
+        group = {'pid': other.pid, 'uid': os.getuid(), 'start': supervision.identity(other.pid),
                  'boot': Path('/proc/sys/kernel/random/boot_id').read_text().strip(), 'role': 'child'}
         group[change] = 'not-the-current-identity'
         life.persist(work / 'groups' / f'{other.pid}.json', group)
@@ -326,7 +334,7 @@ def test_janitor_does_not_signal_different_boot_or_reused_pid(tmp_path, change):
 
 def test_cleanup_lock_prevents_two_janitors_from_reaping_same_run(tmp_path):
     run_id, path, work = stale_fixture(tmp_path)
-    with life.cleanup_lock(work) as locked:
+    with supervision.cleanup_lock(work) as locked:
         assert locked and sweep_stale(tmp_path) == []
         assert work.exists()
     assert sweep_stale(tmp_path) == [run_id]
@@ -351,18 +359,74 @@ def test_supervised_model_worker_gets_only_the_selected_providers_keys(tmp_path,
     assert_clean(tmp_path, data)
 
 
-def test_signal_during_cleanup_cannot_publish_complete(tmp_path, monkeypatch):
+def test_smoke_worker_with_another_plan_exits_without_touching_the_report(tmp_path):
+    run_id = str(uuid.uuid4())
+    report = initial_report(['mock'], run_id)
+    path = tmp_path / 'artifacts' / run_id / 'report.json'
+    life.persist(path, report)
+    before = path.read_bytes()
+    result = subprocess.run([sys.executable, '-I', str(ROOT / 'scripts/model_worker.py'), str(tmp_path), run_id,
+                             'smoke', '0' * 64], capture_output=True, timeout=30)
+    assert result.returncode == 2, result.stderr
+    assert path.read_bytes() == before
+
+
+def test_smoke_worker_spends_within_the_planned_limits(tmp_path):
+    # 計畫只預留 128 個詞元，fixture 一次要 256 個：worker 必須照計畫拒絕，而不是自行重算限額。 / The plan reserves
+    # 128 tokens and the fixture needs 256 per call: the worker must refuse by the plan, not recompute its limits.
+    run_id = str(uuid.uuid4())
+    report = initial_report(['mock'], run_id)
+    report['limits']['reserved_output_tokens'] = 128
+    life.persist(tmp_path / 'artifacts' / run_id / 'report.json', report)
+    data = life.supervise(tmp_path, report, [sys.executable, '-I', str(ROOT / 'scripts/model_worker.py'),
+                                           str(tmp_path), run_id, 'smoke', life.smoke_plan_digest(report)], 10)
+    assert data['status'] == 'INCOMPLETE'
+    assert [(c['status'], c['code']) for c in data['checks']] == [('ERROR', 'BUDGET_EXHAUSTED')]
+    assert_clean(tmp_path, data)
+
+
+@pytest.mark.parametrize('tampered', [False, True])
+def test_smoke_report_that_changes_the_plan_is_not_accepted(tmp_path, tampered):
+    import asyncio
+    from scripts.model_smoke import run_worker
+    run_id = str(uuid.uuid4())
+    report = initial_report(['mock'], run_id)
+    path = tmp_path / 'artifacts' / run_id / 'report.json'
+    life.persist(path, report)
+    prepare_run(tmp_path, run_id, operation='model-smoke')
+    assert asyncio.run(run_worker(tmp_path, run_id, life.smoke_plan_digest(report))) == 0
+    if tampered:
+        changed = json.loads(path.read_text())
+        changed['started_at'] = '2000-01-01T00:00:00+00:00'
+        life.persist(path, changed)
+    data = life.finish(tmp_path, run_id, providers=['mock'], returncode=0, expected_report=report)
+    expected = ('INCOMPLETE', 'EVALUATION_INVALID') if tampered else ('COMPLETE', None)
+    assert (data['status'], data['code']) == expected
+
+
+def test_worker_that_refuses_the_plan_is_recorded_as_invalid(tmp_path):
     run_id = str(uuid.uuid4())
     report = initial_report(['mock'], run_id)
     life.persist(tmp_path / 'artifacts' / run_id / 'report.json', report)
-    original = life.stop_registered
-    def cancel_during_cleanup(work):
-        os.kill(os.getpid(), signal.SIGTERM)
-        original(work)
-    monkeypatch.setattr(life, 'stop_registered', cancel_during_cleanup)
-    data = life.supervise(tmp_path, report, [sys.executable, '-I', str(ROOT / 'scripts/model_worker.py'),
-                                           str(tmp_path), run_id], 10)
-    assert data['status'] == 'CANCELLED'
+    data = life.supervise(tmp_path, report, [sys.executable, '-c', 'raise SystemExit(2)'], 10)
+    assert (data['status'], data['code']) == ('INCOMPLETE', 'EVALUATION_INVALID')
+    assert_clean(tmp_path, data)
+
+
+def test_cancelled_run_never_publishes_a_complete_cleanup_handoff(tmp_path):
+    # 收尾期間的訊號如何變成 CANCELLED 由 test_supervision 驗證；這裡驗證角色不會把它發布成 COMPLETE。 / How a
+    # signal during finalization becomes CANCELLED is covered in test_supervision; here the role must not publish
+    # it as COMPLETE.
+    import asyncio
+    from scripts.model_smoke import run_worker
+    run_id = str(uuid.uuid4())
+    report = initial_report(['mock'], run_id)
+    life.persist(tmp_path / 'artifacts' / run_id / 'report.json', report)
+    prepare_run(tmp_path, run_id, operation='model-smoke')
+    assert asyncio.run(run_worker(tmp_path, run_id, life.smoke_plan_digest(report))) == 0
+    assert report_at_run(tmp_path, run_id)['status'] == 'AWAITING_CLEANUP'
+    data = life.finish(tmp_path, run_id, providers=['mock'], returncode=0, stop='CANCELLED', expected_report=report)
+    assert data['status'] == 'CANCELLED' and 'pending_status' not in data
     assert_clean(tmp_path, data)
 
 
@@ -382,7 +446,7 @@ def test_worker_wait_timeout_still_finalizes_evidence(tmp_path, monkeypatch):
     monkeypatch.setattr(subprocess.Popen, 'wait', stubborn)
     handler = signal.getsignal(signal.SIGTERM)
     data = life.supervise(tmp_path, report, [sys.executable, '-I', str(ROOT / 'scripts/model_worker.py'),
-                                           str(tmp_path), run_id], 10)
+                                           str(tmp_path), run_id, 'smoke', life.smoke_plan_digest(report)], 10)
     assert raised and data['status'] not in ('COMPLETE', 'AWAITING_CLEANUP') and 'pending_status' not in data
     assert signal.getsignal(signal.SIGTERM) is handler
     assert_clean(tmp_path, data)
@@ -391,7 +455,7 @@ def test_worker_wait_timeout_still_finalizes_evidence(tmp_path, monkeypatch):
 @pytest.mark.parametrize('deadline', [0, -1, True, float('nan'), float('inf'), 131])
 def test_invalid_supervisor_deadline_never_launches(tmp_path, deadline):
     report = initial_report(['mock'], str(uuid.uuid4()))
-    with pytest.raises(ValueError, match='^invalid\\ model\\ supervisor\\ deadline$'):
+    with pytest.raises(ValueError, match='^invalid\\ supervisor\\ deadline$'):
         life.supervise(tmp_path, report, ['must-not-execute'], deadline)
     assert not (tmp_path / '.state').exists()
 

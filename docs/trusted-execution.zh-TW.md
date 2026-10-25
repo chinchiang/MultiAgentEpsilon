@@ -14,6 +14,7 @@
 4. 候選只能讀取合成 app 設定、使用唯讀掛載的 PostgreSQL Unix socket，及在容器的限額 tmpfs 建立 HTTP socket；沒有可寫的 host HTTP 目錄。它不取得 DB 管理員密碼、評分器、報告、GitHub 權杖、模型憑證或 Docker socket。
 5. PostgreSQL 在另一個無網路容器中使用 SCRAM 認證；app 帳號僅有指定 schema/table 所需權限。host oracle 獨立建置資料與查詢完整 fixture 狀態。唯讀 runtime bridge 在候選容器內發送 HTTP，不跟隨重新導向，拒絕壓縮及超大回應；host 使用限時、限量 Docker exec 串流接收不可信回應，不連接候選控制的 host socket 路徑。bridge 不負責評分。
 6. AUTH 超時／取消後，父程序依唯一 run label 清除本次容器；普通結束亦在 finally 清除。錯誤及未完成 gate 保存為 BLOCK。來源或 evaluator 在執行期間持續變動也會 BLOCK。
+7. supervisor 在放行 worker 前決定計畫：候選路徑、版本、限額、RoE 與政策雜湊及評估者摘要，並把計畫摘要經命令列交給 worker。worker 讀回的報告與摘要不符時不寫任何東西，以 exit 2 結束；RoE 與政策各只讀一次，雜湊與計畫不符即 BLOCK。supervisor 收尾時再核對報告中的計畫欄位，不符即 BLOCK 並還原為自己的值。候選內容不在計畫內：supervisor 沒有 rlimit，不代 worker 走訪不可信目錄樹；worker 計算 subject 摘要，並於結尾重新比對。
 
 這是 Linux 容器邊界，仍共用 host kernel，不能宣稱抵抗 kernel／runtime 漏洞。正式敵意多租戶使用仍應採專用短生命週期 VM／microVM、受控 worker 身分與平台隔離。候選合成 app 可以破壞自己的資料或服務，這會導致測試失敗，不可把 app 自報結果當 oracle。
 
@@ -110,6 +111,7 @@ Coverage, scan scope, and early-error evidence are enforced, and candidate code 
 4. Candidate gets only synthetic app settings, read-only PostgreSQL Unix socket mount, and bounded HTTP-socket tmpfs. It has no writable host HTTP directory, DB admin password, evaluator, reports, GitHub/model credentials, or Docker socket.
 5. PostgreSQL is a separate networkless SCRAM-authenticated container; app privileges are schema/table-specific. Host oracle seeds and inspects complete state independently. A read-only in-container bridge performs HTTP without redirects/compression/oversized responses. Host receives bounded, timed Docker exec output rather than connecting to candidate-controlled host sockets. Bridge never scores.
 6. Parent cleans uniquely labeled containers on timeout/cancel and normal completion. Errors, incomplete gates, or changing source/evaluator block.
+7. Before releasing the worker, the supervisor decides the plan: candidate path, variant, limits, RoE and policy digests, and the evaluator digest. It passes the plan digest to the worker on the command line. A worker whose report no longer matches that digest writes nothing and exits 2. The worker reads the RoE and policy once each and blocks if their digests differ from the plan. At finish the supervisor checks the report's plan fields again, blocks on any difference and restores its own values. The candidate's content is not in the plan: the supervisor has no rlimits and does not walk an untrusted tree for the worker. The worker computes the subject digest and checks it again at the end.
 
 Linux containers still share a kernel; this is not kernel/runtime-exploit resistance. Hostile multi-tenancy needs dedicated short-lived VM/microVM workers and platform isolation. Candidate damage to its own synthetic data/service should fail tests; self-reported results are never the oracle.
 

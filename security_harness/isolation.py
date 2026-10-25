@@ -19,7 +19,7 @@ from psycopg import sql
 from .authorization import evaluate
 from .fixture_database import connect, seed
 from .inputs import input_files
-from .lifecycle import valid_run_id
+from .supervision import valid_run_id
 from .container_http import BoundedClient, docker_environment
 from .processes import docker_command
 from .results import digest_file, read_regular

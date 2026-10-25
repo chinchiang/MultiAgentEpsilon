@@ -18,7 +18,7 @@ from security_harness.llm import benchmark_score as score
 from security_harness.llm import benchmark_runner as runner
 from security_harness.llm import lifecycle as life
 from security_harness.llm.gateway import ModelError, Reply
-from security_harness.lifecycle import prepare_run
+from security_harness.supervision import prepare_run
 
 
 from tests.model_evidence import provider_answer
@@ -67,7 +67,7 @@ def collected(tmp_path, providers=None, case_ids=None):
     path = tmp_path / 'artifacts' / report['run_id'] / 'report.json'
     life.persist(path, report)
     prepare_run(tmp_path, report['run_id'], operation='model-smoke')
-    code = asyncio.run(runner.run_worker(tmp_path, report['run_id']))
+    code = asyncio.run(runner.run_worker(tmp_path, report['run_id'], plan_digest=life.plan_digest(report)))
     data = life.finish(tmp_path, report['run_id'], providers=report['providers'], returncode=code, expected_report=report)
     return data, path
 
@@ -217,12 +217,12 @@ def test_cancelled_collection_keeps_all_planned_cases_in_analysis(tmp_path, monk
     life.persist(tmp_path / 'artifacts' / report['run_id'] / 'report.json', report)
     prepare_run(tmp_path, report['run_id'], operation='model-smoke')
     async def cancel():
-        task = asyncio.create_task(runner.run_worker(tmp_path, report['run_id']))
+        task = asyncio.create_task(runner.run_worker(tmp_path, report['run_id'], plan_digest=life.plan_digest(report)))
         await asyncio.sleep(0.02)
         task.cancel()
         assert await task == 1
     asyncio.run(cancel())
-    data = life.finish(tmp_path, report['run_id'], reason='CANCELLED', expected_report=report)
+    data = life.finish(tmp_path, report['run_id'], stop='CANCELLED', expected_report=report)
     assert data['status'] == 'CANCELLED' and data['cleanup']['completed']
     assert data['analysis']['provider_metrics']['gemini']['unavailable'] == 2
 
@@ -335,7 +335,9 @@ def test_coordinated_budget_tampering_before_the_worker_starts_is_refused(tmp_pa
                 bench.load_cases()[check['case_id']], check['review_id'], 1024))} for check in report['checks']]
     life.persist(path, tampered)
     prepare_run(tmp_path, report['run_id'], operation='model-smoke')
-    assert asyncio.run(runner.run_worker(tmp_path, report['run_id'])) == 0
+    # worker 綁定磁碟上的報告，因此由 supervisor 收尾時的核對拒絕它。 / The worker is bound to the report on disk,
+    # so the supervisor's check at finish is what refuses it.
+    assert asyncio.run(runner.run_worker(tmp_path, report['run_id'], plan_digest=life.plan_digest(tampered))) == 0
     data = life.finish(tmp_path, report['run_id'], providers=report['providers'], returncode=0, expected_report=report)
     assert (data['status'], data['code']) == ('INCOMPLETE', 'EVALUATION_INVALID')
 
@@ -378,7 +380,7 @@ def test_single_immutable_field_tampering_is_refused(tmp_path, tamper):
     tamper(tampered)
     life.persist(path, tampered)
     prepare_run(tmp_path, report['run_id'], operation='model-smoke')
-    asyncio.run(runner.run_worker(tmp_path, report['run_id']))
+    asyncio.run(runner.run_worker(tmp_path, report['run_id'], plan_digest=life.plan_digest(tampered)))
     data = life.finish(tmp_path, report['run_id'], providers=report['providers'], returncode=0, expected_report=report)
     assert (data['status'], data['code']) == ('INCOMPLETE', 'EVALUATION_INVALID')
 
@@ -388,7 +390,7 @@ def test_parent_refuses_worker_success_when_benchmark_evaluation_is_invalid(tmp_
     path = tmp_path / 'artifacts' / report['run_id'] / 'report.json'
     life.persist(path, report)
     prepare_run(tmp_path, report['run_id'], operation='model-smoke')
-    assert asyncio.run(runner.run_worker(tmp_path, report['run_id'])) == 0
+    assert asyncio.run(runner.run_worker(tmp_path, report['run_id'], plan_digest=life.plan_digest(report))) == 0
     corrupt = json.loads(path.read_text())
     corrupt['checks'][0]['case_sha256'] = '0' * 64
     life.persist(path, corrupt)

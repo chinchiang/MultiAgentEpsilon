@@ -28,11 +28,13 @@ python3 -I scripts/install_test_tools.py
 | `security_harness/authorization.py` | `same`（oracle 的型別嚴格 JSON 比對） |
 | `security_harness/isolation.py` | `verify_container` |
 | `security_harness/scope.py` | `valid_remote_hosts`、`validate_model_roe` |
+| `security_harness/supervision.py` | `child_environment`（子程序共用的基本環境與角色名稱） |
+| `scripts/run_security.py` | `planned_configuration`（worker 核對評估者摘要與 RoE／政策雜湊） |
 | `security_harness/llm/benchmark.py` | `bounded_text`、`validate_review`、`parse_review` |
 
 運算子涵蓋比較反轉、成員（`in`／`not in`）與身分（`is`／`is not`）反轉、含等號／不含等號的邊界、`and`／`or` 交換與否定條件反轉。突變節點以 AST 走訪順序定位，巢狀且起點相同的同型節點（例如 `a and b or c`）不會混淆。只變更指定函式，每次只有一個突變；來源與測試先複製為固定快照，原始工作目錄不被改寫。未涵蓋任意 AST 節點、任意程式或整個儲存庫。
 
-突變子程序只選取純函式測試，模型命令列的子程序整合測試由完整 pytest 保留執行，不在禁止外部程序的突變子程序中重跑。
+突變子程序只選取純函式測試，模型命令列的子程序整合測試由完整 pytest 保留執行，不在禁止外部程序的突變子程序中重跑。supervisor 與 worker 兩端核對計畫摘要的測試需要真的子程序，同樣只在完整 pytest 執行。
 
 每個目標先執行未修改的基準，以及只經 AST 重新格式化、沒有突變的對照；兩者必須通過且案例識別一致，否則停止，避免把格式差異當成成功攔截。突變測試的 JUnit 必須完整、案例數與基準相同且沒有錯誤／跳過。退出碼 1 且有測試失敗才記為 `KILLED`；正常全過為 `SURVIVED`，逾時為 `TIMEOUT`，收集失敗、缺少證據等為 `ERROR`。逾時與工具故障均不算攔截，任何存活、逾時或錯誤都使命令及 CI 失敗；空清單或超過 256 個突變也失敗，不截斷成假綠。
 
@@ -58,9 +60,9 @@ After the README's Python 3.12 bootstrap, run the three commands in the Chinese 
 
 ## Scope and outcomes
 
-Targets are results.py's validate_cases/seeded_defects/decide, github_http.py's strict_json, preflight.py's validate_package_policy/check_metadata, authorization.py's typed JSON comparison `same`, isolation.py's verify_container, scope.py's valid_remote_hosts/validate_model_roe, and benchmark.py's bounded_text/validate_review/parse_review. This is not the entire publisher or repository. Operators invert comparisons/membership/identity, change inclusive boundaries, swap and/or, and invert negation. Mutated nodes are located by AST walk position, so nested same-type nodes starting at one column (such as `a and b or c`) are not confused. One mutation is applied at a time to a fixed source/test snapshot; the working checkout stays unchanged.
+Targets are results.py's validate_cases/seeded_defects/decide, github_http.py's strict_json, preflight.py's validate_package_policy/check_metadata, authorization.py's typed JSON comparison `same`, isolation.py's verify_container, scope.py's valid_remote_hosts/validate_model_roe, supervision.py's child_environment (the base environment every child shares, plus its role's names), run_security.py's planned_configuration (the worker's evaluator, RoE and policy digest checks), and benchmark.py's bounded_text/validate_review/parse_review. This is not the entire publisher or repository. Operators invert comparisons/membership/identity, change inclusive boundaries, swap and/or, and invert negation. Mutated nodes are located by AST walk position, so nested same-type nodes starting at one column (such as `a and b or c`) are not confused. One mutation is applied at a time to a fixed source/test snapshot; the working checkout stays unchanged.
 
-The mutation worker selects pure-function tests; the model CLI subprocess integration test remains in full pytest but is deselected inside the process-denying mutation worker.
+The mutation worker selects pure-function tests; the model CLI subprocess integration test remains in full pytest but is deselected inside the process-denying mutation worker. The tests of the supervisor's and worker's plan-digest checks need real subprocesses, so they also run only in full pytest.
 
 Each target first passes both its original baseline and an AST-normalized, nonmutated control with identical test identities. Failure of either stops the campaign, preventing formatting-only false kills. JUnit must exist, preserve baseline case counts, and contain no errors/skips. Exit 1 with failing tests is KILLED; a clean pass is SURVIVED. Timeouts are TIMEOUT; collection failures/missing evidence are ERROR. Neither infrastructure failures nor timeouts count as kills. Any survivor/timeout/error fails the command and CI. Empty or more-than-256 inventories fail rather than being silently truncated.
 

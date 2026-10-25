@@ -1,31 +1,34 @@
 """使用共用執行清冊管理模型 supervisor 與復原，不使用 Docker。
 
 Model supervisor and recovery using the shared run inventory, without Docker."""
-import fcntl
-import hashlib
-import json
-import math
+import copy
 import os
-import shutil
-import signal
-import subprocess
-import sys
-import time
-from contextlib import contextmanager
-from pathlib import Path
 
-from ..lifecycle import (group_alive, identity, owner_alive, prepare_run, run_directory,
-                         temporary_directory, terminate_group)
-from ..results import write_json
+from .. import supervision
+from ..supervision import CANCELLED, CLEANUP_FAILED, EXITED, TIMEOUT, child_environment, persist
 from .gateway import ModelError
-from .transport import AWS_CHILD_ENV, strict_json
+from .transport import strict_json
 
-SOURCE_ROOT = Path(__file__).resolve().parents[2]
 # 最多 16 筆審查乘以 16 KiB 原文，另加中繼資料。 / 16 reviews x 16 KiB bound raw responses, plus metadata.
 REPORT_LIMIT = 1024 * 1024
+# 模型 supervisor 的最長整體期限。 / The model supervisor's longest total deadline.
+MAX_TOTAL_SECONDS = 130
 BLIND_REVIEW_IMMUTABLE = ('plan', 'providers', 'selected_providers', 'case_ids', 'rounds', 'limits',
                           'total_timeout_seconds', 'output_tokens_per_review', 'implementation_sha256',
                           'case_catalog_sha256', 'oracle_sha256', 'model_roe_sha256')
+
+
+# smoke 的計畫：supervisor 決定的供應商、fixture、實作與 RoE 雜湊、限額與時限。 / The smoke plan: the providers,
+# fixture, implementation and RoE digests, limits and deadline the supervisor decided.
+SMOKE_IMMUTABLE = ('schema_version', 'operation', 'run_id', 'started_at', 'providers', 'fixture',
+                   'implementation_sha256', 'model_roe_sha256', 'limits', 'total_timeout_seconds',
+                   'max_output_tokens_per_call')
+
+
+def smoke_plan_digest(report):
+    """smoke 計畫的雜湊；supervisor 經命令列交給 worker。 / Digest of a smoke plan, handed to the worker on the
+    command line."""
+    return supervision.plan_digest(report, SMOKE_IMMUTABLE)
 
 
 def plan_digest(report):
@@ -33,35 +36,8 @@ def plan_digest(report):
 
 Digest of a blind review's immutable plan, budget, identities and per-request digests. The
     supervisor hands it to the worker on the command line, never through the report on disk."""
-    fixed = {key: report.get(key) for key in BLIND_REVIEW_IMMUTABLE}
-    fixed['request_sha256'] = [check.get('request_sha256') for check in report.get('checks', [])]
-    return hashlib.sha256(json.dumps(fixed, sort_keys=True, separators=(',', ':')).encode()).hexdigest()
-
-
-def persist(path, data):
-    write_json(path, data)
-    # 放行子程序前，登記必須能承受擁有者崩潰。 / Registration must survive an owner crash before the child is released.
-    with path.open('rb') as handle:
-        os.fsync(handle.fileno())
-    descriptor = os.open(path.parent, os.O_RDONLY | os.O_DIRECTORY)
-    try:
-        os.fsync(descriptor)
-    finally:
-        os.close(descriptor)
-
-
-def gated_command(command):
-    return [sys.executable, '-I', str(SOURCE_ROOT / 'scripts/model_process.py'), *command]
-
-
-def register_group(work, pid, role='child'):
-    marker = json.loads((work / 'owner.json').read_text())
-    if marker['uid'] != os.getuid() or marker['operation'] != 'model-smoke':
-        raise ValueError('invalid model owner')
-    if os.getsid(pid) != pid or os.getpgid(pid) != pid:
-        raise ValueError('model child requires a dedicated session')
-    persist(work / 'groups' / f'{pid}.json', {
-        'pid': pid, 'start': identity(pid), 'boot': marker['boot'], 'uid': marker['uid'], 'role': role})
+    requests = [check.get('request_sha256') for check in report.get('checks', [])]
+    return supervision.plan_digest({**report, 'request_sha256': requests}, (*BLIND_REVIEW_IMMUTABLE, 'request_sha256'))
 
 
 def read_report(root, run_id):
@@ -89,60 +65,6 @@ def read_report(root, run_id):
                 'providers': [], 'checks': [], 'calls': []}
 
 
-def stop_registered(work):
-    current_boot = Path('/proc/sys/kernel/random/boot_id').read_text().strip()
-    def stop(path):
-        if path.is_symlink():
-            raise ValueError('invalid process registration')
-        group = json.loads(path.read_text())
-        pid = group['pid']
-        if type(pid) is not int or pid <= 1 or group['uid'] != os.getuid() or path.name != f'{pid}.json':
-            raise ValueError('invalid process identity')
-        if group['boot'] != current_boot:
-            return  # host 重開機後不可對新開機的程序傳送訊號。 / Host reboot: never signal a new boot's processes.
-        try:
-            if identity(pid) != group['start']:
-                return  # PID 重用時不可對新群組傳送訊號。 / PID reuse: do not signal the new process group.
-        except FileNotFoundError:
-            pass  # 已登記群組可能比原領導程序存活更久。 / A registered group can outlive its original leader.
-        terminate_group(pid)
-        deadline = time.monotonic() + 3
-        while True:
-            if not group_alive(pid):
-                break
-            if time.monotonic() >= deadline:
-                raise TimeoutError('model process cleanup incomplete')
-            time.sleep(0.02)
-    # 先停止產生者再重新列舉；接收 SIGTERM 時仍可能 / Freeze the producer first, then enumerate again: it could register another
-    # 登記新子程序，尚未登記的閘門子程序則讀到 EOF。 / child while receiving SIGTERM. A pre-registration gated child sees EOF.
-    for path in sorted((work / 'groups').glob('*.json')):
-        if path.is_symlink():
-            raise ValueError('invalid process registration')
-        if json.loads(path.read_text()).get('role') == 'worker':
-            stop(path)
-    for path in sorted((work / 'groups').glob('*.json')):
-        stop(path)
-
-
-@contextmanager
-def cleanup_lock(work):
-    # 非阻塞 flock 序列化同時執行的 janitor，不重新建立執行目錄。 / Nonblocking flock serializes concurrent janitors. Never recreate a run.
-    try:
-        fd = os.open(work / 'cleanup.lock', os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, 0o600)
-    except FileNotFoundError:
-        yield False
-        return
-    try:
-        try:
-            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        except BlockingIOError:
-            yield False
-        else:
-            yield True
-    finally:
-        os.close(fd)
-
-
 def complete_worker_report(data, providers, returncode):
     # 不可因空集合、過期報告或缺少供應商嘗試而成功。 / No vacuous success, stale report or success from missing provider attempts.
     checks, calls = data.get('checks', []), data.get('calls', [])
@@ -155,105 +77,94 @@ def complete_worker_report(data, providers, returncode):
             all(c.get('status') == 'SUCCESS' for c in calls))
 
 
-def finish(root, run_id, *, providers=(), returncode=None, reason=None, recovered=False, cancelled=None, expected_report=None):
-    work = run_directory(root, run_id)
-    report = root / 'artifacts' / run_id / 'report.json'
-    cleanup_error = None
-    try:
-        stop_registered(work)
-    except Exception as exc:
-        cleanup_error = type(exc).__name__
-    # 群組停止後，worker 才無法繼續覆寫證據。 / Workers can no longer overwrite evidence after their groups are stopped.
-    data = read_report(root, run_id)
-    try:
-        completed = cleanup_error is None and reason is None and complete_worker_report(data, providers, returncode)
-    except (TypeError, AttributeError):
-        completed = False
-    previous_status = data.get('status')
-    data.pop('pending_status', None)
-    data.update(status='INCOMPLETE', cleanup={'completed': False, 'recovered_by_janitor': recovered})
-    if reason:
-        data['code'] = reason
-    for check in data.get('checks', []):
-        if check.get('status') == 'RUNNING':
-            check.update(status='CANCELLED' if reason == 'CANCELLED' else 'ERROR', code=reason or 'WORKER_FAILED')
-    if data.get('task') == 'blind-review' or (expected_report or {}).get('task') == 'blind-review':
+class ModelRun:
+    """model 角色在受監督執行中的宣告：不建立外部資源，並把 worker 報告關成評估證據。
+
+What the model role declares to a supervised run: no external resources, and closing the worker's report into the
+    evaluation evidence.
+    """
+    operation, ceiling = 'model-smoke', MAX_TOTAL_SECONDS
+
+    def __init__(self, root, run_id, providers=(), expected_report=None):
+        self.root, self.run_id = root, run_id
+        self.providers, self.expected_report = list(providers), expected_report
+
+    def release(self, run_id):
+        """模型執行不使用 Docker 或其他外部資源。 / Model runs use no Docker or other external resource."""
+
+    def read(self):
+        return read_report(self.root, self.run_id)
+
+    def close(self, evidence, outcome):
+        data, expected_report = copy.deepcopy(evidence), self.expected_report
+        reason = outcome.stop
         try:
-            from .benchmark_score import summarize
-            data['analysis'] = summarize(data, (expected_report or {}).get('plan'))
-            # 盲審 worker 也綁定 supervisor 交付的不可變計畫、預算與請求摘要。 / Blind-review workers are bound to
-            # the supervisor's immutable plan, budget and request digests too.
-            if expected_report is not None and plan_digest(data) != plan_digest(expected_report):
-                raise ValueError('blind review differs from the supervisor plan')
-        except Exception:
+            completed = outcome.kind == EXITED and complete_worker_report(data, self.providers, outcome.returncode)
+        except (TypeError, AttributeError):
             completed = False
-            data.update(analysis=None, code='EVALUATION_INVALID')
-    elif expected_report is not None:
-        # Smoke worker 也綁定 supervisor 不可變計畫與限額。 / Smoke workers are bound to the supervisor's immutable plan and limits too.
-        immutable = ('providers', 'fixture', 'implementation_sha256', 'model_roe_sha256',
-                     'limits', 'total_timeout_seconds', 'max_output_tokens_per_call')
-        calls = data.get('calls', [])
-        reservations_valid = (type(data.get('reserved_calls')) is int and
-            type(data.get('reserved_output_tokens')) is int and
-            all(type(c.get('reserved')) is bool and c.get('reserved') is True and
-                type(c.get('reserved_output_tokens')) is int and
-                c['reserved_output_tokens'] == expected_report['max_output_tokens_per_call'] for c in calls) and
-            data['reserved_calls'] == len(calls) and
-            data['reserved_output_tokens'] == len(calls) * expected_report['max_output_tokens_per_call'])
-        if not all(data.get(k) == expected_report.get(k) for k in immutable) or not reservations_valid:
-            completed = False
-            data['code'] = 'EVALUATION_INVALID'
-    try:
-        if cleanup_error:
-            raise RuntimeError('process cleanup failed')
-        temp = temporary_directory(run_id)
-        if work.is_symlink() or temp.is_symlink():
-            raise ValueError('invalid model run directory')
-        if temp.exists():
-            shutil.rmtree(temp)
-        # 移除復原清冊前，先保存阻擋狀態的檢查點。 / Persist a blocking checkpoint before removing the recovery inventory.
-        persist(report, data)
-        shutil.rmtree(work)
-    except Exception as exc:
-        cleanup_error = cleanup_error or type(exc).__name__
-    data['cleanup'].update(completed=cleanup_error is None, error_type=cleanup_error,
-                           process_groups_terminated=cleanup_error is None,
-                           temporary_directory_removed=not temporary_directory(run_id).exists(),
-                           run_directory_removed=not work.exists())
-    if cancelled:
-        reason = 'CANCELLED'
-    if cleanup_error:
-        data.update(status='ERROR', code='CLEANUP_FAILED')
-    elif reason in ('CANCELLED', 'TIMEOUT'):
-        data.update(status=reason, code=reason)
-    elif completed:
-        data.update(status='COMPLETE', code=None)
-    else:
-        data.update(status='INCOMPLETE', code=data.get('code') or
-                    ('WORKER_FAILED' if previous_status != 'AWAITING_CLEANUP' else 'PROVIDER_INCOMPLETE'))
-    persist(report, data)
-    return data
+        previous_status = data.get('status')
+        data.pop('pending_status', None)
+        data.update(status='INCOMPLETE', cleanup=outcome.cleanup)
+        if reason:
+            data['code'] = reason
+        for check in data.get('checks', []):
+            if check.get('status') == 'RUNNING':
+                check.update(status='CANCELLED' if reason == CANCELLED else 'ERROR', code=reason or 'WORKER_FAILED')
+        if data.get('task') == 'blind-review' or (expected_report or {}).get('task') == 'blind-review':
+            try:
+                from .benchmark_score import summarize
+                data['analysis'] = summarize(data, (expected_report or {}).get('plan'))
+                # 盲審 worker 也綁定 supervisor 交付的不可變計畫、預算與請求摘要。 / Blind-review workers are bound to
+                # the supervisor's immutable plan, budget and request digests too.
+                if expected_report is not None and plan_digest(data) != plan_digest(expected_report):
+                    raise ValueError('blind review differs from the supervisor plan')
+            except Exception:
+                completed = False
+                data.update(analysis=None, code='EVALUATION_INVALID')
+        elif expected_report is not None:
+            # Smoke worker 也綁定 supervisor 不可變計畫與限額。 / Smoke workers are bound to the supervisor's immutable plan and limits too.
+            calls = data.get('calls', [])
+            reservations_valid = (type(data.get('reserved_calls')) is int and
+                type(data.get('reserved_output_tokens')) is int and
+                all(type(c.get('reserved')) is bool and c.get('reserved') is True and
+                    type(c.get('reserved_output_tokens')) is int and
+                    c['reserved_output_tokens'] == expected_report['max_output_tokens_per_call'] for c in calls) and
+                data['reserved_calls'] == len(calls) and
+                data['reserved_output_tokens'] == len(calls) * expected_report['max_output_tokens_per_call'])
+            if smoke_plan_digest(data) != smoke_plan_digest(expected_report) or not reservations_valid:
+                completed = False
+                data['code'] = 'EVALUATION_INVALID'
+        if outcome.kind == CLEANUP_FAILED:
+            data.update(status='ERROR', code='CLEANUP_FAILED')
+        elif reason in (CANCELLED, TIMEOUT):
+            data.update(status=reason, code=reason)
+        elif completed:
+            data.update(status='COMPLETE', code=None)
+        elif outcome.returncode == 2:
+            # exit 2 表示 worker 讀回的計畫與命令列摘要不符，一次呼叫都沒發。 / Exit 2 means the plan the worker read back
+            # did not match the digest on its command line, and it made no call.
+            data.update(status='INCOMPLETE', code='EVALUATION_INVALID')
+        else:
+            data.update(status='INCOMPLETE', code=data.get('code') or
+                        ('WORKER_FAILED' if previous_status != 'AWAITING_CLEANUP' else 'PROVIDER_INCOMPLETE'))
+        persist(self.root / 'artifacts' / self.run_id / 'report.json', data)
+        return data
 
 
-def recover(root, run_id):
-    work = run_directory(root, run_id)
-    with cleanup_lock(work) as locked:
-        if not locked:
-            return False
-        marker = json.loads((work / 'owner.json').read_text())
-        if marker['run_id'] != run_id or marker['uid'] != os.getuid() or marker['operation'] != 'model-smoke':
-            raise ValueError('invalid model owner')
-        if owner_alive(marker):
-            return False
-        data = finish(root, run_id, reason='CANCELLED', recovered=True)
-        if not data['cleanup']['completed']:
-            raise RuntimeError('model cleanup incomplete')
-        return True
+def finish(root, run_id, *, providers=(), returncode=None, stop=None, expected_report=None):
+    """收尾一個 worker 已在 supervise 之外結束的模型執行。 / Finalize a model run whose worker already ended outside
+    supervise."""
+    return supervision.finalize(root, run_id, ModelRun(root, run_id, providers, expected_report), stop=stop,
+                                returncode=returncode)
 
 
-# httpx 以 trust_env 讀取代理，含 ALL_PROXY；之後再為 AWS CLI 過濾時不會帶下去。 / httpx reads proxies through trust_env,
-# ALL_PROXY included; the later AWS CLI filter does not pass it on.
-MODEL_WORKER_BASIC_ENV = AWS_CHILD_ENV | {"ALL_PROXY", "all_proxy"}
+def recover(root, run_id, marker):
+    """回收擁有者已死亡的模型執行：經同一套收尾協定以 CANCELLED 關閉證據並移除執行狀態。
+
+Reap a model run whose owner died: close its evidence as CANCELLED and remove its run state through the same
+    finalization protocol.
+    """
+    supervision.recover(root, run_id, marker, ModelRun(root, run_id))
 
 
 def model_worker_environment(environ, providers):
@@ -263,65 +174,10 @@ The model worker's environment: basic process, proxy and CA variables plus the
     selected providers' settings. Mock providers need none.
     """
     from .config import PROVIDER_ENV
-    allowed = MODEL_WORKER_BASIC_ENV.union(*(PROVIDER_ENV.get(p, ()) for p in providers))
-    return {k: v for k, v in environ.items() if k in allowed}
+    return child_environment(environ, frozenset().union(*(PROVIDER_ENV.get(p, ()) for p in providers)))
 
 
 def supervise(root, report, command, max_seconds):
-    if (type(max_seconds) not in (int, float) or not math.isfinite(max_seconds)
-            or not 0 < max_seconds <= 130):
-        raise ValueError('invalid model supervisor deadline')
     run_id = report['run_id']
-    work = prepare_run(root, run_id, operation='model-smoke')
-    persist(work / 'owner.json', json.loads((work / 'owner.json').read_text()))
-    cancelled, handlers = [], {}
-    process, reason = None, None
-    deadline = time.monotonic() + max_seconds
-    try:
-        for sig in (signal.SIGTERM, signal.SIGINT):
-            handlers[sig] = signal.signal(sig, lambda number, frame: cancelled.append(number))
-        process = subprocess.Popen(gated_command(command), cwd=root, start_new_session=True,
-                                   stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-                                   env={**model_worker_environment(os.environ, set(report['providers'])),
-                                        'TMPDIR': str(temporary_directory(run_id))})
-        register_group(work, process.pid, role='worker')
-        process.stdin.write(b'G')
-        process.stdin.close()
-        while process.poll() is None:
-            if cancelled:
-                reason = 'CANCELLED'
-                break
-            if time.monotonic() >= deadline:
-                reason = 'TIMEOUT'
-                break
-            time.sleep(0.02)
-    except Exception:
-        reason = 'SUPERVISOR_FAILED'
-    finally:
-        # 尚未登記的閘門子程序仍由此 Popen handle 擁有。 / Even an unregistered gated child is owned by this Popen handle.
-        if process is not None:
-            if process.stdin and not process.stdin.closed:
-                process.stdin.close()
-            if process.returncode is None:
-                terminate_group(process.pid)
-            try:
-                process.wait(timeout=5)
-            except subprocess.TimeoutExpired:
-                # 群組終止後仍存活的 worker 不可略過後續收尾。 / A worker that outlives its group kill must not skip finalization below.
-                reason = reason or 'SUPERVISOR_FAILED'
-                process.kill()
-                try:
-                    process.wait(timeout=5)
-                except subprocess.TimeoutExpired:
-                    pass
-        try:
-            with cleanup_lock(work) as locked:
-                if not locked:
-                    raise RuntimeError('model cleanup lock unavailable')
-                data = finish(root, run_id, providers=report['providers'],
-                              returncode=process.returncode if process else None,
-                              reason='CANCELLED' if cancelled else reason, cancelled=cancelled, expected_report=report)
-        finally:
-            for sig, handler in handlers.items():
-                signal.signal(sig, handler)
-    return data
+    return supervision.supervise(root, run_id, ModelRun(root, run_id, report['providers'], report), command,
+                                 model_worker_environment(os.environ, set(report['providers'])), max_seconds)
