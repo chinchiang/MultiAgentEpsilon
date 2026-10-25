@@ -58,50 +58,59 @@ App 身分與執行位置尚未提供；已準備受控主機的發布程式與�
 
 ## main 的 lock 依賴出現新弱點
 
-適用情境：main 的 `requirements.lock` 鎖定的某個版本，在 OSV 出現新的公告。2026-10-25 的 certifi（GHSA-6q48-6c7w-9gw2）就是這種情況。
+適用情境：main 的 `requirements.lock` 鎖定的某個版本，在 OSV 出現新的公告。例如 certifi 2026.7.22 的 GHSA-6q48-6c7w-9gw2：OSV 於 2026-10-20 發布，2026-10-25 才被發現。
 
 **為什麼會卡住**：以下三件事同時成立。
 
-- **可信 checkout 取 base SHA**：`security.yml` 的 `trusted` checkout 一律取 base SHA，並在其中執行 `bootstrap.py`。G1 對任何已發布的公告都會阻擋，而且沒有豁免名單。所以每個 PR 與 main 的 push run 都會 BLOCK；**升級這個依賴的 PR 也一樣**，因為它的 run 用的是 main 的舊 lock。
+- **可信 checkout 取 base SHA**：`.github/workflows/security.yml` 的 `trusted` checkout 一律取 base SHA，並在其中執行 `scripts/bootstrap.py`。它的 G1 對任何已發布的公告都會阻擋，而且沒有豁免名單。所以每個 PR 與 main 的 push run 都會 BLOCK；**升級這個依賴的 PR 也一樣**，因為它的 run 用的是 main 的舊 lock。
 - **冷卻期**：修正版必須通過 `security/policy.json` 的 `minimum_package_age_days`（目前是 7 天）。上傳未滿這段時間，新版本一樣過不了 G1。
 - **規則集沒有 bypass**：規則集 24512048 沒有 bypass，必要檢查採嚴格模式。
 
 結果是：修正版過完冷卻期之前，沒有任何 PR 能合併。這段期間即使暫時停用規則集也沒有用，因為合併後 main 仍會在冷卻期上失敗。
 
-**決策點：**
+**處理步驟**（標「決策」的地方要選擇做法，其餘照做）：
 
 1. **確認問題出在 main 的 lock 本身。**
    - 從失敗 run 的 bootstrap 證據讀出套件、版本與公告 ID：`report.json` 中 G1 紀錄的 `sca.findings`。
-   - 在 main 的 checkout 中，用下面的指令在本機重現。它只讀 lock、查詢 OSV，不安裝任何東西：
+   - 同一個公告可能有多個 ID。例如 GHSA-6q48-6c7w-9gw2 與 PYSEC-2026-4320 互為別名（`aliases`），是同一個弱點。
+   - 在 main 的 checkout 根目錄，用下面的指令在本機重現。它只讀 lock、查詢 OSV，不安裝任何東西：
      ```bash
      python3 -I -c 'import sys; sys.path.insert(0, "."); from pathlib import Path; from security_harness.dependencies import scan; r = scan(Path("requirements.lock")); print([(f["package"], f["version"], f["advisory_id"]) for f in r["findings"]])'
      ```
    - `scripts/preflight.py` 只檢查 PyPI 來源與冷卻期，**不查 OSV**，不能用來確認公告。
-2. **選定修正版，算出最早可處理時間。**
+2. **決策：選定修正版，算出最早可處理時間。**
    - 修正版取 OSV 公告中 `fixed` 欄位的版本，再用第 1 步的查詢確認這個版本本身沒有公告。
-   - 預設取最小的修正版：變更最小，冷卻期也最早結束。
-   - 最早可處理時間 = 修正版所有檔案中最晚的上傳時間（PyPI JSON 的 `upload_time_iso_8601`）＋ 冷卻期天數。以 certifi 為例，2026.10.19 於 2026-10-20 02:24 UTC 上傳，最早可處理時間是 2026-10-27 02:24 UTC。
+   - 有多個修正版可選時，取最小的那一個：變更最小，冷卻期也最早結束。
+   - 最早可處理時間 = 修正版所有檔案中最晚的上傳時間（PyPI JSON 的 `upload_time_iso_8601`）＋ 冷卻期天數。以 certifi 為例，2026.10.19 的檔案最晚在 2026-10-20 02:24 UTC 上傳，所以最早可處理時間為 2026-10-27 02:24 UTC。
+   - **找不到可用的修正版時**，沒有任何版本能通過 G1，等待冷卻期也解決不了。可能是三種情況：公告沒有 `fixed` 欄位、修正版本身也有公告，或修正版還沒上傳到 PyPI。這時由擁有者決定：
+     - 等上游發布可用的修正版，再從這一步重新開始；或
+     - 把這個依賴移除或換成別的套件。這會改動 `requirements.in` 與 `security/policy.json` 的 `allowed_packages`，屬於受保護變更；它的 PR 一樣會被舊 lock 擋住，合併方式同第 5 步。
+
+     G1 沒有豁免機制。加入豁免本身就是政策變更，不是這份手冊的做法。
 3. **冷卻期內只準備、不合併。**
    - 用 lock 檔頭記載的產生指令，只升級這個套件：
      ```bash
      uv pip compile requirements.in --generate-hashes --only-binary :all: --output-file requirements.lock --upgrade-package '<套件>==<修正版>'
      ```
      確認只有這個套件的版本與雜湊改變，而且雜湊與 PyPI 公布的一致。
-   - 不縮短冷卻期。改政策是受保護變更，那個 PR 一樣會被舊 lock 擋住，還會削弱供應鏈防線。
-   - 不手動放 wheel 來重建隔離執行映像。隔離測試要等冷卻期結束後，經由 `bootstrap.py` 重建。
+   - **決策：不縮短冷卻期。** 改政策是受保護變更，那個 PR 一樣會被舊 lock 擋住，還會削弱供應鏈防線。
+   - 不手動放 wheel 來重建隔離執行映像；它要等冷卻期結束後經由 `scripts/bootstrap.py` 重建。
    - 在受影響的 PR 留言，說明阻擋原因與最早可處理時間。
-4. **冷卻期結束後，先在本機驗證，再開 PR。** 依序執行：
-   1. `bootstrap.py`：通過 G1，並重建 `.state/wheels`。
-   2. `build_runtime.py`：重建隔離映像。
-   3. 完整測試。
-5. **合併升級 PR。** 它自己的 run 仍會被 main 的舊 lock 擋住，符合[基準自身失效時的受控遷移](trusted-execution.zh-TW.md)的三個啟動條件。
-   - 依該程序，由擁有者暫時解除規則集，只合併這一個 PR，然後立即恢復，並重跑 `audit_merge_protection.py`。
-   - 這仍是例外程序，要不要啟動由擁有者決定。
+4. **冷卻期結束後，先在本機驗證，再開 PR。** 在套用升級的 checkout 中依序執行：
+   1. `python3 -I scripts/bootstrap.py`：通過 G1，並重建 `.state/wheels`。
+   2. `python3 -I scripts/build_runtime.py`：重建隔離執行映像。
+   3. 完整測試：照 [README「開始執行」](../README.md#開始執行)的 pytest 指令，包含需要 Docker 與 PostgreSQL 的整合測試。
+5. **決策：合併升級 PR。** 這個 PR 自己的 run 仍會被 main 的舊 lock 擋住，只能依[基準自身失效時的受控遷移](trusted-execution.zh-TW.md#基準自身失效時的受控遷移)處理。那份程序的步驟照原文執行，這裡不轉述。三個啟動條件在這裡的對應：
+   - **失敗位置在 evaluator，不在候選程式**：失敗發生在 `trusted` checkout 的 `scripts/bootstrap.py`，也就是 evaluator 自己的安裝與 G1。
+   - **修正 PR 在同一個基準缺陷上失敗**：升級 PR 的 run 用 base SHA 的舊 lock，因此在同一個公告上被擋。
+   - **沒有不必解除規則集的做法**：base SHA 永遠帶著舊 lock，G1 沒有豁免名單，規則集也沒有 bypass。
+
+   要不要啟動這個例外程序，由擁有者決定。
 6. **合併後處理其他開啟中的 PR。**
    - 每個 PR 都要 update-branch。之後 guard 會依推送時間排除舊核准，所以需要重新核准。
    - 重跑 CI，再用 `python3 -I scripts/verify_required_check.py --pr <編號>` 確認。
 
-**預防：** CI 目前只在 push、`pull_request_target` 與 `workflow_dispatch` 時執行，main 的 lock 出現新公告時，要等到下一次執行才會發現；certifi 的公告就晚了 5 天才發現。開 PR 之前，先用第 1 步的 OSV 查詢檢查 main 的 lock。
+**預防：** CI 目前只在 push、`pull_request_target` 與 `workflow_dispatch` 時執行，main 的 lock 出現新公告時，要等到下一次執行才會發現。以 certifi 為例，從公告發布到發現晚了 5 天。開 PR 之前，先用第 1 步的 OSV 查詢檢查 main 的 lock。
 
 <a id="en"></a>
 
@@ -146,47 +155,56 @@ Remote behavioral acceptance remains NOT_RUN. Earlier closed draft PR #5 being b
 
 ## A new advisory against a dependency in main's lock
 
-This applies when OSV publishes a new advisory against a version pinned in main's `requirements.lock`, as with certifi (GHSA-6q48-6c7w-9gw2) on 2026-10-25.
+This applies when OSV publishes a new advisory against a version pinned in main's `requirements.lock`. For example, GHSA-6q48-6c7w-9gw2 against certifi 2026.7.22 was published by OSV on 2026-10-20 and found on 2026-10-25.
 
 **Why everything blocks**: three things hold at once.
 
-- **The trusted checkout uses the base SHA**: in `security.yml` the `trusted` checkout always uses the base SHA and runs `bootstrap.py` there. G1 blocks on any published advisory and has no exemption list. So every PR and every main push run blocks, **including the PR that upgrades the dependency**, whose run uses main's old lock.
+- **The trusted checkout uses the base SHA**: in `.github/workflows/security.yml` the `trusted` checkout always uses the base SHA and runs `scripts/bootstrap.py` there. Its G1 blocks on any published advisory and has no exemption list. So every PR and every main push run blocks, **including the PR that upgrades the dependency**, whose run uses main's old lock.
 - **The cooling period**: the fixed version must pass `minimum_package_age_days` in `security/policy.json` (7 days today). Until its upload is that old, the new version fails G1 too.
 - **The ruleset has no bypass**: ruleset 24512048 has no bypass, and its required check is strict.
 
 So no PR can merge until the fixed version has cleared the cooling period. Lifting the ruleset during that time does not help, because main would still fail G1 on the cooling period after the merge.
 
-**Decision points:**
+**Steps** (steps marked "Decision" choose a course; the others are followed as written):
 
 1. **Confirm the problem is main's lock itself.**
    - Read the package, version and advisory IDs from the failing run's bootstrap evidence: `sca.findings` in the G1 record of `report.json`.
-   - In a checkout of main, reproduce it locally with the command below. It only reads the lock and queries OSV, and installs nothing:
+   - One advisory can carry several IDs. For example, GHSA-6q48-6c7w-9gw2 and PYSEC-2026-4320 are `aliases` of the same vulnerability.
+   - At the root of a checkout of main, reproduce it locally with the command below. It only reads the lock and queries OSV, and installs nothing:
      ```bash
      python3 -I -c 'import sys; sys.path.insert(0, "."); from pathlib import Path; from security_harness.dependencies import scan; r = scan(Path("requirements.lock")); print([(f["package"], f["version"], f["advisory_id"]) for f in r["findings"]])'
      ```
    - `scripts/preflight.py` checks only PyPI provenance and the cooling period. It **does not query OSV**, so it cannot confirm an advisory.
-2. **Choose the fixed version and compute the earliest time to act.**
+2. **Decision: choose the fixed version and compute the earliest time to act.**
    - Take the version in the advisory's `fixed` field, and use the step 1 query to confirm that version has no advisory of its own.
-   - Prefer the smallest fixed version: the change stays minimal and its cooling period ends first.
-   - Earliest time to act = the latest upload time among the fixed version's files (`upload_time_iso_8601` in PyPI's JSON) + the cooling period. For certifi, 2026.10.19 was uploaded at 2026-10-20 02:24 UTC, so the earliest time was 2026-10-27 02:24 UTC.
+   - When several fixed versions qualify, take the smallest: the change stays minimal and its cooling period ends first.
+   - Earliest time to act = the latest upload time among the fixed version's files (`upload_time_iso_8601` in PyPI's JSON) + the cooling period. For certifi, the last file of 2026.10.19 was uploaded at 2026-10-20 02:24 UTC, so the earliest time to act is 2026-10-27 02:24 UTC.
+   - **When no usable fixed version exists**, no version passes G1 and waiting out the cooling period does not help. That covers three cases: the advisory has no `fixed` field, the fixed version has an advisory of its own, or the fixed version is not on PyPI yet. The owner then decides to either:
+     - wait for upstream to publish a usable fix and restart from this step, or
+     - remove or replace the dependency. That changes `requirements.in` and `allowed_packages` in `security/policy.json`, a protected change whose PR is blocked by the old lock too and merges the same way as step 5.
+
+     G1 has no exemption mechanism; adding one is itself a policy change, not part of this runbook.
 3. **During the cooling period, prepare but do not merge.**
    - Upgrade only that package, with the command recorded in the lock's header:
      ```bash
      uv pip compile requirements.in --generate-hashes --only-binary :all: --output-file requirements.lock --upgrade-package '<package>==<fixed version>'
      ```
      Confirm that only that package's version and hashes change, and that the hashes match what PyPI publishes.
-   - Do not shorten the cooling period. The policy is a protected change whose PR is blocked by the old lock too, and shortening it weakens the supply-chain defence.
-   - Do not place wheels by hand to rebuild the isolation runtime image. The isolation tests wait until `bootstrap.py` can rebuild it after the cooling period.
+   - **Decision: keep the cooling period.** The policy is a protected change whose PR is blocked by the old lock too, and shortening it weakens the supply-chain defence.
+   - Do not place wheels by hand to rebuild the isolation runtime image; it waits until `scripts/bootstrap.py` can rebuild it after the cooling period.
    - Comment on each affected PR with the reason and the earliest time to act.
-4. **After the cooling period, verify locally before opening the PR.** Run in order:
-   1. `bootstrap.py`, which passes G1 and rebuilds `.state/wheels`.
-   2. `build_runtime.py`, which rebuilds the isolation image.
-   3. The full suite.
-5. **Merge the upgrade PR.** Its own run is still blocked by main's old lock, which meets the three preconditions of the [controlled migration when the baseline itself is broken](trusted-execution.zh-TW.md#en).
-   - Following that procedure, the owner lifts the ruleset, merges only this PR, restores the ruleset immediately and reruns `audit_merge_protection.py`.
-   - It remains an exception procedure, and starting it is the owner's decision.
+4. **After the cooling period, verify locally before opening the PR.** In the checkout with the upgrade applied, run in order:
+   1. `python3 -I scripts/bootstrap.py`, which passes G1 and rebuilds `.state/wheels`.
+   2. `python3 -I scripts/build_runtime.py`, which rebuilds the isolation runtime image.
+   3. The full suite: the pytest command in the [README "Run the pilot"](../README.md#run-the-pilot) section, including the integration tests that need Docker and PostgreSQL.
+5. **Decision: merge the upgrade PR.** Its own run is still blocked by main's old lock, so the only route is the [controlled migration when the baseline itself is broken](trusted-execution.zh-TW.md#controlled-migration-when-the-baseline-itself-is-broken). Follow that procedure's steps as written; they are not restated here. Its three preconditions map as follows:
+   - **The failure is in the evaluator, not the candidate**: it happens in `scripts/bootstrap.py` in the `trusted` checkout, the evaluator's own installation and G1.
+   - **The fix PR fails on the same baseline defect**: the upgrade PR's run uses the base SHA's old lock and blocks on the same advisory.
+   - **No option keeps the ruleset enforced**: the base SHA always carries the old lock, G1 has no exemption list, and the ruleset has no bypass.
+
+   Starting this exception procedure is the owner's decision.
 6. **After the merge, handle the other open PRs.**
    - Each PR needs an update-branch. The guard then excludes approvals given before the latest push, so each needs a fresh approval.
    - Rerun CI, then confirm with `python3 -I scripts/verify_required_check.py --pr <number>`.
 
-**Prevention:** CI runs only on push, `pull_request_target` and `workflow_dispatch`, so a new advisory against main's lock surfaces only at the next run; certifi's was found five days late. Before opening a PR, run the step 1 OSV query against main's lock.
+**Prevention:** CI runs only on push, `pull_request_target` and `workflow_dispatch`, so a new advisory against main's lock surfaces only at the next run; certifi's was found five days after OSV published it. Before opening a PR, run the step 1 OSV query against main's lock.
