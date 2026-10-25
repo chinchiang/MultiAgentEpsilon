@@ -413,7 +413,7 @@ def test_worker_that_refuses_the_plan_is_recorded_as_invalid(tmp_path):
     assert_clean(tmp_path, data)
 
 
-def test_cancelled_run_never_publishes_a_complete_worker_handoff(tmp_path):
+def test_cancelled_run_never_publishes_a_complete_cleanup_handoff(tmp_path):
     # 收尾期間的訊號如何變成 CANCELLED 由 test_supervision 驗證；這裡驗證角色不會把它發布成 COMPLETE。 / How a
     # signal during finalization becomes CANCELLED is covered in test_supervision; here the role must not publish
     # it as COMPLETE.
@@ -425,7 +425,7 @@ def test_cancelled_run_never_publishes_a_complete_worker_handoff(tmp_path):
     prepare_run(tmp_path, run_id, operation='model-smoke')
     assert asyncio.run(run_worker(tmp_path, run_id, life.smoke_plan_digest(report))) == 0
     assert report_at_run(tmp_path, run_id)['status'] == 'AWAITING_CLEANUP'
-    data = life.finish(tmp_path, run_id, providers=['mock'], returncode=0, reason='CANCELLED', expected_report=report)
+    data = life.finish(tmp_path, run_id, providers=['mock'], returncode=0, stop='CANCELLED', expected_report=report)
     assert data['status'] == 'CANCELLED' and 'pending_status' not in data
     assert_clean(tmp_path, data)
 

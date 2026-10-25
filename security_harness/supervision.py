@@ -213,14 +213,19 @@ def plan_changed(report, planned):
     return any(report.get(key) != value for key, value in planned.items())
 
 
+# 監督結果的種類；停止原因也使用其中三個。 / The supervision outcome kinds; three of them are also stop reasons.
+EXITED, TIMEOUT, CANCELLED, SUPERVISOR_FAILED, CLEANUP_FAILED = (
+    'EXITED', 'TIMEOUT', 'CANCELLED', 'SUPERVISOR_FAILED', 'CLEANUP_FAILED')
+
+
 class PlanMismatch(ValueError):
     """worker 報告與 supervisor 的計畫不同。 / The worker's report differs from the supervisor's plan."""
 
 
 class _SupervisedRun:
-    """一次受監督執行的狀態：收到的訊號、結束原因、例外型別與群組停止結果。
+    """supervise 內部的一次受監督執行狀態：收到的訊號、停止原因、例外型別與群組停止結果。
 
-The state of one supervised run: signals received, the stop reason, the exception type
+The internal state of one supervised run in supervise: signals received, the stop reason, the exception type
     and whether every registered group was stopped.
     """
 
@@ -230,7 +235,7 @@ The state of one supervised run: signals received, the stop reason, the exceptio
         self.deadline = self.started + max_seconds
         self.cancelled = []
         self.process = None
-        self.reason = None
+        self.first_stop = None
         self.error_type = None
         self.stop_error = None
 
@@ -254,18 +259,27 @@ Start the worker through the gate, release it only after durable registration, w
             self.process.stdin.close()
             while self.process.poll() is None:
                 if self.cancelled:
-                    self.reason = 'CANCELLED'
+                    self.first_stop = CANCELLED
                     break
                 if time.monotonic() >= self.deadline:
-                    self.reason = 'TIMEOUT'
+                    self.first_stop = TIMEOUT
                     break
                 time.sleep(0.02)
         except Exception as exc:
-            self.reason, self.error_type = 'SUPERVISOR_FAILED', type(exc).__name__
+            self.first_stop, self.error_type = SUPERVISOR_FAILED, type(exc).__name__
         finally:
-            self.stop()
+            self.terminate()
 
+    @property
     def stop(self):
+        """目前的停止原因：最早觀察到的原因不被改寫；worker 自行結束後才收到的訊號仍阻止發布成功。
+
+The current stop reason. The first reason observed is never rewritten; a signal after the worker exited on its own
+        still keeps success unpublished.
+        """
+        return self.first_stop or (CANCELLED if self.cancelled else None)
+
+    def terminate(self):
         process = self.process
         # 尚未登記的閘門子程序仍由此 Popen handle 擁有。 / Even an unregistered gated child is owned by this Popen handle.
         if process is not None:
@@ -281,7 +295,7 @@ Start the worker through the gate, release it only after durable registration, w
             except subprocess.TimeoutExpired:
                 # 群組終止後仍存活的 worker 不可略過後續收尾。 / A worker that outlives its group kill must not skip
                 # finalization.
-                self.reason = self.reason or 'SUPERVISOR_FAILED'
+                self.first_stop = self.first_stop or SUPERVISOR_FAILED
                 self.error_type = self.error_type or 'TimeoutExpired'
                 process.kill()
                 try:
@@ -292,10 +306,6 @@ Start the worker through the gate, release it only after durable registration, w
             stop_registered(self.work)
         except Exception as exc:
             self.stop_error = self.stop_error or type(exc).__name__
-
-    @property
-    def seconds(self):
-        return round(time.monotonic() - self.started, 3)
 
 
 @contextmanager
@@ -341,8 +351,8 @@ The supervision outcome: how one supervised run ended and how far its cleanup go
         """清理失敗優先，其次是停止原因，最後才是 worker 自行結束。 / Cleanup failure first, then the stop reason, and
         only then a worker that exited on its own."""
         if not self.cleanup['completed']:
-            return 'CLEANUP_FAILED'
-        return self.stop or 'EXITED'
+            return CLEANUP_FAILED
+        return self.stop or EXITED
 
 
 def remove_run(root, run_id):
@@ -363,29 +373,40 @@ Remove the run's own temporary directory and run inventory. Neither may be a sym
         shutil.rmtree(work)
 
 
-def close_run(root, run_id, role, locked, stopped, *, returncode=None, error_type=None, stop_error=None,
-              started=None, marker=None):
-    """收尾協定：停止群組、清除角色的外部資源、寫阻擋檢查點、刪執行清冊，再寫最終證據；回傳最終監督結果與角色的結果。
+class Ended(NamedTuple):
+    """在 supervise 之外結束的 worker：停止原因與結束碼；介面與 supervise 內部的執行狀態相同。
 
-The finalization protocol: stop the groups, release the role's external resources, write a blocking checkpoint,
-    remove the run inventory, then write the final evidence. Return the final outcome and the role's result.
+A worker that ended outside supervise: its stop reason and exit code, with the same interface as the run state
+    inside supervise.
     """
-    started = time.monotonic() if started is None else started
+    stop: str | None
+    returncode: int | None
+    started: float
+    error_type: str | None = None
+    stop_error: str | None = None
+
+
+def close_run(root, run_id, role, ended, marker=None):
+    """在已持有的清理鎖下執行收尾協定：停止群組、清除角色的外部資源、寫阻擋檢查點、刪執行清冊，再寫最終證據；
+回傳最終監督結果與角色的結果。ended 提供停止原因、結束碼、例外型別與開始時間；停止原因每次寫入前重新讀取。
+
+Run the finalization protocol under the cleanup lock the caller holds: stop the groups, release the role's external
+    resources, write a blocking checkpoint, remove the run inventory, then write the final evidence. Return the final
+    outcome and the role's result. ended supplies the stop reason, exit code, exception type and start time; the stop
+    reason is read again before each write.
+    """
     work, temporary = run_directory(root, run_id), temporary_directory(run_id)
-    errors = [stop_error] if stop_error else []
-    groups_stopped = stop_error is None
-    if not locked:
-        errors.append(CleanupLockUnavailable.__name__)
-    else:
-        try:
-            stop_registered(work)
-        except Exception as exc:
-            groups_stopped = False
-            errors.append(type(exc).__name__)
-        try:
-            role.release(run_id)
-        except Exception as exc:
-            errors.append(type(exc).__name__)
+    errors = [ended.stop_error] if ended.stop_error else []
+    groups_stopped = ended.stop_error is None
+    try:
+        stop_registered(work)
+    except Exception as exc:
+        groups_stopped = False
+        errors.append(type(exc).__name__)
+    try:
+        role.release(run_id)
+    except Exception as exc:
+        errors.append(type(exc).__name__)
     # 群組停止後，worker 才無法繼續覆寫證據。 / Workers can no longer overwrite evidence after their groups are stopped.
     evidence = role.read()
 
@@ -395,7 +416,8 @@ The finalization protocol: stop the groups, release the role's external resource
                    'process_group_terminated': groups_stopped, 'recovered_by_janitor': marker is not None}
         if marker is not None:
             cleanup['boot_changed'] = marker['boot'] != current_boot()
-        return Outcome(stopped(), returncode, error_type, cleanup, round(time.monotonic() - started, 3))
+        return Outcome(ended.stop, ended.returncode, ended.error_type, cleanup,
+                       round(time.monotonic() - ended.started, 3))
 
     try:
         role.close(evidence, outcome(False))
@@ -412,35 +434,43 @@ The finalization protocol: stop the groups, release the role's external resource
     return final, role.close(evidence, final)
 
 
+@contextmanager
+def finalization_lock(work):
+    """收尾所需的清理鎖；另一個程序持有時拋出 CleanupLockUnavailable，證據與執行清冊都不碰。
+
+The cleanup lock finalization needs. When another process holds it, raise CleanupLockUnavailable and touch neither
+    the evidence nor the run inventory.
+    """
+    with cleanup_lock(work) as locked:
+        if not locked:
+            raise CleanupLockUnavailable('run cleanup lock unavailable')
+        yield
+
+
 def supervise(root, run_id, role, command, env, max_seconds):
     """在一次受監督執行中跑 worker 並收尾；回傳角色最後一次關閉證據的結果。
 
 Run the worker in one supervised run and finalize it. Return the role's final closing of the evidence.
 
     角色提供 operation、ceiling、release(run_id) 清除外部資源、read() 讀回 worker 證據，以及 close(evidence,
-    outcome)。close 先以阻擋檢查點、再以最終監督結果各呼叫一次，所以只能由這兩個引數推導結果。 / The role provides
-    operation, ceiling, release(run_id) for its external resources, read() for the worker's evidence and
-    close(evidence, outcome). close runs first with a blocking checkpoint and then with the final outcome, so it must
-    derive everything from those two arguments.
+    outcome)。read 遇到無法讀取的證據時須回傳阻擋用的替代證據而不是拋出例外，否則執行清冊會一直保留。close 先以阻擋
+    檢查點、再以最終監督結果各呼叫一次，所以只能由這兩個引數推導結果。 / The role provides operation, ceiling,
+    release(run_id) for its external resources, read() for the worker's evidence and close(evidence, outcome). read
+    must return blocking stand-in evidence for evidence it cannot read rather than raise, or the run inventory stays
+    forever. close runs first with a blocking checkpoint and then with the final outcome, so it must derive everything
+    from those two arguments.
     """
     with _supervised_run(root, run_id, role.operation, max_seconds, role.ceiling) as run:
         run.run(command, env)
-
-        def stopped():
-            # 最早觀察到的停止原因不被改寫；worker 自行結束後才收到的訊號仍阻止發布成功。 / The first stop reason
-            # observed is never rewritten; a signal after the worker exited on its own still keeps success unpublished.
-            return run.reason or ('CANCELLED' if run.cancelled else None)
-
-        with cleanup_lock(run.work) as locked:
-            return close_run(root, run_id, role, locked, stopped, returncode=run.returncode,
-                             error_type=run.error_type, stop_error=run.stop_error, started=run.started)[1]
+        with finalization_lock(run.work):
+            return close_run(root, run_id, role, run)[1]
 
 
 def finalize(root, run_id, role, *, stop=None, returncode=None):
     """收尾一個 worker 已在 supervise 之外結束的執行；回傳角色的最終結果。 / Finalize a run whose worker already ended
     outside supervise. Return the role's final result."""
-    with cleanup_lock(run_directory(root, run_id)) as locked:
-        return close_run(root, run_id, role, locked, lambda: stop, returncode=returncode)[1]
+    with finalization_lock(run_directory(root, run_id)):
+        return close_run(root, run_id, role, Ended(stop, returncode, time.monotonic()))[1]
 
 
 def recover(root, run_id, marker, role):
@@ -449,10 +479,9 @@ def recover(root, run_id, marker, role):
 Finalize a run whose owner died as cancelled, under the cleanup lock sweep_runs already holds. Raise when cleanup is
     incomplete.
     """
-    final, _ = close_run(root, run_id, role, True, lambda: 'CANCELLED', marker=marker)
+    final, _ = close_run(root, run_id, role, Ended(CANCELLED, None, time.monotonic()), marker)
     if not final.cleanup['completed']:
         raise RuntimeError('run cleanup incomplete')
-    return True
 
 
 def sweep_runs(root, recoverers):
@@ -476,11 +505,13 @@ Reap the runs whose owner died, dispatching on the owner marker's operation. Ret
                 raise ValueError('invalid run owner')
             if owner_alive(marker):
                 continue
-            recover = recoverers.get(marker.get('operation'))
-            if recover is None:
+            reap = recoverers.get(marker.get('operation'))
+            if reap is None:
                 raise ValueError('unknown run operation')
             with cleanup_lock(work) as locked:
-                if locked and recover(root, work.name, marker):
+                if locked:
+                    # 回收失敗時拋出例外，由下方記為失敗。 / A failed reap raises and is recorded as a failure below.
+                    reap(root, work.name, marker)
                     cleaned.append(work.name)
         except Exception as exc:
             # 繼續回收其他執行；每個失敗均回報，但不保存原文。 / Keep reaping the remaining runs; report every failure, without its text.

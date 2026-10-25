@@ -146,6 +146,16 @@ def raise_runtime_error(run_id):
     raise RuntimeError('sensitive docker diagnostics')
 
 
+def replace_run_directory_with_symlink(root):
+    # 執行清冊被換成指向別處的 symlink；刪除時不可跟著它刪到別處。 / The run inventory is swapped for a symlink to
+    # elsewhere; removal must never follow it.
+    def release(run_id):
+        work = root / '.state/runs' / run_id
+        work.rename(root / 'moved-run')
+        work.symlink_to(root / 'moved-run')
+    return release
+
+
 def replace_temporary_with_symlink(run_id):
     from security_harness.supervision import temporary_directory
     temporary = temporary_directory(run_id)
@@ -208,13 +218,15 @@ def test_supervisor_failure_is_a_fixed_outcome_without_its_text(tmp_path):
     assert inventory_removed(tmp_path, run_id)
 
 
-@pytest.mark.parametrize('role,error_type', [
-    (FakeRole(raise_runtime_error), 'RuntimeError'),
-    (FakeRole(replace_temporary_with_symlink), 'ValueError'),
-    (FakeRole(checkpoint_error=OSError('sensitive disk diagnostics')), 'OSError'),
-], ids=['external-cleanup', 'symlinked-temporary-directory', 'checkpoint'])
-def test_failed_cleanup_step_keeps_the_run_inventory_for_the_janitor(tmp_path, role, error_type):
+@pytest.mark.parametrize('make_role,error_type', [
+    (lambda root: FakeRole(raise_runtime_error), 'RuntimeError'),
+    (lambda root: FakeRole(replace_temporary_with_symlink), 'ValueError'),
+    (lambda root: FakeRole(replace_run_directory_with_symlink(root)), 'ValueError'),
+    (lambda root: FakeRole(checkpoint_error=OSError('sensitive disk diagnostics')), 'OSError'),
+], ids=['external-cleanup', 'symlinked-temporary-directory', 'symlinked-run-directory', 'checkpoint'])
+def test_failed_cleanup_step_keeps_the_run_inventory_for_the_janitor(tmp_path, make_role, error_type):
     from security_harness.supervision import temporary_directory
+    role = make_role(tmp_path)
     try:
         run_id, final = supervised(tmp_path, role, [EXIT[0], EXIT[1], EXIT[2].format(0)])
         assert final.kind == 'CLEANUP_FAILED' and final.cleanup['error_type'] == error_type
@@ -229,17 +241,19 @@ def test_failed_cleanup_step_keeps_the_run_inventory_for_the_janitor(tmp_path, r
             shutil.rmtree(temporary, ignore_errors=True)
 
 
-def test_finalization_without_the_cleanup_lock_never_removes_the_inventory(tmp_path):
-    from security_harness.supervision import cleanup_lock, finalize, prepare_run, temporary_directory
+def test_finalization_without_the_cleanup_lock_touches_neither_evidence_nor_inventory(tmp_path):
+    from security_harness.supervision import (CleanupLockUnavailable, cleanup_lock, finalize, prepare_run,
+                                              temporary_directory)
     run_id = str(uuid.uuid4())
     work = prepare_run(tmp_path, run_id, 'fake-role')
     role = FakeRole()
     try:
         with cleanup_lock(work) as locked:
             assert locked
-            final = finalize(tmp_path, run_id, role, returncode=0)
-        assert (final.kind, final.cleanup['error_type']) == ('CLEANUP_FAILED', 'CleanupLockUnavailable')
-        assert role.released == [] and work.exists()
+            with pytest.raises(CleanupLockUnavailable):
+                finalize(tmp_path, run_id, role, returncode=0)
+        assert (role.released, role.reads, role.closed) == ([], 0, [])
+        assert work.exists() and temporary_directory(run_id).exists()
     finally:
         shutil.rmtree(temporary_directory(run_id), ignore_errors=True)
 

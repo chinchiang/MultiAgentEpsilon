@@ -5,7 +5,7 @@ import copy
 import os
 
 from .. import supervision
-from ..supervision import child_environment, persist, plan_digest as fields_digest
+from ..supervision import CANCELLED, CLEANUP_FAILED, EXITED, TIMEOUT, child_environment, persist
 from .gateway import ModelError
 from .transport import strict_json
 
@@ -28,7 +28,7 @@ SMOKE_IMMUTABLE = ('schema_version', 'operation', 'run_id', 'started_at', 'provi
 def smoke_plan_digest(report):
     """smoke 計畫的雜湊；supervisor 經命令列交給 worker。 / Digest of a smoke plan, handed to the worker on the
     command line."""
-    return fields_digest(report, SMOKE_IMMUTABLE)
+    return supervision.plan_digest(report, SMOKE_IMMUTABLE)
 
 
 def plan_digest(report):
@@ -37,7 +37,7 @@ def plan_digest(report):
 Digest of a blind review's immutable plan, budget, identities and per-request digests. The
     supervisor hands it to the worker on the command line, never through the report on disk."""
     requests = [check.get('request_sha256') for check in report.get('checks', [])]
-    return fields_digest({**report, 'request_sha256': requests}, (*BLIND_REVIEW_IMMUTABLE, 'request_sha256'))
+    return supervision.plan_digest({**report, 'request_sha256': requests}, (*BLIND_REVIEW_IMMUTABLE, 'request_sha256'))
 
 
 def read_report(root, run_id):
@@ -99,7 +99,7 @@ What the model role declares to a supervised run: no external resources, and clo
         data, expected_report = copy.deepcopy(evidence), self.expected_report
         reason = outcome.stop
         try:
-            completed = outcome.kind == 'EXITED' and complete_worker_report(data, self.providers, outcome.returncode)
+            completed = outcome.kind == EXITED and complete_worker_report(data, self.providers, outcome.returncode)
         except (TypeError, AttributeError):
             completed = False
         previous_status = data.get('status')
@@ -109,7 +109,7 @@ What the model role declares to a supervised run: no external resources, and clo
             data['code'] = reason
         for check in data.get('checks', []):
             if check.get('status') == 'RUNNING':
-                check.update(status='CANCELLED' if reason == 'CANCELLED' else 'ERROR', code=reason or 'WORKER_FAILED')
+                check.update(status='CANCELLED' if reason == CANCELLED else 'ERROR', code=reason or 'WORKER_FAILED')
         if data.get('task') == 'blind-review' or (expected_report or {}).get('task') == 'blind-review':
             try:
                 from .benchmark_score import summarize
@@ -134,9 +134,9 @@ What the model role declares to a supervised run: no external resources, and clo
             if smoke_plan_digest(data) != smoke_plan_digest(expected_report) or not reservations_valid:
                 completed = False
                 data['code'] = 'EVALUATION_INVALID'
-        if outcome.kind == 'CLEANUP_FAILED':
+        if outcome.kind == CLEANUP_FAILED:
             data.update(status='ERROR', code='CLEANUP_FAILED')
-        elif reason in ('CANCELLED', 'TIMEOUT'):
+        elif reason in (CANCELLED, TIMEOUT):
             data.update(status=reason, code=reason)
         elif completed:
             data.update(status='COMPLETE', code=None)
@@ -151,10 +151,10 @@ What the model role declares to a supervised run: no external resources, and clo
         return data
 
 
-def finish(root, run_id, *, providers=(), returncode=None, reason=None, expected_report=None):
+def finish(root, run_id, *, providers=(), returncode=None, stop=None, expected_report=None):
     """收尾一個 worker 已在 supervise 之外結束的模型執行。 / Finalize a model run whose worker already ended outside
     supervise."""
-    return supervision.finalize(root, run_id, ModelRun(root, run_id, providers, expected_report), stop=reason,
+    return supervision.finalize(root, run_id, ModelRun(root, run_id, providers, expected_report), stop=stop,
                                 returncode=returncode)
 
 
@@ -164,7 +164,7 @@ def recover(root, run_id, marker):
 Reap a model run whose owner died: close its evidence as CANCELLED and remove its run state through the same
     finalization protocol.
     """
-    return supervision.recover(root, run_id, marker, ModelRun(root, run_id))
+    supervision.recover(root, run_id, marker, ModelRun(root, run_id))
 
 
 def model_worker_environment(environ, providers):

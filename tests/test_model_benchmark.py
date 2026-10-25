@@ -222,7 +222,7 @@ def test_cancelled_collection_keeps_all_planned_cases_in_analysis(tmp_path, monk
         task.cancel()
         assert await task == 1
     asyncio.run(cancel())
-    data = life.finish(tmp_path, report['run_id'], reason='CANCELLED', expected_report=report)
+    data = life.finish(tmp_path, report['run_id'], stop='CANCELLED', expected_report=report)
     assert data['status'] == 'CANCELLED' and data['cleanup']['completed']
     assert data['analysis']['provider_metrics']['gemini']['unavailable'] == 2
 
