@@ -264,6 +264,7 @@ MultiAgentEpsilon/
 ├── .env.example
 ├── .gitattributes
 ├── .gitignore
+├── CODING_STANDARDS.md
 ├── GLOSSARY.md
 ├── README.md
 ├── SECURITY.md
