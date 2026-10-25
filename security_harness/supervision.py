@@ -217,7 +217,7 @@ class PlanMismatch(ValueError):
     """worker 報告與 supervisor 的計畫不同。 / The worker's report differs from the supervisor's plan."""
 
 
-class SupervisedRun:
+class _SupervisedRun:
     """一次受監督執行的狀態：收到的訊號、結束原因、例外型別與群組停止結果。
 
 The state of one supervised run: signals received, the stop reason, the exception type
@@ -261,7 +261,7 @@ Start the worker through the gate, release it only after durable registration, w
                     break
                 time.sleep(0.02)
         except Exception as exc:
-            self.reason, self.error_type = 'ERROR', type(exc).__name__
+            self.reason, self.error_type = 'SUPERVISOR_FAILED', type(exc).__name__
         finally:
             self.stop()
 
@@ -281,7 +281,7 @@ Start the worker through the gate, release it only after durable registration, w
             except subprocess.TimeoutExpired:
                 # 群組終止後仍存活的 worker 不可略過後續收尾。 / A worker that outlives its group kill must not skip
                 # finalization.
-                self.reason = self.reason or 'ERROR'
+                self.reason = self.reason or 'SUPERVISOR_FAILED'
                 self.error_type = self.error_type or 'TimeoutExpired'
                 process.kill()
                 try:
@@ -299,7 +299,7 @@ Start the worker through the gate, release it only after durable registration, w
 
 
 @contextmanager
-def supervised_run(root, run_id, operation, max_seconds, ceiling):
+def _supervised_run(root, run_id, operation, max_seconds, ceiling):
     """驗證期限、建立並持久登記執行，於收尾期間安裝訊號處理器；離開時還原。
 
 Validate the deadline, create and durably register the run, and keep signal handlers
@@ -308,7 +308,7 @@ Validate the deadline, create and durably register the run, and keep signal hand
     if (type(max_seconds) not in (int, float) or not math.isfinite(max_seconds)
             or not 0 < max_seconds <= ceiling):
         raise ValueError('invalid supervisor deadline')
-    run = SupervisedRun(root, run_id, prepare_run(root, run_id, operation), max_seconds)
+    run = _SupervisedRun(root, run_id, prepare_run(root, run_id, operation), max_seconds)
     handlers = {}
     try:
         for signum in (signal.SIGTERM, signal.SIGINT):
@@ -423,14 +423,13 @@ Run the worker in one supervised run and finalize it. Return the role's final cl
     close(evidence, outcome). close runs first with a blocking checkpoint and then with the final outcome, so it must
     derive everything from those two arguments.
     """
-    with supervised_run(root, run_id, role.operation, max_seconds, role.ceiling) as run:
+    with _supervised_run(root, run_id, role.operation, max_seconds, role.ceiling) as run:
         run.run(command, env)
 
         def stopped():
             # 最早觀察到的停止原因不被改寫；worker 自行結束後才收到的訊號仍阻止發布成功。 / The first stop reason
             # observed is never rewritten; a signal after the worker exited on its own still keeps success unpublished.
-            reason = 'SUPERVISOR_FAILED' if run.reason == 'ERROR' else run.reason
-            return reason or ('CANCELLED' if run.cancelled else None)
+            return run.reason or ('CANCELLED' if run.cancelled else None)
 
         with cleanup_lock(run.work) as locked:
             return close_run(root, run_id, role, locked, stopped, returncode=run.returncode,

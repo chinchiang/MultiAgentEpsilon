@@ -1,12 +1,11 @@
 """使用共用執行清冊管理模型 supervisor 與復原，不使用 Docker。
 
 Model supervisor and recovery using the shared run inventory, without Docker."""
-import json
+import copy
 import os
-import shutil
 
-from ..supervision import (child_environment, cleanup_lock, persist, plan_digest as fields_digest, run_directory,
-                           stop_registered, supervised_run, temporary_directory)
+from .. import supervision
+from ..supervision import child_environment, persist, plan_digest as fields_digest
 from .gateway import ModelError
 from .transport import strict_json
 
@@ -78,98 +77,94 @@ def complete_worker_report(data, providers, returncode):
             all(c.get('status') == 'SUCCESS' for c in calls))
 
 
-def finish(root, run_id, *, providers=(), returncode=None, reason=None, recovered=False, cancelled=None, expected_report=None):
-    work = run_directory(root, run_id)
-    report = root / 'artifacts' / run_id / 'report.json'
-    cleanup_error = None
-    try:
-        stop_registered(work)
-    except Exception as exc:
-        cleanup_error = type(exc).__name__
-    # 群組停止後，worker 才無法繼續覆寫證據。 / Workers can no longer overwrite evidence after their groups are stopped.
-    data = read_report(root, run_id)
-    try:
-        completed = cleanup_error is None and reason is None and complete_worker_report(data, providers, returncode)
-    except (TypeError, AttributeError):
-        completed = False
-    previous_status = data.get('status')
-    data.pop('pending_status', None)
-    data.update(status='INCOMPLETE', cleanup={'completed': False, 'recovered_by_janitor': recovered})
-    if reason:
-        data['code'] = reason
-    for check in data.get('checks', []):
-        if check.get('status') == 'RUNNING':
-            check.update(status='CANCELLED' if reason == 'CANCELLED' else 'ERROR', code=reason or 'WORKER_FAILED')
-    if data.get('task') == 'blind-review' or (expected_report or {}).get('task') == 'blind-review':
+class ModelRun:
+    """model 角色在受監督執行中的宣告：不建立外部資源，並把 worker 報告關成評估證據。
+
+What the model role declares to a supervised run: no external resources, and closing the worker's report into the
+    evaluation evidence.
+    """
+    operation, ceiling = 'model-smoke', MAX_TOTAL_SECONDS
+
+    def __init__(self, root, run_id, providers=(), expected_report=None):
+        self.root, self.run_id = root, run_id
+        self.providers, self.expected_report = list(providers), expected_report
+
+    def release(self, run_id):
+        """模型執行不使用 Docker 或其他外部資源。 / Model runs use no Docker or other external resource."""
+
+    def read(self):
+        return read_report(self.root, self.run_id)
+
+    def close(self, evidence, outcome):
+        data, expected_report = copy.deepcopy(evidence), self.expected_report
+        reason = outcome.stop
         try:
-            from .benchmark_score import summarize
-            data['analysis'] = summarize(data, (expected_report or {}).get('plan'))
-            # 盲審 worker 也綁定 supervisor 交付的不可變計畫、預算與請求摘要。 / Blind-review workers are bound to
-            # the supervisor's immutable plan, budget and request digests too.
-            if expected_report is not None and plan_digest(data) != plan_digest(expected_report):
-                raise ValueError('blind review differs from the supervisor plan')
-        except Exception:
+            completed = outcome.kind == 'EXITED' and complete_worker_report(data, self.providers, outcome.returncode)
+        except (TypeError, AttributeError):
             completed = False
-            data.update(analysis=None, code='EVALUATION_INVALID')
-    elif expected_report is not None:
-        # Smoke worker 也綁定 supervisor 不可變計畫與限額。 / Smoke workers are bound to the supervisor's immutable plan and limits too.
-        calls = data.get('calls', [])
-        reservations_valid = (type(data.get('reserved_calls')) is int and
-            type(data.get('reserved_output_tokens')) is int and
-            all(type(c.get('reserved')) is bool and c.get('reserved') is True and
-                type(c.get('reserved_output_tokens')) is int and
-                c['reserved_output_tokens'] == expected_report['max_output_tokens_per_call'] for c in calls) and
-            data['reserved_calls'] == len(calls) and
-            data['reserved_output_tokens'] == len(calls) * expected_report['max_output_tokens_per_call'])
-        if smoke_plan_digest(data) != smoke_plan_digest(expected_report) or not reservations_valid:
-            completed = False
-            data['code'] = 'EVALUATION_INVALID'
-    try:
-        if cleanup_error:
-            raise RuntimeError('process cleanup failed')
-        temp = temporary_directory(run_id)
-        if work.is_symlink() or temp.is_symlink():
-            raise ValueError('invalid model run directory')
-        if temp.exists():
-            shutil.rmtree(temp)
-        # 移除復原清冊前，先保存阻擋狀態的檢查點。 / Persist a blocking checkpoint before removing the recovery inventory.
-        persist(report, data)
-        shutil.rmtree(work)
-    except Exception as exc:
-        cleanup_error = cleanup_error or type(exc).__name__
-    data['cleanup'].update(completed=cleanup_error is None, error_type=cleanup_error,
-                           process_groups_terminated=cleanup_error is None,
-                           temporary_directory_removed=not temporary_directory(run_id).exists(),
-                           run_directory_removed=not work.exists())
-    if cancelled:
-        reason = 'CANCELLED'
-    if cleanup_error:
-        data.update(status='ERROR', code='CLEANUP_FAILED')
-    elif reason in ('CANCELLED', 'TIMEOUT'):
-        data.update(status=reason, code=reason)
-    elif completed:
-        data.update(status='COMPLETE', code=None)
-    elif returncode == 2:
-        # exit 2 表示 worker 讀回的計畫與命令列摘要不符，一次呼叫都沒發。 / Exit 2 means the plan the worker read back
-        # did not match the digest on its command line, and it made no call.
-        data.update(status='INCOMPLETE', code='EVALUATION_INVALID')
-    else:
-        data.update(status='INCOMPLETE', code=data.get('code') or
-                    ('WORKER_FAILED' if previous_status != 'AWAITING_CLEANUP' else 'PROVIDER_INCOMPLETE'))
-    persist(report, data)
-    return data
+        previous_status = data.get('status')
+        data.pop('pending_status', None)
+        data.update(status='INCOMPLETE', cleanup=outcome.cleanup)
+        if reason:
+            data['code'] = reason
+        for check in data.get('checks', []):
+            if check.get('status') == 'RUNNING':
+                check.update(status='CANCELLED' if reason == 'CANCELLED' else 'ERROR', code=reason or 'WORKER_FAILED')
+        if data.get('task') == 'blind-review' or (expected_report or {}).get('task') == 'blind-review':
+            try:
+                from .benchmark_score import summarize
+                data['analysis'] = summarize(data, (expected_report or {}).get('plan'))
+                # 盲審 worker 也綁定 supervisor 交付的不可變計畫、預算與請求摘要。 / Blind-review workers are bound to
+                # the supervisor's immutable plan, budget and request digests too.
+                if expected_report is not None and plan_digest(data) != plan_digest(expected_report):
+                    raise ValueError('blind review differs from the supervisor plan')
+            except Exception:
+                completed = False
+                data.update(analysis=None, code='EVALUATION_INVALID')
+        elif expected_report is not None:
+            # Smoke worker 也綁定 supervisor 不可變計畫與限額。 / Smoke workers are bound to the supervisor's immutable plan and limits too.
+            calls = data.get('calls', [])
+            reservations_valid = (type(data.get('reserved_calls')) is int and
+                type(data.get('reserved_output_tokens')) is int and
+                all(type(c.get('reserved')) is bool and c.get('reserved') is True and
+                    type(c.get('reserved_output_tokens')) is int and
+                    c['reserved_output_tokens'] == expected_report['max_output_tokens_per_call'] for c in calls) and
+                data['reserved_calls'] == len(calls) and
+                data['reserved_output_tokens'] == len(calls) * expected_report['max_output_tokens_per_call'])
+            if smoke_plan_digest(data) != smoke_plan_digest(expected_report) or not reservations_valid:
+                completed = False
+                data['code'] = 'EVALUATION_INVALID'
+        if outcome.kind == 'CLEANUP_FAILED':
+            data.update(status='ERROR', code='CLEANUP_FAILED')
+        elif reason in ('CANCELLED', 'TIMEOUT'):
+            data.update(status=reason, code=reason)
+        elif completed:
+            data.update(status='COMPLETE', code=None)
+        elif outcome.returncode == 2:
+            # exit 2 表示 worker 讀回的計畫與命令列摘要不符，一次呼叫都沒發。 / Exit 2 means the plan the worker read back
+            # did not match the digest on its command line, and it made no call.
+            data.update(status='INCOMPLETE', code='EVALUATION_INVALID')
+        else:
+            data.update(status='INCOMPLETE', code=data.get('code') or
+                        ('WORKER_FAILED' if previous_status != 'AWAITING_CLEANUP' else 'PROVIDER_INCOMPLETE'))
+        persist(self.root / 'artifacts' / self.run_id / 'report.json', data)
+        return data
+
+
+def finish(root, run_id, *, providers=(), returncode=None, reason=None, expected_report=None):
+    """收尾一個 worker 已在 supervise 之外結束的模型執行。 / Finalize a model run whose worker already ended outside
+    supervise."""
+    return supervision.finalize(root, run_id, ModelRun(root, run_id, providers, expected_report), stop=reason,
+                                returncode=returncode)
 
 
 def recover(root, run_id, marker):
-    """回收擁有者已死亡的模型執行：停止登記的群組、以 CANCELLED 收尾證據並移除執行狀態。
+    """回收擁有者已死亡的模型執行：經同一套收尾協定以 CANCELLED 關閉證據並移除執行狀態。
 
-Reap a model run whose owner died: stop its registered groups, close its evidence as
-    CANCELLED and remove its run state.
+Reap a model run whose owner died: close its evidence as CANCELLED and remove its run state through the same
+    finalization protocol.
     """
-    data = finish(root, run_id, reason='CANCELLED', recovered=True)
-    if not data['cleanup']['completed']:
-        raise RuntimeError('model cleanup incomplete')
-    return True
+    return supervision.recover(root, run_id, marker, ModelRun(root, run_id))
 
 
 def model_worker_environment(environ, providers):
@@ -184,13 +179,5 @@ The model worker's environment: basic process, proxy and CA variables plus the
 
 def supervise(root, report, command, max_seconds):
     run_id = report['run_id']
-    with supervised_run(root, run_id, 'model-smoke', max_seconds, MAX_TOTAL_SECONDS) as run:
-        run.run(command, model_worker_environment(os.environ, set(report['providers'])))
-        # 模型證據把監督程序例外歸為固定分類。 / Model evidence files supervisor exceptions under one fixed code.
-        reason = 'SUPERVISOR_FAILED' if run.reason == 'ERROR' else run.reason
-        with cleanup_lock(run.work) as locked:
-            if not locked:
-                raise RuntimeError('model cleanup lock unavailable')
-            return finish(root, run_id, providers=report['providers'], returncode=run.returncode,
-                          reason='CANCELLED' if run.cancelled else reason, cancelled=run.cancelled,
-                          expected_report=report)
+    return supervision.supervise(root, run_id, ModelRun(root, run_id, report['providers'], report), command,
+                                 model_worker_environment(os.environ, set(report['providers'])), max_seconds)
