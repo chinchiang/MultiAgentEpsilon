@@ -2,6 +2,7 @@
 
 Documentation checker regressions: anchors, links, stale tree, monolingual docstrings
 and candidate mode."""
+import re
 import subprocess
 
 import pytest
@@ -104,3 +105,43 @@ def test_stale_svg_labels_are_reported(tmp_path):
     root = repo(tmp_path, base_files(**{"docs/d.mmd": 'flowchart TB\n    A["新標籤<br/>New label"]\n',
                                          "docs/d.svg": svg}))
     assert any("SVG not regenerated" in e for e in errors(root))
+
+
+
+GLOSSARY = ("中文說明\n<a id=\"zh-tw\"></a>\n**讀取**：\n說明。\n"
+            "_避免_：唯讀 client、復原清冊、子程序執行、交接（單獨使用時）、判定、`gh api`\n"
+            "<a id=\"en\"></a>\n**Reader**:\nText.\n"
+            "_Avoid_: read-only client, recovery inventory, handoff (on its own), verdict, `gh api`\n")
+MODULE = ("\"\"\"模組說明。\n\nA Read-Only\nclient for one repository.\"\"\"\n"
+          "value = \"read-only client\"  # 字串值不算 / a string value is not prose\n"
+          "read_only_client = 1\n"
+          "# 改用唯讀 client 讀取，先寫復原清冊。 / Read through it\n"
+          "# into the recovery\n"
+          "# inventory first.\n"
+          "def reader():\n    \"\"\"讀取判定與交接。 / Not a read-only clientele, nor gh api or a verdict.\"\"\"\n")
+
+
+def test_avoided_glossary_terms_in_comments_and_docstrings_are_reported_at_the_matching_line(tmp_path):
+    # 只檢查能機械判斷的詞：多字詞與四字以上的中文詞；單字詞、標了情境或以反引號標示的條目留給審查者。 / Only
+    # terms a check can judge: multi-word terms and Chinese terms of four or more characters. Single words, qualified
+    # entries and entries marked with backticks are left to the reviewer.
+    root = repo(tmp_path, base_files(**{"GLOSSARY.md": GLOSSARY, "tool.py": MODULE}))
+    assert sorted(e for e in errors(root) if "avoided glossary term" in e) == sorted([
+        "tool.py:3: avoided glossary term / 名詞表避用詞 read-only client",
+        "tool.py:7: avoided glossary term / 名詞表避用詞 唯讀 client",
+        "tool.py:7: avoided glossary term / 名詞表避用詞 復原清冊",
+        "tool.py:8: avoided glossary term / 名詞表避用詞 recovery inventory"])
+
+
+def test_without_avoid_lists_nothing_is_reported(tmp_path):
+    root = repo(tmp_path, base_files(**{"tool.py": MODULE}))
+    assert not [e for e in errors(root) if "avoided glossary term" in e]
+
+
+def test_every_term_in_the_real_glossary_keeps_a_parsable_avoid_list():
+    # 名詞表格式改變時避用詞會靜默變空、檢查照樣通過，所以每個條目都要有讀得到的「避免」行。 / A changed glossary
+    # format would silently empty the avoided terms and let the check pass, so every entry keeps a readable avoid line.
+    lines = (check_docs.ROOT / "GLOSSARY.md").read_text(encoding="utf-8").splitlines()
+    entries = [line for line in lines if re.fullmatch(r"\*\*[^*]+\*\*[：:]", line)]
+    assert entries and len(entries) == sum(bool(check_docs.AVOID_LINE.match(line)) for line in lines)
+    assert check_docs.avoided_terms(check_docs.ROOT)
