@@ -5,13 +5,11 @@ and recovery after its owner died."""
 import copy
 import json
 import os
-import shutil
 import time
 from datetime import datetime, timedelta, timezone
 from . import supervision
-from .results import required_gate_kinds
-from .supervision import (PlanMismatch, child_environment, current_boot, plan_changed, plan_digest, run_directory,
-                          stop_registered, temporary_directory)
+from .results import EVIDENCE_VERSION, SUBJECT_FORMAT, required_gate_kinds
+from .supervision import PlanMismatch, child_environment, plan_changed, plan_digest
 
 # 遠大於 RoE 的 120 秒執行上限。 / Well beyond the RoE's 120-second run limit.
 ORPHAN_CONTAINER_AGE = timedelta(minutes=10)
@@ -22,26 +20,6 @@ MAX_TOTAL_SECONDS = 600
 def remove_run_containers(run_id):
     from .isolation import cleanup_run
     cleanup_run(run_id)
-
-
-def cleanup(root, run_id, remove_containers=remove_run_containers):
-    # CLI 終止後，daemon 仍可能正在完成請求。 / The daemon may still be finishing a request when its CLI is terminated.
-    for _ in range(3):
-        remove_containers(run_id)
-        time.sleep(0.1)
-    work = run_directory(root, run_id)
-    if work.exists():
-        if work.is_symlink():
-            raise ValueError('run directory must not be a symlink')
-        marker = json.loads((work / 'owner.json').read_text())
-        if marker['run_id'] != run_id or marker['uid'] != os.getuid():
-            raise ValueError('run ownership mismatch')
-        temporary = temporary_directory(run_id)
-        if temporary.is_symlink():
-            raise ValueError('temporary directory must not be a symlink')
-        if temporary.exists():
-            shutil.rmtree(temporary)
-        shutil.rmtree(work)
 
 
 def remove_orphan_containers(root):
@@ -59,33 +37,6 @@ def remove_orphan_containers(root):
            and (c['Config']['Labels'] or {}).get('epsilon.run') not in live]
     if old:
         isolation.docker('rm', '--force', *old, timeout=30)
-
-
-def recover(root, run_id, marker):
-    """回收擁有者已死亡的 security 執行：停止登記的群組、清除容器與執行狀態，並以 CANCELLED 收尾證據。
-
-Reap a security run whose owner died: stop its registered groups, remove its containers
-    and run state, and close its evidence as CANCELLED.
-    """
-    work = run_directory(root, run_id)
-    same_boot = marker['boot'] == current_boot()
-    stop_registered(work)
-    cleanup(root, run_id)
-    report = root / 'artifacts' / run_id / 'report.json'
-    if report.exists():
-        from .audit import AuditRun
-        audit = AuditRun.__new__(AuditRun)
-        audit.output = report.parent
-        audit.data = json.loads(report.read_text())
-        audit.data.update(execution='CANCELLED', decision='BLOCK', reasons=['orphaned supervisor reaped'],
-                          cleanup={'completed': True, 'recovered_by_janitor': True,
-                                   'run_directory_removed': not work.exists(),
-                                   'temporary_directory_removed': not temporary_directory(run_id).exists(),
-                                   'process_group_terminated': True, 'error_type': None,
-                                   'boot_changed': not same_boot})
-        # 回收舊執行不可覆寫較新執行的索引。 / A reaped old run must not displace the index of a newer run.
-        audit.finish(required_gate_kinds(root), update_pointer=False)
-    return True
 
 
 # supervisor 在放行 worker 前決定的計畫欄位；worker 報告中的這些欄位必須與 supervisor 持有的值相同。
@@ -114,17 +65,16 @@ The security worker's environment: the base environment plus the docker configur
     return child_environment(environ, SECURITY_WORKER_EXTRA)
 
 
-class SecurityRun:
-    """security 角色在受監督執行中的宣告：清除這次執行的容器，並把 worker 報告關成發布用的證據。
+class SecurityContainers:
+    """security 角色在接縫上的外部資源：這次執行的容器，正常收尾與 janitor 回收都經過這裡清除。
 
-What the security role declares to a supervised run: remove the run's containers, and close the worker's report
-    into the evidence that is published.
+The security role's external resources at the seam: the run's containers, removed here on both live finalization
+    and janitor recovery.
     """
     operation, ceiling = 'security', MAX_TOTAL_SECONDS
 
-    def __init__(self, root, audit, remove_containers=remove_run_containers):
-        self.root, self.audit, self.remove_containers = root, audit, remove_containers
-        self.planned = {key: audit.data.get(key) for key in SECURITY_IMMUTABLE}
+    def __init__(self, root, run_id, remove_containers=remove_run_containers):
+        self.root, self.run_id, self.remove_containers = root, run_id, remove_containers
 
     def release(self, run_id):
         # CLI 終止後，daemon 仍可能正在完成請求。 / The daemon may still be finishing a request when its CLI is terminated.
@@ -132,9 +82,57 @@ What the security role declares to a supervised run: remove the run's containers
             self.remove_containers(run_id)
             time.sleep(0.1)
 
+    def report_path(self):
+        return self.root / 'artifacts' / self.run_id / 'report.json'
+
+    def load(self):
+        """讀回 worker 最後原子保存的報告；無法解析時回傳 None 與例外型別。 / Read back the worker's last atomically
+        persisted report; when it cannot be parsed, return None and the exception type."""
+        try:
+            data = json.loads(self.report_path().read_text())
+            if not isinstance(data, dict) or data.get('run_id') != self.run_id:
+                raise ValueError('invalid evidence identity')
+            return data, None
+        except (OSError, ValueError) as exc:
+            return None, type(exc).__name__
+
+
+def closed(data, outcome):
+    """關閉證據的共同部分：不留待定結果，帶上清理紀錄；回傳被移除的待定判定與執行狀態。
+
+The part of closing shared by both security closes: no pending result stays and the cleanup record is attached.
+    Return the pending decision and execution that were removed.
+    """
+    pending = data.pop('pending_decision', None), data.pop('pending_execution', None)
+    data['cleanup'] = outcome.cleanup
+    return pending
+
+
+def block_unless_cleaned(data, outcome):
+    if outcome.kind == supervision.CLEANUP_FAILED:
+        data.update(execution='ERROR', decision='BLOCK', reasons=['cleanup incomplete'])
+
+
+class SecurityRun(SecurityContainers):
+    """security 角色在受監督執行中的宣告：清除這次執行的容器，並把 worker 報告關成發布用的證據。
+
+What the security role declares to a supervised run: remove the run's containers, and close the worker's report
+    into the evidence that is published.
+    """
+
+    def __init__(self, root, audit, remove_containers=remove_run_containers):
+        super().__init__(root, audit.data['run_id'], remove_containers)
+        self.audit = audit
+        self.planned = {key: audit.data.get(key) for key in SECURITY_IMMUTABLE}
+
     def read(self):
-        # 讀取 worker 最後原子保存的進度，不使用父程序舊副本。 / Read the worker's last atomically persisted progress, not a stale parent copy.
-        return json.loads((self.audit.output / 'report.json').read_text())
+        data, error_type = self.load()
+        if data is None:
+            # 報告無法讀回時，以 supervisor 持有的副本關成阻擋證據，不讓執行卡住。 / When the report cannot be read
+            # back, close the supervisor's own copy as blocking evidence instead of stranding the run.
+            data = copy.deepcopy(self.audit.data)
+            data['errors'].append({'stage': 'supervisor', 'error_type': error_type})
+        return data
 
     def close(self, evidence, outcome):
         audit = self.audit
@@ -143,11 +141,9 @@ What the security role declares to a supervised run: remove the run's containers
         # the supervisor actually used, never values the worker changed.
         changed = plan_changed(audit.data, self.planned)
         audit.data.update(self.planned)
-        # 關閉後的證據不留待定結果，即使它沒有被採用。 / Closed evidence keeps no pending result, even one not adopted.
-        pending = audit.data.pop('pending_decision', None)
-        execution = audit.data.pop('pending_execution', None)
+        pending, execution = closed(audit.data, outcome)
         finalized = False
-        if (outcome.kind == 'EXITED' and not changed and outcome.returncode in (0, 1)
+        if (outcome.kind == supervision.EXITED and not changed and outcome.returncode in (0, 1)
                 and audit.data['execution'] == 'AWAITING_CLEANUP' and pending in ('ALLOW', 'BLOCK')):
             finalized = True
             if outcome.returncode != (0 if pending == 'ALLOW' else 1):
@@ -155,11 +151,10 @@ What the security role declares to a supervised run: remove the run's containers
             else:
                 audit.data['decision'] = pending
                 audit.data['execution'] = 'COMPLETED' if execution == 'RUNNING' else execution
-        audit.data['cleanup'] = outcome.cleanup
         if outcome.error_type:
             # 保留監督程序例外型別，不保存例外文字。 / Keep the supervisor's exception type, never its text.
             audit.data['errors'].append({'stage': 'supervisor', 'error_type': outcome.error_type})
-        reason = 'ERROR' if outcome.stop == 'SUPERVISOR_FAILED' else outcome.stop
+        reason = 'ERROR' if outcome.stop == supervision.SUPERVISOR_FAILED else outcome.stop
         if reason:
             stage = audit.data['stage']
             kinds = dict(required_gate_kinds(self.root))
@@ -171,10 +166,9 @@ What the security role declares to a supervised run: remove the run's containers
             # the digest on its command line.
             audit.fail(PlanMismatch('worker report differs from the plan'))
         elif not finalized:
-            # 只有完成清理交接後才能發布 worker 判定。 / Only the cleanup-gated handoff may publish a worker decision.
+            # 只有完成清理交接後才能發布 worker 判定。 / Only the cleanup handoff may publish a worker decision.
             audit.fail(RuntimeError('worker did not complete'))
-        if outcome.kind == 'CLEANUP_FAILED':
-            audit.data.update(execution='ERROR', decision='BLOCK', reasons=['cleanup incomplete'])
+        block_unless_cleaned(audit.data, outcome)
         audit.data['total_seconds'] = outcome.seconds
         # 檢查點也更新最新指標，指標永遠指向已關閉的證據。 / The checkpoint moves the latest pointer too, so it always
         # names closed evidence.
@@ -184,3 +178,46 @@ What the security role declares to a supervised run: remove the run's containers
 def supervise(root, audit, command, max_seconds, remove_containers=remove_run_containers):
     return supervision.supervise(root, audit.data['run_id'], SecurityRun(root, audit, remove_containers), command,
                                  security_worker_environment(os.environ), max_seconds)
+
+
+class SecurityRecovery(SecurityContainers):
+    """擁有者已死亡的 security 執行：同樣清除容器，證據一律以取消關閉，且不移動最新指標。
+
+A security run whose owner died: its containers are removed the same way, its evidence is always closed as
+    cancelled, and the latest pointer stays where it is.
+    """
+
+    def read(self):
+        if not self.report_path().exists():
+            return None
+        data, error_type = self.load()
+        if data is None:
+            # 無法解析的證據換成阻擋用的替代證據，janitor 才不會每輪都卡在同一次執行。 / Unparsable evidence is
+            # replaced by blocking evidence, so the janitor does not stall on the same run every sweep.
+            data = {'schema_version': EVIDENCE_VERSION, 'subject_digest_format': SUBJECT_FORMAT,
+                    'run_id': self.run_id, 'operation': 'security', 'created_at': None, 'subject_digest': None,
+                    'policy_digest': None, 'records': [], 'stage': 'janitor',
+                    'errors': [{'stage': 'janitor', 'error_type': error_type}]}
+        return data
+
+    def close(self, evidence, outcome):
+        if evidence is None:
+            return None
+        from .audit import AuditRun
+        audit = AuditRun.__new__(AuditRun)
+        audit.output = self.report_path().parent
+        audit.data = copy.deepcopy(evidence)
+        closed(audit.data, outcome)
+        audit.data.update(execution='CANCELLED', decision='BLOCK', reasons=['orphaned supervisor reaped'])
+        block_unless_cleaned(audit.data, outcome)
+        # 回收舊執行不可覆寫較新執行的索引。 / A reaped old run must not displace the index of a newer run.
+        return audit.finish(required_gate_kinds(self.root), update_pointer=False)
+
+
+def recover(root, run_id, marker):
+    """回收擁有者已死亡的 security 執行：經同一套收尾協定停止群組、清除容器與執行狀態，並以取消關閉證據。
+
+Reap a security run whose owner died: stop its groups, remove its containers and run state, and close its evidence
+    as cancelled, through the same finalization protocol.
+    """
+    supervision.recover(root, run_id, marker, SecurityRecovery(root, run_id))

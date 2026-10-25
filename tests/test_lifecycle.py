@@ -109,14 +109,13 @@ raise SystemExit(supervise(root,audit,[sys.executable,str(root/'worker.py'),sys.
 
 
 def test_janitor_never_reaps_live_supervisor(tmp_path, monkeypatch):
-    from security_harness.lifecycle import cleanup
-    from security_harness.supervision import prepare_run
-    monkeypatch.setattr(isolation, 'cleanup_run', lambda run: None)
+    from security_harness.supervision import prepare_run, remove_run
+    monkeypatch.setattr(isolation, 'docker', FakeDocker())
     audit = AuditRun(tmp_path, 'security')
     work = prepare_run(tmp_path, audit.data['run_id'], 'security')
     assert sweep_stale(tmp_path) == []
     assert work.exists()
-    cleanup(tmp_path, audit.data['run_id'])
+    remove_run(tmp_path, audit.data['run_id'])
 
 
 @pytest.mark.parametrize('execution,code', [('COMPLETED', 0), ('ERROR', 1), ('CANCELLED', 0)])
@@ -192,6 +191,67 @@ raise SystemExit(supervise(root,audit,worker,10,lambda run_id: None))
     assert not (tmp_path / '.state/runs' / run_id).exists() and not temporary_directory(run_id).exists()
 
 
+HANDOFF = [sys.executable, '-c', 'import json,sys; p=sys.argv[1]; d=json.load(open(p)); '
+           'd["records"]=[{"gate": g, "execution": "COMPLETED"} for g in ("G1", "G2", "AUTH")]; '
+           'd.update(execution="AWAITING_CLEANUP", decision="BLOCK", reasons=[], pending_decision="ALLOW", '
+           'pending_execution="RUNNING"); json.dump(d, open(p, "w"))']
+
+
+def test_container_cleanup_failure_blocks_a_completed_handoff(tmp_path):
+    audit = AuditRun(tmp_path, 'security')
+    def stuck(run_id):
+        raise subprocess.CalledProcessError(1, ['docker', 'rm'], stderr='sensitive docker diagnostics')
+    assert supervise(tmp_path, audit, [*HANDOFF, str(audit.output / 'report.json')], 10, stuck) == 1
+    assert (audit.data['execution'], audit.data['decision']) == ('ERROR', 'BLOCK')
+    assert audit.data['reasons'][0] == 'cleanup incomplete' and 'pending_decision' not in audit.data
+    assert audit.data['cleanup']['error_type'] == 'CalledProcessError' and not audit.data['cleanup']['completed']
+    assert (tmp_path / '.state/runs' / audit.data['run_id']).exists()
+    assert 'sensitive' not in (audit.output / 'report.json').read_text()
+    supervision.remove_run(tmp_path, audit.data['run_id'])
+
+
+def test_supervisor_failure_is_recorded_as_an_error_with_its_type_only(tmp_path):
+    from security_harness.lifecycle import SecurityRun
+    from security_harness.supervision import Outcome
+    audit = AuditRun(tmp_path, 'security')
+    audit.stage('G1')
+    cleanup = {'completed': True, 'error_type': None, 'temporary_directory_removed': True,
+               'run_directory_removed': True, 'process_group_terminated': True, 'recovered_by_janitor': False}
+    role = SecurityRun(tmp_path, audit, no_containers)
+    assert role.close(role.read(), Outcome('SUPERVISOR_FAILED', None, 'TypeError', cleanup, 0.5)) == 1
+    assert (audit.data['execution'], audit.data['decision']) == ('ERROR', 'BLOCK')
+    assert audit.data['reasons'][0] == 'supervisor error'
+    assert {'stage': 'supervisor', 'error_type': 'TypeError'} in audit.data['errors']
+    assert audit.data['records'][0]['gate'] == 'G1' and audit.data['records'][0]['execution'] == 'ERROR'
+
+
+@pytest.mark.parametrize('content', ['not json', '[]', '{"run_id": "another-run"}'])
+def test_unreadable_worker_report_is_closed_as_blocking_and_cleaned(tmp_path, content):
+    audit = AuditRun(tmp_path, 'security')
+    report = audit.output / 'report.json'
+    command = [sys.executable, '-c', 'import sys; open(sys.argv[1], "w").write(sys.argv[2])', str(report), content]
+    assert supervise(tmp_path, audit, command, 10, no_containers) == 1
+    data = json.loads(report.read_text())
+    assert (data['run_id'], data['execution'], data['decision']) == (audit.data['run_id'], 'ERROR', 'BLOCK')
+    assert {'stage': 'supervisor', 'error_type': 'JSONDecodeError' if content == 'not json' else 'ValueError'} in \
+        data['errors']
+    assert data['cleanup']['completed'] and not (tmp_path / '.state/runs' / audit.data['run_id']).exists()
+
+
+def test_janitor_replaces_unparsable_security_evidence_instead_of_stalling(tmp_path, monkeypatch):
+    monkeypatch.setattr(isolation, 'docker', FakeDocker())
+    stale = AuditRun(tmp_path, 'security')
+    supervision.prepare_run(tmp_path, stale.data['run_id'], 'security')
+    (stale.output / 'report.json').write_text('private raw failure must not be copied')
+    monkeypatch.setattr(supervision, 'owner_alive', lambda marker: False)
+    assert sweep_stale(tmp_path) == [stale.data['run_id']]
+    data = json.loads((stale.output / 'report.json').read_text())
+    assert (data['run_id'], data['execution'], data['decision']) == (stale.data['run_id'], 'CANCELLED', 'BLOCK')
+    assert {'stage': 'janitor', 'error_type': 'JSONDecodeError'} in data['errors']
+    assert data['cleanup']['completed'] and 'private raw' not in (stale.output / 'report.json').read_text()
+    assert sweep_stale(tmp_path) == []
+
+
 def test_worker_that_refuses_the_plan_is_recorded_as_a_plan_mismatch(tmp_path, monkeypatch):
     audit = AuditRun(tmp_path, 'security')
     assert supervise(tmp_path, audit, [sys.executable, '-c', 'raise SystemExit(2)'], 10, no_containers) == 1
@@ -237,7 +297,7 @@ def test_security_worker_is_registered_durably_before_it_runs(tmp_path, monkeypa
 
 
 def test_janitor_stops_the_registered_worker_group_of_a_dead_security_supervisor(tmp_path, monkeypatch):
-    monkeypatch.setattr(isolation, 'cleanup_run', lambda run: None)
+    monkeypatch.setattr(isolation, 'docker', FakeDocker())
     audit = AuditRun(tmp_path, 'security')
     work = supervision.prepare_run(tmp_path, audit.data['run_id'], 'security')
     worker = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(60)'], start_new_session=True)
@@ -254,7 +314,7 @@ def test_janitor_stops_the_registered_worker_group_of_a_dead_security_supervisor
 
 
 def test_janitor_keeps_latest_pointer_on_the_newer_run(tmp_path, monkeypatch):
-    monkeypatch.setattr(isolation, 'cleanup_run', lambda run: None)
+    monkeypatch.setattr(isolation, 'docker', FakeDocker())
     stale = AuditRun(tmp_path, 'security')
     supervision.prepare_run(tmp_path, stale.data['run_id'], 'security')
     newer = AuditRun(tmp_path, 'security')
@@ -275,7 +335,11 @@ class FakeDocker:
 
     def __call__(self, *args, check=True, timeout=45):
         if args[:2] == ('ps', '-aq') and 'label=epsilon.isolated=true' in args:
-            out = ''.join(i + '\n' for i in self.containers)
+            # 與 docker 相同，指定 epsilon.run 標籤時只列出該次執行的容器。 / Like docker, an epsilon.run label filter
+            # lists only that run's containers.
+            runs = [a.removeprefix('label=epsilon.run=') for a in args if a.startswith('label=epsilon.run=')]
+            out = ''.join(i + '\n' for i, c in self.containers.items()
+                          if not runs or (c['Config']['Labels'] or {}).get('epsilon.run') in runs)
         elif args[0] == 'inspect':
             out = json.dumps([self.containers[i] for i in args[1:]])
         elif args[:2] == ('rm', '--force'):
@@ -310,21 +374,18 @@ def test_janitor_keeps_a_young_container_that_another_checkout_may_own(tmp_path,
 
 
 def test_janitor_keeps_an_old_container_of_a_live_run(tmp_path, monkeypatch):
-    from security_harness.lifecycle import cleanup
-    from security_harness.supervision import prepare_run
-    monkeypatch.setattr(isolation, 'cleanup_run', lambda run: None)
+    from security_harness.supervision import prepare_run, remove_run
     audit = AuditRun(tmp_path, 'security')
     prepare_run(tmp_path, audit.data['run_id'], 'security')
     fake = FakeDocker(container('live', audit.data['run_id'], minutes_old=11))
     monkeypatch.setattr(isolation, 'docker', fake)
     assert sweep_stale(tmp_path) == []
     assert fake.removed == []
-    cleanup(tmp_path, audit.data['run_id'])
+    remove_run(tmp_path, audit.data['run_id'])
 
 
 def test_janitor_reports_a_failed_container_sweep_without_losing_reaped_runs(tmp_path, monkeypatch):
     from security_harness.janitor import SweepIncomplete
-    monkeypatch.setattr(isolation, 'cleanup_run', lambda run: None)
     stale = AuditRun(tmp_path, 'security')
     supervision.prepare_run(tmp_path, stale.data['run_id'], 'security')
     monkeypatch.setattr(supervision, 'owner_alive', lambda marker: False)
@@ -333,6 +394,26 @@ def test_janitor_reports_a_failed_container_sweep_without_losing_reaped_runs(tmp
         sweep_stale(tmp_path)
     assert raised.value.cleaned == [stale.data['run_id']]
     assert raised.value.failures == [{'containers': 'epsilon.isolated', 'error_type': 'CalledProcessError'}]
+
+
+def test_janitor_keeps_a_security_run_whose_containers_cannot_be_removed(tmp_path, monkeypatch):
+    stale = AuditRun(tmp_path, 'security')
+    run_id = stale.data['run_id']
+    work = supervision.prepare_run(tmp_path, run_id, 'security')
+    monkeypatch.setattr(supervision, 'owner_alive', lambda marker: False)
+    monkeypatch.setattr(isolation, 'docker', FakeDocker(container('owned', run_id, minutes_old=1), rm_fails=True))
+    with pytest.raises(RuntimeError, match='^stale run cleanup incomplete$'):
+        sweep_stale(tmp_path)
+    data = json.loads((stale.output / 'report.json').read_text())
+    assert (data['execution'], data['decision'], data['reasons'][0]) == ('ERROR', 'BLOCK', 'cleanup incomplete')
+    assert data['cleanup']['error_type'] == 'CalledProcessError' and data['cleanup']['recovered_by_janitor']
+    assert work.exists()
+    fake = FakeDocker(container('owned', run_id, minutes_old=1))
+    monkeypatch.setattr(isolation, 'docker', fake)
+    assert sweep_stale(tmp_path) == [run_id]
+    data = json.loads((stale.output / 'report.json').read_text())
+    assert data['execution'] == 'CANCELLED' and data['cleanup']['completed'] and 'owned' in fake.removed
+    assert not work.exists() and not temporary_directory(run_id).exists()
 
 
 def test_required_gates_follow_the_trusted_policy(tmp_path):

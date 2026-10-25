@@ -129,10 +129,12 @@ def test_core_janitor_does_not_signal_a_reused_pid_after_reboot(tmp_path, monkey
         'pid': os.getpid(), 'start': supervision.identity(os.getpid()), 'boot': 'earlier-boot', 'uid': os.getuid(),
         'role': 'worker'})
     monkeypatch.setattr(supervision, 'terminate_group', lambda pid: pytest.fail('must not signal another boot'))
-    monkeypatch.setattr(isolation, 'cleanup_run', lambda run: None)
+    from tests.test_lifecycle import FakeDocker
+    monkeypatch.setattr(isolation, 'docker', FakeDocker())
     assert sweep_stale(tmp_path) == [audit.data['run_id']]
     data = json.loads((audit.output / 'report.json').read_text())
     assert data['cleanup']['completed'] and data['cleanup']['boot_changed']
+    assert data['cleanup']['recovered_by_janitor'] and data['execution'] == 'CANCELLED'
 
 
 @pytest.mark.parametrize('mode,expected', [(0o700, 0o111), (0o710, 0o111), (0o744, 0o111),
