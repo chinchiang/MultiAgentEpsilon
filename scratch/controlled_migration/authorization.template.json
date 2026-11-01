@@ -1,0 +1,21 @@
+{
+  "repository": "chinchiang/MultiAgentEpsilon",
+  "pr": 64,
+  "ruleset_id": 24512048,
+  "expected_head_sha": "f7e424b47fed9e4a27d10b2f73b3a6e3278508b7",
+  "expected_base_sha": "469ce1850177703bd022a7d65a841dac7dc01994",
+  "authorized": false,
+  "approved_by": "chinchiang",
+  "approval_reference": "",
+  "maintenance_freeze_confirmed": false,
+  "backup_recovery_confirmed": false,
+  "backup_operator": "",
+  "expires_at": 0,
+  "plan_sha256": "d3caf9f811c2d2996ed312d072e9729f564fa4261e25a664ae9aac93a79049ed",
+  "tools_sha256": {
+    "migration.py": "68badcc1793e38c3a01d2d2452f054e94c41e51f9784c173639db36ef9fb73d8",
+    "command.py": "feb8a24c8c26de718f5ebe2bcc71bc703ec2530a5bcd3408fe3e2763d8e51d03",
+    "github_adapter.py": "ef993f47f0c958591e49c33d1e73fe3ecd89bb7ad18ad52612e23a7640326d0e",
+    "runtime.py": "45c8782c14a3345c7bcc99df02e18164a143987680db64961231d081f9ce2f67"
+  }
+}

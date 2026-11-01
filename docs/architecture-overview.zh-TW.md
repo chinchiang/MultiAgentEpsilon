@@ -137,6 +137,20 @@ MultiAgentEpsilon/
 ├── fixture_app/
 │   ├── __init__.py
 │   └── app.py
+├── scratch/
+│   ├── certifi-controlled-migration-20261102/
+│   │   └── reference-ruleset.json
+│   └── controlled_migration/
+│       ├── README.zh-TW.md
+│       ├── authorization.template.json
+│       ├── command.py
+│       ├── github_adapter.py
+│       ├── migration.py
+│       ├── mutation-success.fixture.json
+│       ├── runtime.py
+│       ├── test_github.py
+│       ├── test_migration.py
+│       └── test_runtime.py
 ├── scripts/
 │   ├── __init__.py
 │   ├── audit_merge_protection.py
