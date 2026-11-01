@@ -13,7 +13,7 @@ if __name__ == "__main__":
     sys.path.insert(0, str(ROOT))
 from security_harness.github_readonly import GitHubReader, ReadOnlyGitHub
 from security_harness.results import write_json
-from security_harness.trusted_publisher import GITHUB_ACTIONS_APP_ID as ACTIONS_APP_ID
+from security_harness.github_trust import GITHUB_ACTIONS_APP_ID as ACTIONS_APP_ID
 
 
 def codeowners_reviewers(text):

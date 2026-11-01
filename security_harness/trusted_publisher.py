@@ -17,7 +17,6 @@ import stat
 import subprocess
 import time
 import tempfile
-import urllib.parse
 import zipfile
 from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
@@ -25,13 +24,12 @@ from xml.etree import ElementTree
 
 from .github_http import Denied, GitHub, need, strict_json
 from .github_readonly import GitHubReader
+from .github_trust import (GITHUB_ACTIONS_APP_ID, GitHubTrust, head_scope, identities, run_scope, validate_review,
+                           validate_run_base as validate_run_base)
 from .inputs import excluded
 from .limits import LIMITS
 from .results import EVIDENCE_VERSION, decide, seeded_defects, validate_cases, validate_policy
 
-# 共用 GitHub Actions App；同名檢查不能單憑此 ID 證明來源。 / The shared GitHub Actions App; this ID alone
-# never proves which workflow produced a same-named check.
-GITHUB_ACTIONS_APP_ID = 15368
 GUARD_SCHEMA_VERSION = 2
 # 冷快取時每個來源檔需要一次 blob 請求，預算須高於檔案上限。 / A cold cache costs one blob request per source
 # file, so the call budget must exceed the file ceiling.
@@ -99,32 +97,6 @@ def validate_pr(pr, settings):
          and pr["base"]["ref"] == settings["base_branch"], "PR_REPOSITORY")
     need(pr["base"]["sha"] == settings["evaluator_sha"], "BASE_NOT_APPROVED")
     need(SHA.fullmatch(pr["head"]["sha"]), "CANDIDATE_SHA")
-
-
-def validate_review(pr, reviews, permissions, settings, excluded):
-    """excluded 包含接觸 head 的 run actor 與提交作者／提交者；這些自報或事件範圍身分只能移除核准，真實推送者仍以規則集原生最後推送核准為準。
-
-excluded: identities that touched the head (run actors, commit author/committer).
-    They are self-asserted or event-scoped, so they may only remove approvals; the
-    ruleset's native last-push approval stays authoritative for the actual pusher."""
-    latest = {}
-    ids = set()
-    for review in sorted(reviews, key=lambda r: r["id"]):
-        need(type(review["id"]) is int and review["id"] not in ids, "REVIEW_ID")
-        ids.add(review["id"])
-        if review["state"] in ("APPROVED", "DISMISSED", "CHANGES_REQUESTED"):
-            latest[review["user"]["login"]] = review
-    allowed = []
-    for login, review in latest.items():
-        role = permissions.get(login)
-        need(role in ("read", "triage", "write", "maintain", "admin"), "REVIEW_PERMISSION_UNKNOWN")
-        capable = role in ("write", "maintain", "admin")
-        need(not (capable and review["state"] == "CHANGES_REQUESTED"), "CHANGES_REQUESTED")
-        if (login in settings["reviewers"] and login != pr["user"]["login"] and login not in excluded
-                and capable and review["state"] == "APPROVED" and review["commit_id"] == pr["head"]["sha"]):
-            allowed.append(review["id"])
-    need(bool(allowed), "INDEPENDENT_APPROVAL_MISSING")
-    return allowed
 
 
 REQUIRED_STEPS = ("Record evaluator-owned CI provenance", "Check protected changes and exact-head independent approval",
@@ -350,78 +322,6 @@ def head_runs(reader, settings, head):
                         key="workflow_runs")
 
 
-def identities(*people):
-    return {p["login"] for p in people if isinstance(p, dict) and isinstance(p.get("login"), str)}
-
-
-def head_scope(pr):
-    head = pr["head"]
-    return head.get("sha"), (head.get("repo") or {}).get("id"), head.get("ref")
-
-
-def run_scope(run):
-    return run.get("head_sha"), (run.get("head_repository") or {}).get("id"), run.get("head_branch")
-
-
-def related_pull_path(prefix, pr):
-    repo = (pr["head"].get("repo") or {}).get("full_name", "")
-    need(re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", repo), "PR_HEAD_REPOSITORY")
-    owner = repo.split("/")[0]
-    return prefix + "/pulls?state=all&head=" + urllib.parse.quote(owner + ":" + pr["head"]["ref"], safe="")
-
-
-def run_base_history(reader, pr, pulls):
-    return {p["number"]: reader.items(f"issues/{p['number']}/timeline")
-            for p in pulls if head_scope(p) == head_scope(pr)}
-
-
-def validate_run_base(run, pr, pull_requests, base_branch, histories=None):
-    """不信任 run 自報證據，將 pull_request_target 綁定此 PR 的 base。現況不能證明歷史 workflow；相同 head／repo／branch 曾改 base 即拒絕，包括來回切換與重跑，時間戳不能證明排隊事件來源。可用新 head 分支開新 PR，timeline 必須是完整 API 資料。
-
-Bind a pull_request_target run to this PR's base without trusting run evidence.
-
-    Current PR state cannot prove historical workflow source. Without a signed
-    source identity, any base-retargeted PR sharing this exact head/repo/branch is
-    refused, including later reruns and retarget-away-and-back. Creation timestamps
-    alone cannot establish which queued event supplied a workflow. A new PR on a
-    new head branch can be evaluated normally. Timelines must be complete API data.
-    """
-    head = pr["head"]["sha"]
-    need(run.get("head_sha") == head, "RUN_SHA")
-    head_repo = (pr["head"].get("repo") or {}).get("id")
-    need(head_repo is not None and run.get("head_branch") == pr["head"].get("ref")
-         and (run.get("head_repository") or {}).get("id") == head_repo, "RUN_HEAD_BRANCH")
-    need(isinstance(pull_requests, list) and any(p.get("number") == pr["number"] for p in pull_requests),
-         "PR_LISTING_INCOMPLETE")
-    relevant = [p for p in pull_requests if head_scope(p) == head_scope(pr)]
-    need(any(p["number"] == pr["number"] for p in relevant), "PR_LISTING_INCOMPLETE")
-    need(all(p["base"]["ref"] == base_branch and p["base"]["repo"]["id"] == pr["base"]["repo"]["id"]
-             for p in relevant), "FOREIGN_BASE_PR")
-    need(isinstance(histories, dict), "BASE_HISTORY_MISSING")
-    for p in relevant:
-        events = histories.get(p["number"])
-        need(isinstance(events, list) and all(isinstance(e, dict) and isinstance(e.get("event"), str)
-                                             for e in events), "BASE_HISTORY_MISSING")
-        need(not any(e["event"] == "base_ref_changed" for e in events), "BASE_RETARGETED_UNVERIFIABLE")
-    # 關聯 PR 快照若存在，只能進一步限縮信任。 / Associated PR snapshots, when present, may only constrain trust further.
-    for linked in run.get("pull_requests", []):
-        if linked.get("number") == pr["number"] and linked.get("base"):
-            need(linked["base"].get("ref") == base_branch, "RUN_ORIGINAL_BASE")
-
-
-PR_COMMIT_LIMIT = 250  # GitHub 每個 PR 最多列出 250 個 commits。 / GitHub lists at most 250 commits for a pull request.
-
-
-def pr_commit_identities(commits, head):
-    """GitHub 歸屬於任一 PR commit 的帳號屬自報資料，只用來排除核准；曾提交先前 commit 的審查者不獨立。
-
-Accounts GitHub attributes any PR commit to. Self-asserted, so only ever used to
-    exclude approvers: a reviewer who pushed earlier commits is not independent."""
-    need(isinstance(commits, list) and 0 < len(commits) < PR_COMMIT_LIMIT, "PR_COMMITS_TRUNCATED")
-    need(all(isinstance(c, dict) for c in commits) and commits[-1].get("sha") == head, "PR_COMMITS_HEAD")
-    return set().union(*(identities(c.get("author"), c.get("committer")) for c in commits))
-
-
 def open_config(path, owner_uid):
     """逐層開啟可信目錄 descriptor；僅保護檔案擁有者，無法防止可寫上層目錄或中途符號連結的替換。
 
@@ -524,19 +424,11 @@ def collect(client, settings, number, run_id, gate_policy, blob_cache=None):
     advertised_digest = artifact.get("digest")
     need(advertised_digest == "sha256:" + hashlib.sha256(raw).hexdigest(), "ARTIFACT_DIGEST")
     verify_artifact_attestation(reader, settings, run, raw)
-    reviews = reader.items(f"pulls/{number}/reviews")
-    logins = {r["user"]["login"] for r in reviews if r["state"] in ("APPROVED", "DISMISSED", "CHANGES_REQUESTED")}
-    permissions = {login: reader.get(f"collaborators/{urllib.parse.quote(login, safe='')}/permission")["role_name"] for login in logins}
-    twins = reader.items(related_pull_path("", pr).lstrip("/"))
-    need([p["number"] for p in twins if p["state"] == "open" and head_scope(p) == head_scope(pr)] == [number], "SHARED_PR_HEAD")
-    validate_run_base(run, pr, twins, settings["base_branch"], run_base_history(reader, pr, twins))
-    commit = reader.get(f"commits/{head}")
-    commit_identities = (identities(commit.get("author"), commit.get("committer"))
-                         | pr_commit_identities(reader.items(f"pulls/{number}/commits"), head))
+    evidence = GitHubTrust(reader).publication_review(number, pr, run, settings["base_branch"])
     subject = remote_subject(reader, head, blob_cache)
-    proof = validate_bundle(settings, gate_policy, pr, run, runs, jobs, unpack_evidence(raw), reviews,
-                            permissions, subject, datetime.now(timezone.utc), commit_identities)
-    proof["excluded_identities"] = sorted(commit_identities)
+    proof = validate_bundle(settings, gate_policy, pr, run, runs, jobs, unpack_evidence(raw), evidence.reviews,
+                            evidence.permissions, subject, datetime.now(timezone.utc), evidence.commit_identities)
+    proof["excluded_identities"] = sorted(evidence.commit_identities)
     return proof
 
 
@@ -586,16 +478,11 @@ Publish one completed check only when the verified outcome changes.
         run = reader.get(f"actions/runs/{run_id}")
         need(run["run_attempt"] == proof["run_attempt"] and run["status"] == "completed"
              and run["conclusion"] == "success" and run["head_sha"] == head, "RUN_CHANGED")
-        twins = reader.items(related_pull_path("", fresh).lstrip("/"))
-        validate_run_base(run, fresh, twins, settings["base_branch"], run_base_history(reader, fresh, twins))
+        trust = GitHubTrust(reader)
+        trust.run_base(fresh, settings["base_branch"]).validate(run)
         reject_newer_runs(run, head_runs(reader, settings, head), head)
-        reviews = reader.items(f"pulls/{number}/reviews")
-        # 每個帳號只查一次，重複審查不會耗盡呼叫預算。 / One lookup per login, so repeated reviews cannot exhaust the call budget.
-        logins = {r["user"]["login"] for r in reviews if r["state"] in ("APPROVED", "DISMISSED", "CHANGES_REQUESTED")}
-        permissions = {login: reader.get(f"collaborators/{urllib.parse.quote(login, safe='')}/permission")["role_name"]
-                       for login in logins}
         excluded = identities(run.get("actor"), run.get("triggering_actor")) | set(proof["excluded_identities"])
-        need(validate_review(fresh, reviews, permissions, settings, excluded) == proof["review_ids"], "REVIEW_CHANGED")
+        need(trust.review_ids(number, fresh, settings["reviewers"], excluded) == proof["review_ids"], "REVIEW_CHANGED")
         conclusion, code = "success", "VERIFIED"
     except Denied as exc:
         if str(exc) in THROTTLED:
