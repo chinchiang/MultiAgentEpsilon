@@ -24,15 +24,15 @@ class GitHubAdapter:
         self.merge_sent = True
         return self.transport.request('PUT', 'pulls/64/merge', {'sha': head, 'merge_method': 'merge'})
 
-    def read_ruleset(self):
-        raw = self.transport.request('GET', 'rulesets/24512048')
+    def read_ruleset(self, *, recovery=False, deadline=None, clock=None):
+        raw = self.transport.request('GET', 'rulesets/24512048', recovery=recovery, deadline=deadline, clock=clock)
         return {k: raw[k] for k in FIELDS}
 
 
-    def observe(self):
+    def observe(self, *, deadline=None, clock=None):
         from security_harness.trusted_publisher import validate_review, validate_run_base, unpack_evidence
-        get = lambda path, **kwargs: self.transport.request('GET', path, **kwargs)
-        items = self.transport.items
+        get = lambda path, **kwargs: self.transport.request('GET', path, deadline=deadline, clock=clock, **kwargs)
+        items = lambda path, key=None: self.transport.items(path, key=key, deadline=deadline, clock=clock)
         need(get('user')['login'] == 'chinchiang', 'IDENTITY')
         need(get('collaborators/chinchiang/permission')['permission'] == 'admin', 'ADMIN_REQUIRED')
         pr = get('pulls/64')
@@ -45,7 +45,7 @@ class GitHubAdapter:
         rules = items('rulesets?includes_parents=true')
         need(len(rules) == 1 and rules[0]['id'] == 24512048, 'OTHER_RULESETS')
         need(get('branches/main/protection', allow_404=True) is None, 'LEGACY_PROTECTION')
-        rule = self.read_ruleset()
+        rule = self.read_ruleset(deadline=deadline, clock=clock)
         normalized = {**deepcopy(rule), 'enforcement': 'active'}
         need(normalized == self.reference, 'RULE_DRIFT')
         comparison = get(f'compare/{base}...{head}')
@@ -187,6 +187,7 @@ import shutil
 import sys
 from urllib.parse import urlsplit, unquote
 from uuid import uuid4
+import time
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 from security_harness.processes import bounded_output
@@ -208,7 +209,7 @@ class GhTransport:
         self.env.update(GH_PROMPT_DISABLED='1', GH_NO_UPDATE_NOTIFIER='1', GH_HOST='github.com')
         self.calls = 0
 
-    def request(self, method, path, payload=None, *, binary=False, allow_404=False):
+    def request(self, method, path, payload=None, *, binary=False, allow_404=False, recovery=False, deadline=None, clock=None):
         parts = urlsplit(path)
         need(not parts.scheme and not parts.netloc and not path.startswith('/') and not parts.fragment
              and '..' not in unquote(parts.path).split('/') and '\\' not in path, 'DESTINATION')
@@ -217,9 +218,10 @@ class GhTransport:
             need(self.write_enabled, 'WRITE_NOT_AUTHORIZED')
             need(path in ('rulesets/24512048', 'pulls/64/merge'), 'WRITE_SCOPE')
         need(method == 'PUT' or payload is None, 'READ_PAYLOAD')
+        need(not recovery or (method == 'GET' and path == 'rulesets/24512048'), 'RECOVERY_READ_SCOPE')
         self.calls += 1
-        # 只限制讀取；恢復寫入不得因一般讀取預算耗盡而遭拒。
-        need(method == 'PUT' or self.calls <= 1500, 'READ_BUDGET')
+        # 必要恢復讀回與恢復寫入都不能因一般查核預算耗盡而遭拒。
+        need(method == 'PUT' or recovery or self.calls <= 1500, 'READ_BUDGET')
         endpoint = 'user' if path == 'user' else 'repos/' + SCOPE['repository'] + '/' + path
         command = [self.gh, 'api', '--hostname', 'github.com', '--method', method,
                    '--header', 'Accept: application/vnd.github+json',
@@ -234,7 +236,13 @@ class GhTransport:
             raw = json.dumps(payload, separators=(',', ':')).encode()
         if allow_404:
             command = ['/bin/sh', '-c', '"$@"; exit 0', 'migration-http', *command]
-        response = self.runner(command, raw, timeout=12, limit=16*1024**2 if binary else 2*1024**2, env=self.env)
+        clock = clock or time
+        remaining = 12 if deadline is None else min(12, deadline-clock.monotonic())
+        if remaining <= 0:
+            raise TimeoutError('MERGE_WINDOW_EXPIRED')
+        response = self.runner(command, raw, timeout=remaining, limit=16*1024**2 if binary else 2*1024**2, env=self.env)
+        if deadline is not None and clock.monotonic() >= deadline:
+            raise TimeoutError('MERGE_WINDOW_EXPIRED')
         if allow_404:
             head, separator, body = response.replace(b'\r\n', b'\n').partition(b'\n\n')
             status = re.match(rb'HTTP/\S+ (\d{3})', head)
@@ -256,11 +264,11 @@ class GhTransport:
                 print('RECOVERY_HTTP_JOURNAL_UNAVAILABLE', file=sys.stderr, flush=True)
         return response if binary else strict_json(response)
 
-    def items(self, path, key=None):
+    def items(self, path, key=None, *, deadline=None, clock=None):
         result, totals = [], []
         for page in range(1, 102):
             separator = '&' if '?' in path else '?'
-            value = self.request('GET', path + separator + f'per_page=100&page={page}')
+            value = self.request('GET', path + separator + f'per_page=100&page={page}', deadline=deadline, clock=clock)
             if key:
                 totals.append(value['total_count'])
                 value = value[key]

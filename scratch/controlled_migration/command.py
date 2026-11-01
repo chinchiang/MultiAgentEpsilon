@@ -10,7 +10,7 @@ import stat
 import sys
 import time
 from uuid import uuid4
-from migration import FIELDS, SCOPE, run, assess_outcome
+from migration import FIELDS, SCOPE, run, assess_outcome, preflight_valid
 from github_adapter import GhTransport, GitHubAdapter, ROOT, need, strict_json
 from runtime import Journal, ProcessLock, ProtectedRemote, sync_json, termination_guard, recovery_signals
 
@@ -76,7 +76,7 @@ def recover(remote, original):
         while True:
             try:
                 remote.set_ruleset(original)
-                if remote.read_ruleset() == original:
+                if remote.read_ruleset(recovery=True) == original:
                     return {'status': 'RESTORED', 'restored': True, 'accepted': False}
                 print('RECOVERY_READBACK_MISMATCH', file=sys.stderr, flush=True)
             except KeyboardInterrupt:
@@ -117,7 +117,9 @@ def main(argv=None, *, workspace=ROOT, transport_factory=GhTransport):
                 journal = Journal(state/('readonly-'+uuid4().hex[:12]))
                 remote = GitHubAdapter(transport_factory(write_enabled=False, evidence=journal), plan['expected_ruleset'])
                 if args.preflight:
-                    return output({'status': 'READ_ONLY', 'evidence': remote.observe(), 'remote_writes': 0,
+                    snapshot = remote.observe()
+                    need(preflight_valid(snapshot) and snapshot['ruleset'] == plan['expected_ruleset'], 'PREFLIGHT_DRIFT')
+                    return output({'status': 'READ_ONLY', 'evidence': snapshot, 'remote_writes': 0,
                                    'evidence_directory': str(journal.directory)})
                 need(remote.read_ruleset() == plan['expected_ruleset'], 'PROTECTION_NOT_RESTORED')
                 value = remote.inspect_outcome()
@@ -153,7 +155,7 @@ def main(argv=None, *, workspace=ROOT, transport_factory=GhTransport):
                 if attempted:
                     result = recover(remote, saved)
                 else:
-                    restored = remote.read_ruleset() == saved
+                    restored = remote.read_ruleset(recovery=True) == saved
                     result = {'status': 'RESTORED' if restored else 'RECOVERY_REQUIRED',
                               'restored': restored, 'accepted': False, 'remote_writes': 0}
             else:

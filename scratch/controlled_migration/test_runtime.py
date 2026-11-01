@@ -216,3 +216,16 @@ def test_duplicate_authorization_fields_are_rejected_before_transport(tmp_path, 
     assert main(['--execute', '--authorization', str(receipt)], workspace=tmp_path,
                 transport_factory=lambda **kwargs: calls.append(kwargs)) != 0
     assert calls == []
+
+
+def test_preflight_rejects_disabled_protection_without_remote_writes(tmp_path, capsys):
+    from command import main
+    from test_github import repository
+    workspace_with_receipt(tmp_path)
+    transport = repository()
+    transport.responses[('GET', 'rulesets/24512048')] = {**RULE, 'enforcement': 'disabled'}
+    code = main(['--preflight'], workspace=tmp_path, transport_factory=lambda **kwargs: transport)
+    result = json.loads(capsys.readouterr().out)
+    assert code == 2
+    assert result['status'] == 'BLOCKED'
+    assert all(method == 'GET' for method, _, _ in transport.requests)

@@ -64,10 +64,11 @@ def run(plan, remote, *, execute=False, authorization=None, clock=None):
     try:
         result['remote_writes'] += 1
         remote.set_ruleset(disabled)
-        disabled_readback = remote.read_ruleset()
+        deadline = started + 60
+        disabled_readback = remote.read_ruleset(deadline=deadline, clock=clock)
         if {k: disabled_readback[k] for k in FIELDS} != disabled:
             raise RuntimeError('DISABLE_READBACK_DRIFT')
-        refreshed = remote.observe()
+        refreshed = remote.observe(deadline=deadline, clock=clock)
         normalized = deepcopy(refreshed)
         normalized['ruleset']['enforcement'] = 'active'
         if not preflight_valid(normalized) or {k: normalized['ruleset'][k] for k in FIELDS} != original:
@@ -86,7 +87,7 @@ def run(plan, remote, *, execute=False, authorization=None, clock=None):
                 try:
                     result['remote_writes'] += 1
                     remote.set_ruleset(original)
-                    readback = remote.read_ruleset()
+                    readback = remote.read_ruleset(recovery=True)
                     result['restored'] = {k: readback[k] for k in FIELDS} == original
                     if not result['restored']:
                         raise RuntimeError('RESTORE_READBACK_DRIFT')

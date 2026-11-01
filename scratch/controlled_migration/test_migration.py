@@ -58,14 +58,14 @@ class GitHub(Remote):
                          'review_valid': True, 'guard_valid': True,
                          'other_protection_absent': True,
                          'only_expected_lock_diff': True, 'ruleset': deepcopy(RULE)}
-    def observe(self):
+    def observe(self, **kwargs):
         self.events.append('observe')
         return deepcopy(self.snapshot)
     def set_ruleset(self, payload):
         self.writes.append(deepcopy(payload))
         self.events.append(payload['enforcement'])
         self.rule = deepcopy(payload)
-    def read_ruleset(self):
+    def read_ruleset(self, **kwargs):
         return deepcopy(self.rule)
     def merge(self, head):
         self.writes.append({'merge': head})
@@ -127,13 +127,13 @@ def test_uncertain_or_changed_state_restores_before_inspection(failure):
                     raise TimeoutError('response lost after side effect')
                 if failure == 'cutoff':
                     clock.seconds = 60
-        def observe(self):
-            snapshot = super().observe()
+        def observe(self, **kwargs):
+            snapshot = super().observe(**kwargs)
             if self.writes and failure == 'drift':
                 snapshot['expected_base_sha'] = 'd' * 40
             return snapshot
-        def read_ruleset(self):
-            value = super().read_ruleset()
+        def read_ruleset(self, **kwargs):
+            value = super().read_ruleset(**kwargs)
             if value['enforcement'] == 'disabled' and failure == 'readback_drift':
                 value['rules'] = []
             return value
@@ -214,8 +214,8 @@ def test_all_verified_evidence_allows_acceptance():
 
 def test_live_state_adapter_can_report_disabled_ruleset_during_window():
     class CurrentState(GitHub):
-        def observe(self):
-            value = super().observe()
+        def observe(self, **kwargs):
+            value = super().observe(**kwargs)
             value['ruleset'] = deepcopy(self.rule)
             return value
     result = run(PLAN, CurrentState(), execute=True, authorization=consent(), clock=Clock())
@@ -245,10 +245,10 @@ def test_cli_refuses_live_execution_instead_of_inventing_authorization():
 @pytest.mark.parametrize('phase', ['preflight', 'outcome'])
 def test_unavailable_read_evidence_is_reported_without_new_remote_mutations(phase):
     class MissingEvidence(GitHub):
-        def observe(self):
+        def observe(self, **kwargs):
             if phase == 'preflight':
                 raise TimeoutError('cannot establish preconditions')
-            return super().observe()
+            return super().observe(**kwargs)
         def inspect_outcome(self):
             raise TimeoutError('CI evidence unavailable')
     remote = MissingEvidence()
@@ -279,8 +279,8 @@ def test_failed_ci_is_failed_acceptance_with_protection_kept_active():
 def test_restore_readback_mismatch_is_repaired_before_inspection():
     class StaleReadback(GitHub):
         bad_read = True
-        def read_ruleset(self):
-            value = super().read_ruleset()
+        def read_ruleset(self, **kwargs):
+            value = super().read_ruleset(**kwargs)
             if value['enforcement'] == 'active' and self.bad_read:
                 self.bad_read = False
                 value['rules'] = []
@@ -304,8 +304,8 @@ def test_rules_changed_since_review_stop_before_disable():
 def test_authorization_expiring_during_preflight_prevents_disable():
     clock = Clock()
     class SlowPreflight(GitHub):
-        def observe(self):
-            snapshot = super().observe()
+        def observe(self, **kwargs):
+            snapshot = super().observe(**kwargs)
             clock.time = lambda: 1800000300
             return snapshot
     remote = SlowPreflight()

@@ -58,8 +58,8 @@ def archive(files):
 
 
 class Repository(Transport):
-    def items(self, path, key=None):
-        return self.request('GET', path)
+    def items(self, path, key=None, **kwargs):
+        return self.request('GET', path, **kwargs)
 
 
 def repository():
@@ -240,3 +240,108 @@ def test_transport_saves_raw_evidence_without_credential_values(tmp_path):
     record = next(event for event in events if event['event'] == 'github_response')
     assert record['path'] == 'rulesets/24512048'
     assert json.loads((journal.directory/record['file']).read_bytes()) == {'id': 24512048}
+
+
+def test_recovery_readback_survives_exhausted_ordinary_read_budget():
+    from github_adapter import GhTransport
+    calls = []
+    def runner(command, payload, **kwargs):
+        calls.append(command)
+        return json.dumps(RULE).encode()
+    transport = GhTransport(write_enabled=True, runner=runner)
+    adapter = GitHubAdapter(transport, RULE)
+    for _ in range(1500):
+        transport.request('GET', 'user')
+    with pytest.raises(ValueError, match='READ_BUDGET'):
+        transport.request('GET', 'user')
+    adapter.set_ruleset(RULE)
+    assert adapter.read_ruleset(recovery=True) == RULE
+    assert len(calls) == 1502
+    with pytest.raises(ValueError, match='READ_BUDGET'):
+        adapter.read_ruleset()
+
+
+def test_slow_post_disable_evidence_reads_restore_at_shared_deadline():
+    from github_adapter import GhTransport
+    from migration import run
+    from test_migration import Clock, consent
+    from urllib.parse import urlsplit, parse_qsl, urlencode
+    clock = Clock()
+    data = repository().responses
+    reads, restores, merge_requests = [], [], []
+    prefix = 'repos/chinchiang/MultiAgentEpsilon/'
+    def runner(command, payload, **kwargs):
+        method = command[command.index('--method')+1]
+        endpoint = next(arg for arg in command if arg.startswith(prefix) or arg == 'user')
+        path = endpoint.removeprefix(prefix)
+        parts = urlsplit(path)
+        query = [(k, v) for k, v in parse_qsl(parts.query) if k not in ('per_page', 'page')]
+        path = parts.path + ('?'+urlencode(query, safe=':/') if query else '')
+        rule_key = ('GET', 'rulesets/24512048')
+        if method == 'PUT':
+            value = json.loads(payload)
+            if path == 'rulesets/24512048':
+                data[rule_key] = value
+                if value['enforcement'] == 'active':
+                    restores.append(clock.monotonic())
+            elif path == 'pulls/64/merge':
+                merge_requests.append(value)
+            return b'{}'
+        if data[rule_key]['enforcement'] == 'disabled':
+            reads.append({'time': clock.monotonic(), 'timeout': kwargs['timeout']})
+            clock.seconds += min(11, kwargs['timeout'])
+        value = data[(method, path)]
+        if path == 'branches/main/protection':
+            return b'HTTP/2 404\r\n\r\n{"message":"Branch not protected"}'
+        if isinstance(value, bytes):
+            return value
+        if isinstance(value, list):
+            key = 'workflow_runs' if '/runs?' in path else 'jobs' if path.endswith('/jobs') else 'artifacts' if path.endswith('/artifacts') else None
+            if key:
+                value = {'total_count': len(value), key: value}
+        return json.dumps(value).encode()
+    adapter = GitHubAdapter(GhTransport(write_enabled=True, runner=runner), RULE)
+    result = run(PLAN, adapter, execute=True, authorization=consent(), clock=clock)
+    assert result['restored'] is True
+    assert result['accepted'] is False
+    assert restores == [60]
+    assert reads and all(read['time'] < 60 for read in reads)
+    assert reads[-1]['timeout'] == 5
+    assert merge_requests == []
+
+
+@pytest.mark.parametrize('operation', ['pagination', 'artifact'])
+def test_shared_deadline_bounds_pagination_and_artifact_download(operation):
+    from github_adapter import GhTransport
+    from test_migration import Clock
+    clock = Clock()
+    clock.seconds = 55
+    timeouts = []
+    def runner(command, payload, **kwargs):
+        timeouts.append(kwargs['timeout'])
+        clock.seconds += min(4, kwargs['timeout'])
+        return json.dumps([{'id': i} for i in range(100)]).encode() if operation == 'pagination' else b'archive'
+    transport = GhTransport(runner=runner)
+    if operation == 'pagination':
+        with pytest.raises(TimeoutError, match='MERGE_WINDOW_EXPIRED'):
+            transport.items('pulls/64/reviews', deadline=60, clock=clock)
+        assert timeouts == [5, 1]
+    else:
+        assert transport.request('GET', 'actions/artifacts/8/zip', binary=True, deadline=60, clock=clock) == b'archive'
+        with pytest.raises(TimeoutError, match='MERGE_WINDOW_EXPIRED'):
+            transport.request('GET', 'actions/artifacts/9/zip', binary=True, deadline=60, clock=clock)
+        assert timeouts == [5, 1]
+    assert clock.monotonic() == 60
+    with pytest.raises(TimeoutError):
+        transport.request('GET', 'user', deadline=60, clock=clock)
+    assert timeouts == [5, 1]
+
+
+@pytest.mark.parametrize('method,path', [('GET', 'user'), ('GET', 'pulls/64'), ('PUT', 'rulesets/24512048')])
+def test_recovery_budget_exemption_is_limited_to_exact_ruleset_get(method, path):
+    from github_adapter import GhTransport
+    calls = []
+    transport = GhTransport(write_enabled=True, runner=lambda *args, **kwargs: calls.append(args))
+    with pytest.raises(ValueError, match='RECOVERY_READ_SCOPE'):
+        transport.request(method, path, recovery=True)
+    assert calls == []

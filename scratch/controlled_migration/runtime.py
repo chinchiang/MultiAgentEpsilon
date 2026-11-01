@@ -69,8 +69,8 @@ class ProtectedRemote:
         self.remote, self.journal = remote, journal
         self.saved = False
 
-    def observe(self):
-        snapshot = self.remote.observe()
+    def observe(self, **kwargs):
+        snapshot = self.remote.observe(**kwargs)
         if not self.saved:
             self.journal.save('recovery.json', {'ruleset': snapshot['ruleset']})
             self.original = snapshot['ruleset']
@@ -95,8 +95,8 @@ class ProtectedRemote:
             if not restoring:
                 raise
 
-    def read_ruleset(self):
-        value = self.remote.read_ruleset()
+    def read_ruleset(self, **kwargs):
+        value = self.remote.read_ruleset(**kwargs)
         try:
             self.journal.record('ruleset_readback', ruleset=value)
         except OSError:

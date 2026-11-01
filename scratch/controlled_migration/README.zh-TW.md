@@ -27,7 +27,7 @@
 
 沿用既有 GitHub CLI credential store，不搜尋、不讀取或匯出 token，不呼叫登入功能，也不接受任意主機。刻意移除 `GH_TOKEN`／`GITHUB_TOKEN` 等注入變數，避免意外換用其他身分；若原環境只有環境變數認證，將停止並要求另外處理。登入身分須為 `chinchiang` 且具管理權限。
 
-前置查核（preflight）檢查 main、PR head/base、完整原始設定、繼承規則及傳統分支保護、單檔 lock blob、有效且獨立的核准、最新工作流程及 run attempt。guard 證據必須來自指定工作流程；PR 歷史曾更換 base、最新 run 未完成、來源或分頁不完整，都會停止。CODEOWNERS 可核准身分固定為既有基準中的 CatGrocery、d98922036ntu，並排除 PR 作者、提交作者／提交者及 run actor。
+前置查核（preflight）檢查 main、PR head/base、完整原始設定、繼承規則及傳統分支保護、單檔 lock blob、有效且獨立的核准、最新工作流程及 run attempt。唯讀入口也套用完整前置條件；保護不是 active 時會回報 BLOCKED、退出碼 2。guard 證據必須來自指定工作流程；PR 歷史曾更換 base、最新 run 未完成、來源或分頁不完整，都會停止。CODEOWNERS 可核准身分固定為既有基準中的 CatGrocery、d98922036ntu，並排除 PR 作者、提交作者／提交者及 run actor。
 
 唯讀驗收（verify outcome）先確認保護設定已完整恢復，再查合併內容、該 merge SHA 的正式 main push 工作、完整 206 個突變、七個基準、清理結果，以及 artifact 密碼學簽章（cryptographic signature）。`gh attestation verify` 查核 signer workflow、憑證身分、GitHub OIDC issuer 與 GitHub-hosted runner；再將已驗證 statement 綁定 artifact SHA-256、來源 URI／提交與精確 run attempt。缺證據時不能驗收成功。唯讀查核也會將原始 API 回應與驗證結果保存到 `scratch/controlled-migration-state/readonly-*/`。
 
@@ -48,7 +48,7 @@
 
 ## 恢復與備援交接
 
-停用或合併請求逾時皆先恢復，最多送一次合併。停用後第 60 秒起停止新的合併嘗試；120 秒是恢復目標，不是保證。恢復失敗每隔兩秒重送同一原始設定並向 stderr 告警，超過 120 秒標為 `RECOVERY_INCIDENT`，不繼續合併。磁碟紀錄失效會阻擋新的停用／合併，但不阻擋必要恢復與讀回。
+停用或合併請求逾時皆先恢復，最多送一次合併。停用後的讀回、API 查核、每一頁與 artifact 下載共用同一單調時鐘的 60 秒截止時間；單次 HTTP 逾時上限為 12 秒與剩餘時間的較小值。到期即轉入恢復，不再開始一般讀取或新的合併嘗試；120 秒是恢復目標，不是保證。恢復失敗每隔兩秒重送同一原始設定並向 stderr 告警，超過 120 秒標為 `RECOVERY_INCIDENT`，不繼續合併。磁碟紀錄失效會阻擋新的停用／合併，但不阻擋必要恢復與讀回。必要恢復讀回僅限指定規則集的 GET，豁免一般查核預算，且不沿用已到期的合併截止時間；其他讀取仍受原有限制。
 
 `SIGTERM` 轉為取消，由協調器進入恢復。恢復途中再次收到中斷則交接備援，保留 `active.json`，回報 `RECOVERY_REQUIRED`；不得宣稱已恢復。工具無法在 `SIGKILL`、整台主機斷線或 API 長期不可用時保證恢復。維護凍結與獨立備援仍為必要條件。
 
@@ -100,6 +100,8 @@ Run from the repository root:
 Only the third command contacts GitHub, using the existing GitHub CLI credential store for read-only checks. It checks the exact PR/main state, independent review, guard workflow/attempt provenance, ruleset snapshot, absence of other protection, and expected lock blob. `--verify-outcome` requires restored protection and checks merge parents/content, formal main push CI, the full mutation campaign, and artifact signatures bound to the exact commit/run attempt.
 
 Execution requires a separately approved private authorization file matching the plan and tool digests; `authorization.template.json` is intentionally unauthorized and expired. Confirm current upstream advisories, maintenance freeze, an independent recovery connection, and a backup operator first. The tool does not query PyPI or OSV itself.
+
+Read-only preflight applies the complete predicate and exits with BLOCKED/2 when protection is disabled. Post-disable readback, evidence requests, pagination, and artifact downloads share one monotonic 60-second deadline, with each HTTP timeout capped by the remaining budget. Expiry enters recovery without further ordinary requests. Only recovery GETs for the exact ruleset are exempt from the ordinary read budget; they do not inherit the expired merge deadline.
 
 Persistent snapshots and write intents are synced before mutation. A process lock and active-operation marker prevent a second coordinator. Only one exact-head merge request is permitted. Uncertain responses restore protection before outcome inspection; the 60-second merge cutoff and 120-second recovery target never justify abandoning recovery. Logging failures must not block restoration.
 
