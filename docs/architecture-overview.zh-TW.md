@@ -278,6 +278,8 @@ MultiAgentEpsilon/
 ├── .env.example
 ├── .gitattributes
 ├── .gitignore
+├── AGENTS.md
+├── CLAUDE.md
 ├── GLOSSARY.md
 ├── README.md
 ├── SECURITY.md

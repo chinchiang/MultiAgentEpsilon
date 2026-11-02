@@ -59,6 +59,11 @@ def validate(paths, root=ROOT):
     markdown = [root / p for p in paths if p.endswith('.md')]
     for path in markdown:
         text = path.read_text(encoding='utf-8')
+        if path == root / 'CLAUDE.md' and text == '@AGENTS.md\n':
+            instructions = root / 'AGENTS.md'
+            if not instructions.is_file() or instructions.is_symlink():
+                errors.append('CLAUDE.md: missing agent instructions / 缺少專案指引 AGENTS.md')
+            continue
         for anchor in ('zh-tw', 'en'):
             if text.count(f'<a id="{anchor}"></a>') != 1:
                 errors.append(f'{path.relative_to(root)}: language anchor / 語言入口 {anchor}')
