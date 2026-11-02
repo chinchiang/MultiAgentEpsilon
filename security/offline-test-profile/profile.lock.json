@@ -1,0 +1,45 @@
+{
+  "base_image": "python:3.12.16-slim-trixie@sha256:8523d6abeb48ceae0b7240d30c5808fc26cb79c1a635bacdf19cf3baecfbec07",
+  "collection_sha256": "4eb425a3463e5f672dabf6cf3d9e0ac3b80889e5c3645c2731bfad60ec4dfe78",
+  "git_amd64_manifest": "sha256:065c242211a32384e228ac6d7d45be2a349cdd06b18cbbf222a5ac4a351fe0ff",
+  "git_source_image": "python:3.12.15-trixie@sha256:0d0db5b17f11b1b7d1aafa74ceadaa64ba0944b267ff6fc22008a197acd6b9ad",
+  "git_version": "2.47.3",
+  "input_sha256": {
+    "security/offline-test-profile/Dockerfile": "dbf14041f5d328884ef4e3f082833163204d256c8168024090d6d4c5fdefb21b",
+    "security/offline-test-profile/entrypoint.py": "3a43ccdc1567f71453b7f2ac7c67e0eca56330690180d0139b90a69289d590ac",
+    "security/offline-test-profile/gh-deny": "057ac8497fc5bf3778bba739190b1de2ea11d7f752a51891cff10fc728ec82a7",
+    "security/offline-test-profile/requirements-build.lock": "9dbd1754a173e25c4ad278834c54cece10cd6e2b58ed86948d521a9866932b98",
+    "security/offline-test-profile/requirements-runtime.lock": "b273f5e0471bf27df27f3c00191671a2b02a3dbedf8af0a4472a0013c3f007c9",
+    "security/offline-test-profile/runtime-contract.json": "bd0ac029f6a2238d5efeed262428957eb87265b9d26c565f2544ce6e095c2e78",
+    "security/offline-test-profile/runtime_guard.py": "23133dbca16c4fda5c7a8911021b09c92f1269b45562bc447b0efba8ea21a9b7",
+    "security/offline-test-profile/source-proofs/hypothesis.json": "b2188a65f04a185dce51e5596c2c8717d100b957f0d3fbafb433c68a8fbb3344",
+    "security/offline-test-profile/source-proofs/iniconfig.json": "2be8e92c6daa5e5796e405da61df87d919e258aa292b34fe399feb4952d3fe6a",
+    "security/offline-test-profile/source-proofs/packaging.json": "31a988cc15cd05c06dada9677b889bbfdce045b75fc76cbd4b8790620b8f90b5",
+    "security/offline-test-profile/source-proofs/pip.json": "24970e6a3b36205127be18fd2194487024bfaa24c2d2c14f3ddffccf60ebee9d",
+    "security/offline-test-profile/source-proofs/pluggy.json": "6d422d1543177716f17232034d71db21c5771ac7ef4125daf722aa732b2af9c1",
+    "security/offline-test-profile/source-proofs/pygments.json": "a8a430d364a616ae7cfcae0f830963cd85f2d99cd3df252fb67c5d74aecfe5a1",
+    "security/offline-test-profile/source-proofs/pytest.json": "89417d7a8a9f1b71b71f8598ae7a59ec321f29b1dd8b0aa4b47e3284b531fc78",
+    "security/offline-test-profile/source-proofs/sortedcontainers.json": "4eb8b2746da1675fdde670839fc716065939fb9461b874ddd451136a9f0d5d6e",
+    "security/offline-test-profile/supplemental_manifest.py": "d4059d7d739d3aecc3f115c29c80265a7b81d95f6a10a0cfb8847d2a2e9c9232",
+    "tests/test_offline_test_profile.py": "a45009df6a4ea2add61b577928d25b013b3465040e6592147f6bfc861066cc2b"
+  },
+  "native_sha256": {
+    "/usr/local/bin/git": "356db14e102d68a1a37d8a1ac577dfd678d45d46e92f468bef8b7154e7bfdc60",
+    "/usr/local/lib/libpcre2-8.so.0": "92e9b4167f9bbc237ca8f5526d82ee99ec9f8dbd0270ef1dd0ab24e2217f48e3",
+    "/usr/local/lib/libz.so.1": "85590dd58edf5445e18bc7193e5ebc01ac5841f1ae187e97705a662e90c6421e"
+  },
+  "platform": "linux/amd64",
+  "profile": "offline-supplemental-tests",
+  "schema": 1,
+  "source_date_epoch": 0,
+  "wheel_sha256": {
+    "hypothesis-6.168.3-cp310-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64.whl": "26928956c54748e4dfa587333741ab750246123b93484955646ff316cca27eef",
+    "iniconfig-2.3.0-py3-none-any.whl": "f631c04d2c48c52b84d0d0549c99ff3859c98df65b3101406327ecc7d53fbf12",
+    "packaging-26.3-py3-none-any.whl": "d7193f7c8e4e93f444fde0262bf90af30e16fa0ad0ad44cb553c87339b23cd1c",
+    "pip-26.2.2-py3-none-any.whl": "fd7f4dfa8190e014013b9f08f3e973f4e4c26ffd179a204895533a7254813a70",
+    "pluggy-1.6.0-py3-none-any.whl": "e920276dd6813095e9377c0bc5566d94c932c33b27a3e3945d8389c374dd4746",
+    "pygments-2.21.0-py3-none-any.whl": "2363c69b61c4a97c838da3b130dcd6468f4848992b21a82f2a63ec34377137d9",
+    "pytest-9.1.1-py3-none-any.whl": "37a86b45efb9a47a61a36449063e8e18d0cab3161329fc099eb21783169c4f0c",
+    "sortedcontainers-2.4.0-py2.py3-none-any.whl": "a163dcaede0f1c021485e957a39245190e74249897e2ae4b2aa38595db237ee0"
+  }
+}

@@ -1,0 +1,16 @@
+{
+  "collection_sha256": "4eb425a3463e5f672dabf6cf3d9e0ac3b80889e5c3645c2731bfad60ec4dfe78",
+  "gh_deny_sha256": "057ac8497fc5bf3778bba739190b1de2ea11d7f752a51891cff10fc728ec82a7",
+  "gh_deny_stderr": "OFFLINE TEST PROFILE: gh is disabled; inject an offline runner\n",
+  "packages": {
+    "hypothesis": "6.168.3",
+    "iniconfig": "2.3.0",
+    "packaging": "26.3",
+    "pluggy": "1.6.0",
+    "pygments": "2.21.0",
+    "pytest": "9.1.1",
+    "sortedcontainers": "2.4.0"
+  },
+  "profile": "offline-supplemental-tests",
+  "schema": 1
+}

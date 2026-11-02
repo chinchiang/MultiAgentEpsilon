@@ -82,6 +82,7 @@ PR 使用 `.github/workflows/security.yml` 的 `pull_request_target`：evaluator
 | 模型 transport／adapter | [`gateway.py`](../security_harness/llm/gateway.py)、[`adapters.py`](../security_harness/llm/adapters.py)、[`transport.py`](../security_harness/llm/transport.py)、[`output_schema.py`](../security_harness/llm/output_schema.py) |
 | 盲審、評分與註記 | [`model_review.py`](../scripts/model_review.py)、[`benchmark.py`](../security_harness/llm/benchmark.py)、[`benchmark_runner.py`](../security_harness/llm/benchmark_runner.py)、[`benchmark_score.py`](../security_harness/llm/benchmark_score.py)、[`review_adjudicate.py`](../scripts/review_adjudicate.py) |
 | 可信審查與 CI 證據 | [`check_trusted_changes.py`](../scripts/check_trusted_changes.py)、[`verify_required_check.py`](../scripts/verify_required_check.py)、[`write_ci_provenance.py`](../scripts/write_ci_provenance.py)、[`check_publishable_evidence.py`](../scripts/check_publishable_evidence.py) |
+| 離線補充測試設定 | [`offline_test_profile.py`](../security_harness/offline_test_profile.py)、[`cache_offline_test_profile_wheels.py`](../scripts/cache_offline_test_profile_wheels.py)、[`prepare_offline_test_profile.py`](../scripts/prepare_offline_test_profile.py)、[`security/offline-test-profile/`](../security/offline-test-profile/)、[維護說明](offline-test-profile.zh-TW.md)；本機可信建置介面，尚未接入正式 CI |
 | 尚待部署的發布器 | [`trusted_publisher.py`](../security_harness/trusted_publisher.py)、[`publish_trusted_check.py`](../scripts/publish_trusted_check.py)、[`prepare_publisher_deployment.py`](../scripts/prepare_publisher_deployment.py)、[`deploy/trusted-publisher/`](../deploy/trusted-publisher/) |
 
 ## 目錄結構
@@ -124,6 +125,7 @@ MultiAgentEpsilon/
 │   ├── milestone-status.zh-TW.md
 │   ├── model-gateway.zh-TW.md
 │   ├── mutation-testing.zh-TW.md
+│   ├── offline-test-profile.zh-TW.md
 │   ├── pilot-scope.zh-TW.md
 │   ├── remote-ci-evidence.json
 │   ├── remote-ci-validation.zh-TW.md
@@ -159,6 +161,7 @@ MultiAgentEpsilon/
 │   ├── audit_merge_protection.py
 │   ├── bootstrap.py
 │   ├── build_runtime.py
+│   ├── cache_offline_test_profile_wheels.py
 │   ├── check_docs.py
 │   ├── check_publishable_evidence.py
 │   ├── check_trusted_changes.py
@@ -177,6 +180,7 @@ MultiAgentEpsilon/
 │   ├── mutation_check.py
 │   ├── mutation_worker.py
 │   ├── preflight.py
+│   ├── prepare_offline_test_profile.py
 │   ├── prepare_publisher_deployment.py
 │   ├── publish_trusted_check.py
 │   ├── review_adjudicate.py
@@ -187,12 +191,32 @@ MultiAgentEpsilon/
 │   ├── verify_required_check.py
 │   └── write_ci_provenance.py
 ├── security/
+│   ├── offline-test-profile/
+│   │   ├── source-proofs/
+│   │   │   ├── hypothesis.json
+│   │   │   ├── iniconfig.json
+│   │   │   ├── packaging.json
+│   │   │   ├── pip.json
+│   │   │   ├── pluggy.json
+│   │   │   ├── pygments.json
+│   │   │   ├── pytest.json
+│   │   │   └── sortedcontainers.json
+│   │   ├── Dockerfile
+│   │   ├── entrypoint.py
+│   │   ├── gh-deny
+│   │   ├── profile.lock.json
+│   │   ├── requirements-build.lock
+│   │   ├── requirements-runtime.lock
+│   │   ├── runtime-contract.json
+│   │   ├── runtime_guard.py
+│   │   └── supplemental_manifest.py
 │   ├── runtime/
 │   │   ├── request.py
 │   │   └── server.py
 │   ├── binary-allowlist.json
 │   ├── gitleaks.toml
 │   ├── model-roe.json
+│   ├── offline-test-profile-trust.json
 │   ├── policy.json
 │   ├── review-cases.json
 │   ├── review-oracle.json
@@ -227,6 +251,7 @@ MultiAgentEpsilon/
 │   ├── isolation.py
 │   ├── lifecycle.py
 │   ├── limits.py
+│   ├── offline_test_profile.py
 │   ├── preflight.py
 │   ├── processes.py
 │   ├── results.py
@@ -263,6 +288,7 @@ MultiAgentEpsilon/
 │   ├── test_model_lifecycle.py
 │   ├── test_model_rounds.py
 │   ├── test_mutation_runner.py
+│   ├── test_offline_test_profile.py
 │   ├── test_policy.py
 │   ├── test_preflight.py
 │   ├── test_publisher_deployment.py
@@ -392,7 +418,7 @@ Main push evaluates its own commit. Manual workflow uses chosen ref and distinct
 
 ## Components and directory structure
 
-The Chinese section's linked component table and complete repository tree use unchanged language-neutral paths and are shared by both editions. Installation: scripts/bootstrap.py/build_runtime.py, requirements.lock/tools.lock. Execution: run_security.py/security_worker.py/audit.py. Scope/input/policy: scope.py/inputs.py/results.py and security JSON. G1/G2: preflight.py/dependencies.py/secrets.py/scan_content.py/candidate_git.py. Isolation/oracle: isolation.py/container_http.py/authorization.py/fixture_database.py/fixture_app. Lifecycle: lifecycle.py/limits.py/cleanup_runs.py and llm/lifecycle.py. Models: gateway.py/adapters.py/lmstudio.py/transport.py/output_schema.py. Reviews: model_review.py/benchmark*.py/review_adjudicate.py/model_compare.py/comparison.py. CI: check_trusted_changes.py/verify_required_check.py/write_ci_provenance.py/check_publishable_evidence.py. Deployment: trusted_publisher.py/publish_trusted_check.py/prepare_publisher_deployment.py and deploy/trusted-publisher.
+The Chinese section's linked component table and complete repository tree use unchanged language-neutral paths and are shared by both editions. Installation: scripts/bootstrap.py/build_runtime.py, requirements.lock/tools.lock. Execution: run_security.py/security_worker.py/audit.py. Scope/input/policy: scope.py/inputs.py/results.py and security JSON. G1/G2: preflight.py/dependencies.py/secrets.py/scan_content.py/candidate_git.py. Isolation/oracle: isolation.py/container_http.py/authorization.py/fixture_database.py/fixture_app. Lifecycle: lifecycle.py/limits.py/cleanup_runs.py and llm/lifecycle.py. Models: gateway.py/adapters.py/lmstudio.py/transport.py/output_schema.py. Reviews: model_review.py/benchmark*.py/review_adjudicate.py/model_compare.py/comparison.py. CI: check_trusted_changes.py/verify_required_check.py/write_ci_provenance.py/check_publishable_evidence.py. Offline supplemental profile: security_harness/offline_test_profile.py, scripts/cache_offline_test_profile_wheels.py, scripts/prepare_offline_test_profile.py, and security/offline-test-profile; locally buildable, not wired into formal CI. Deployment: trusted_publisher.py/publish_trusted_check.py/prepare_publisher_deployment.py and deploy/trusted-publisher.
 
 Directory purposes: .github CI/review ownership; deploy production templates; docs architecture/coverage/acceptance; fixture_app synthetic target; scripts operational entries; security protected policy/tools/cases; security_harness trusted core (llm model path); tests contracts/mutations/isolation/recovery. __init__.py marks packages. The tracked tree excludes generated files, caches, Git internals, and private attachments.
 
