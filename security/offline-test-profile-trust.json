@@ -1,0 +1,9 @@
+{
+  "platforms": [
+    "linux/amd64"
+  ],
+  "profile": "offline-supplemental-tests",
+  "profile_lock_path": "security/offline-test-profile/profile.lock.json",
+  "profile_lock_sha256": "5f0dd4023d3560f57324507d2bba322555fa2b2820f35491144fb90abc60af65",
+  "schema_version": 1
+}

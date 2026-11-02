@@ -104,3 +104,27 @@ def test_stale_svg_labels_are_reported(tmp_path):
     root = repo(tmp_path, base_files(**{"docs/d.mmd": 'flowchart TB\n    A["新標籤<br/>New label"]\n',
                                          "docs/d.svg": svg}))
     assert any("SVG not regenerated" in e for e in errors(root))
+
+
+def test_root_claude_can_delegate_to_single_authoritative_agent_document(tmp_path):
+    root = repo(tmp_path, base_files(**{'AGENTS.md': BILINGUAL, 'CLAUDE.md': '@AGENTS.md\n'}))
+    assert errors(root) == []
+
+
+def test_claude_delegation_requires_existing_authoritative_document(tmp_path):
+    root = repo(tmp_path, base_files(**{'CLAUDE.md': '@AGENTS.md\n'}))
+    assert any('missing agent instructions' in error for error in errors(root))
+
+
+@pytest.mark.parametrize('name,text', [
+    ('docs/CLAUDE.md', '@AGENTS.md\n'),
+    ('CLAUDE.md', '@AGENTS.md\nextra instructions\n'),
+])
+def test_agent_redirect_exception_does_not_skip_normal_document_checks(tmp_path, name, text):
+    root = repo(tmp_path, base_files(**{'AGENTS.md': BILINGUAL, name: text}))
+    assert any('language anchor' in error for error in errors(root))
+
+
+def test_delegated_agent_document_still_requires_normal_validation(tmp_path):
+    root = repo(tmp_path, base_files(**{'AGENTS.md': 'incomplete instructions\n', 'CLAUDE.md': '@AGENTS.md\n'}))
+    assert any('AGENTS.md: language anchor' in error for error in errors(root))

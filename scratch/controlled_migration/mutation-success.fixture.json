@@ -1,0 +1,1166 @@
+{
+  "schema_version": 1,
+  "status": "COMPLETE",
+  "advisory_only": true,
+  "scope": {
+    "security_harness/results.py": [
+      "validate_cases",
+      "seeded_defects",
+      "decide"
+    ],
+    "security_harness/github_http.py": [
+      "strict_json"
+    ],
+    "security_harness/preflight.py": [
+      "validate_package_policy",
+      "check_metadata"
+    ],
+    "security_harness/authorization.py": [
+      "same"
+    ],
+    "security_harness/isolation.py": [
+      "verify_container"
+    ],
+    "security_harness/scope.py": [
+      "valid_remote_hosts",
+      "validate_model_roe"
+    ],
+    "security_harness/llm/benchmark.py": [
+      "bounded_text",
+      "validate_review",
+      "parse_review"
+    ]
+  },
+  "mutants": [
+    {
+      "id": "security_harness/results.py:seeded_defects:127:8:208:boolean:0",
+      "status": "KILLED",
+      "mutant_sha256": "5a23304b7be0763225ed78845d9273969c3c637ecf4fa4a572e1313b09112e08"
+    },
+    {
+      "id": "security_harness/results.py:seeded_defects:127:8:432:negation:0",
+      "status": "KILLED",
+      "mutant_sha256": "59e7c4f8153bb3698926c253be029e5ee2164753c98811c898b525209ee1b345"
+    },
+    {
+      "id": "security_harness/results.py:seeded_defects:127:40:433:negation:0",
+      "status": "KILLED",
+      "mutant_sha256": "8f226f22931f0cb970ef6d2376d8c2901f93c35a9f36372cdafee65a6191503f"
+    },
+    {
+      "id": "security_harness/results.py:seeded_defects:128:68:435:compare:0",
+      "status": "KILLED",
+      "mutant_sha256": "40cd8d8c1d2d0f48f79669269d79de6f6b36ccd5f4455a5291d53c70c4a9311b"
+    },
+    {
+      "id": "security_harness/results.py:seeded_defects:129:12:436:negation:0",
+      "status": "KILLED",
+      "mutant_sha256": "66155d33e3364d9e8e0c8064ef38ed1b85b523f94d1a80635b04fc2465725554"
+    },
+    {
+      "id": "security_harness/results.py:seeded_defects:129:16:765:compare:0",
+      "status": "KILLED",
+      "mutant_sha256": "448763c88a796f82cf712000555dfe72350a6e2ad7d63ba9dc425ae9bbc21e30"
+    },
+    {
+      "id": "security_harness/results.py:seeded_defects:128:16:1118:boolean:0",
+      "status": "KILLED",
+      "mutant_sha256": "20dea0f8e8fac1a4892a6e5674d090feb8653dfba4a09b36362fff178bb29669"
+    },
+    {
+      "id": "security_harness/results.py:seeded_defects:128:16:1462:negation:0",
+      "status": "KILLED",
+      "mutant_sha256": "fab2adcd2d0793d5ce27c8586d79ad67e96272e533804ee135fbbd30af4e36d1"
+    },
+    {
+      "id": "security_harness/results.py:seeded_defects:128:42:1463:negation:0",
+      "status": "KILLED",
+      "mutant_sha256": "c2f8f02e21fba5856451aeeeec710ec70c388ef1c23aeb84cd82b5e56bee85c4"
+    },
+    {
+      "id": "security_harness/results.py:validate_cases:136:8:218:boolean:0",
+      "status": "KILLED",
+      "mutant_sha256": "d665b4b9fdb5e99e52035f456fd7ee35fe4a959e9dd673cc683c3377d3454ef4"
+    },
+    {
+      "id": "security_harness/results.py:validate_cases:140:8:220:boolean:0",
+      "status": "KILLED",
+      "mutant_sha256": "8965a7b0d7c08dda079a6abb8bde01423b782606e16cb08ad86a8ee534f16c85"
+    },
+    {
+      "id": "security_harness/results.py:validate_cases:145:7:224:boolean:0",
+      "status": "KILLED",
+      "mutant_sha256": "11afa64a4796ecb486d315cbe35847ff2cdb991e477aadb1e8d010d2470d866f"
+    },
+    {
+      "id": "security_harness/results.py:validate_cases:136:8:448:negation:0",
+      "status": "KILLED",
+      "mutant_sha256": "51a6c89f61bb176519afe2d24201d15e910b48c8449c7275ea77549dbe673f46"
+    },
+    {
+      "id": "security_harness/results.py:validate_cases:136:42:449:negation:0",
+      "status": "KILLED",
+      "mutant_sha256": "7dd49ab2b7d71c636d1fd36cc573348ffb350c6f1207a68c5a26594b90680c68"
+    },
+    {
+      "id": "security_harness/results.py:validate_cases:138:12:451:compare:0",
+      "status": "KILLED",
+      "mutant_sha256": "958b346e66eadca9ecfb578ef6d69e4d368b0ccdb3fbb3cdfccc6beb7412e2d9"
+    },
+    {
+      "id": "security_harness/results.py:validate_cases:140:8:454:negation:0",
+      "status": "KILLED",
+      "mutant_sha256": "84518e52e3c3070068d2a03dae02a322df28761ece24aeeb50a427bef00ef005"
+    },
+    {
+      "id": "security_harness/results.py:validate_cases:140:39:455:compare:0",
+      "status": "KILLED",
+      "mutant_sha256": "37254c6d19482885aec7928b293755dd0f60838a90242a640c8a688b1a7add56"
+    },
+    {
+      "id": "security_harness/results.py:validate_cases:145:7:462:compare:0",
+      "status": "KILLED",
+      "mutant_sha256": "1017fa4366f4829b5db37aa90e703f7a7d98fc9477ddaad7f435909c91f951f0"
+    },
+    {
+      "id": "security_harness/results.py:validate_cases:145:40:463:compare:0",
+      "status": "KILLED",
+      "mutant_sha256": "37541bf550783bc9c823a5868225c63d4d90142a18286f44ef28ad0e041ec4c8"
+    },
+    {
+      "id": "security_harness/results.py:validate_cases:137:16:1136:boolean:0",
+      "status": "KILLED",
+      "mutant_sha256": "f0f30b5d52e5fd4369ab0911433b4fdda9665634912567f98b20f4862a6927d9"
+    },
+    {
+      "id": "security_harness/results.py:validate_cases:141:16:1151:boolean:0",
+      "status": "KILLED",
+      "mutant_sha256": "d3573e2bb97289cc8e0ea7598ee6f5d78eda3c08c0f827b127a6426555fc9faa"
+    },
+    {
+      "id": "security_harness/results.py:validate_cases:137:16:1479:negation:0",
+      "status": "KILLED",
+      "mutant_sha256": "1469203f0f5b10690c1fde7814b5ff7502a68ade0785bbe2114f3e53e853077e"
+    },
+    {
+      "id": "security_harness/results.py:validate_cases:137:42:1480:negation:0",
+      "status": "KILLED",
+      "mutant_sha256": "9ef95f541154b80f90e4e009d4d54e830d728a09efbf58367e86a45f362bcfcc"
+    },
+    {
+      "id": "security_harness/results.py:validate_cases:141:16:1496:negation:0",
+      "status": "KILLED",
+      "mutant_sha256": "34e8cde5fdeb2bcf5c1b893ab128e9c67e9817f844d242f53df6d34ae82c06dd"
+    },
+    {
+      "id": "security_harness/results.py:validate_cases:141:43:1497:negation:0",
+      "status": "KILLED",
+      "mutant_sha256": "8b1990d0b00058be9ece36758a50d32103da207e5b7dd67af9ed0297c3c74e29"
+    },
+    {
+      "id": "security_harness/results.py:validate_cases:142:16:1498:compare:0",
+      "status": "KILLED",
+      "mutant_sha256": "d02ebc7bc9e44bb34897b46f87fa4a22d009e647573cbec17c980065c1c56c02"
+    },
+    {
+      "id": "security_harness/results.py:decide:151:10:234:boolean:0",
+      "status": "KILLED",
+      "mutant_sha256": "d4337ad47c99816d423ba2aee2eb2e84b80a0d05d12ad569da361ff17962a881"
+    },
+    {
+      "id": "security_harness/results.py:decide:159:7:243:boolean:0",
+      "status": "KILLED",
+      "mutant_sha256": "1228a4aeac1c116d028193952fba54133a48af59f4f9308b61f2c86d57e52b84"
+    },
+    {
+      "id": "security_harness/results.py:decide:159:7:487:negation:0",
+      "status": "KILLED",
+      "mutant_sha256": "dd1075572365cb5e4b0f7498ab0b39f60d9e3506bb357a0eab4b8a456a89f2ed"
+    },
+    {
+      "id": "security_harness/results.py:decide:159:22:488:negation:0",
+      "status": "KILLED",
+      "mutant_sha256": "0fb39bbae6e4fa0083a4cb7a3ad3269a1386fce353b89fb42ab6c4e2f0bdacf0"
+    },
+    {
+      "id": "security_harness/results.py:decide:159:43:489:negation:0",
+      "status": "KILLED",
+      "mutant_sha256": "f79730f6d7460e2405cf1fc2c7d12e71bb10f62732c3a48f1ee01b74176595f1"
+    },
+    {
+      "id": "security_harness/results.py:decide:159:74:490:negation:0",
+      "status": "KILLED",
+      "mutant_sha256": "c8026360eea6b84424052fce6f4d68feede83792ec992375c7b65b765d7cafb7"
+    },
+    {
+      "id": "security_harness/results.py:decide:162:11:494:negation:0",
+      "status": "KILLED",
+      "mutant_sha256": "35411808f6f1c2a269300b52d6a170175a8dba4bea15e82d22389979c429c5dd"
+    },
+    {
+      "id": "security_harness/results.py:decide:166:11:499:compare:0",
+      "status": "KILLED",
+      "mutant_sha256": "709bd29581ed384074b569a1056798131a3633d751034db3e6d805a9c8c2ec7c"
+    },
+    {
+      "id": "security_harness/results.py:decide:169:11:502:compare:0",
+      "status": "KILLED",
+      "mutant_sha256": "8746197b0b2fc29433a02cb1d32fdac1cf318fdd5c4c322a0813bdafc9011b02"
+    },
+    {
+      "id": "security_harness/results.py:decide:216:11:514:compare:0",
+      "status": "KILLED",
+      "mutant_sha256": "8ae9ff622a1f7809bdd106e966ccac0b35b7bf5bb140009d79eb5b9831a45cad"
+    },
+    {
+      "id": "security_harness/results.py:decide:221:11:522:compare:0",
+      "status": "KILLED",
+      "mutant_sha256": "834fff468dedbbd533e21a6b783e6ea4eb12444ac4f002392a9976f475c8384f"
+    },
+    {
+      "id": "security_harness/results.py:decide:173:21:861:boolean:0",
+      "status": "KILLED",
+      "mutant_sha256": "aa629f048df0a60fef68f32f0cd50e8c784b0b4aced6bcf07ff1bc4960f80cbb"
+    },
+    {
+      "id": "security_harness/results.py:decide:182:15:862:negation:0",
+      "status": "KILLED",
+      "mutant_sha256": "febbe5de53f9bd5485dcda8d1843033c92bdae8a32c33927ce81654650436d9a"
+    },
+    {
+      "id": "security_harness/results.py:decide:204:15:874:compare:0",
+      "status": "KILLED",
+      "mutant_sha256": "085efcdaa4a3bfb4bbe9ac2ffbb0c955298ffd22846dd513a680be4fbe802df7"
+    },
+    {
+      "id": "security_harness/results.py:decide:211:15:881:negation:0",
+      "status": "KILLED",
+      "mutant_sha256": "269063662a5299862bb9ca25739190afbb46b204350086942df54917980e4f4c"
+    },
+    {
+      "id": "security_harness/results.py:decide:173:21:1210:compare:0",
+      "status": "KILLED",
+      "mutant_sha256": "6b903710ac4adc556ed6aee7ca1fde25f98f0c5b8956c2425683d87966df9dd1"
+    },
+    {
+      "id": "security_harness/results.py:decide:173:63:1211:compare:0",
+      "status": "KILLED",
+      "mutant_sha256": "4da021a7637dd6835be094bf75a309e3f48143c1e912ad07a7ce02072c6b7cb4"
+    },
+    {
+      "id": "security_harness/results.py:decide:174:25:1212:compare:0",
+      "status": "KILLED",
+      "mutant_sha256": "70d9d55f29d459ba4e7468541ee8237104bdf1c219c656f84d39361210cf86c0"
+    },
+    {
+      "id": "security_harness/results.py:decide:175:25:1213:compare:0",
+      "status": "KILLED",
+      "mutant_sha256": "6e8a8a16f0f72752dba43b38025e9ffa4330c8e66d361e23efe8469773424dd2"
+    },
+    {
+      "id": "security_harness/results.py:decide:176:25:1214:compare:0",
+      "status": "KILLED",
+      "mutant_sha256": "5b690b3c3307117fdba7d8044ff2cceac2c6d66d143bf2274900cb9d73fceed8"
+    },
+    {
+      "id": "security_harness/results.py:decide:177:25:1215:compare:0",
+      "status": "KILLED",
+      "mutant_sha256": "d2ae677b7b229d0b8457c74c68199e3e6c5b88df495b2d3632b2a5707c19ccfd"
+    },
+    {
+      "id": "security_harness/results.py:decide:178:25:1216:compare:0",
+      "status": "KILLED",
+      "mutant_sha256": "066c4abb92602f0749589fb6f5e271193a3843ca4cedfcc6df4e8ff14075f773"
+    },
+    {
+      "id": "security_harness/results.py:decide:179:25:1217:compare:0",
+      "status": "KILLED",
+      "mutant_sha256": "fbeafadb0e1a2f3b0efd7708f676431da285e9dff7aa0c3a4e938544926d466b"
+    },
+    {
+      "id": "security_harness/results.py:decide:180:25:1218:compare:0",
+      "status": "KILLED",
+      "mutant_sha256": "343acd15fbfe65554f93bcfd864ff9ad6381adc2904b5bc42b807d361d3c7725"
+    },
+    {
+      "id": "security_harness/results.py:decide:180:67:1219:compare:0",
+      "status": "KILLED",
+      "mutant_sha256": "6eaf870c73be6c460191f2e2b0f11c48c3e1ac5e0d4eb8f7227be13127a05671"
+    },
+    {
+      "id": "security_harness/results.py:decide:181:25:1220:compare:0",
+      "status": "KILLED",
+      "mutant_sha256": "205a08e27c560e888fd844e69873b92ba1e59b7b4ba567c2fc5cba338380866b"
+    },
+    {
+      "id": "security_harness/results.py:decide:181:61:1221:compare:0",
+      "status": "KILLED",
+      "mutant_sha256": "426d95175d64f39f8c5a6160519c70f9772854094f3057eb1cd39adfc3e151c0"
+    },
+    {
+      "id": "security_harness/results.py:decide:188:20:1231:boolean:0",
+      "status": "KILLED",
+      "mutant_sha256": "9c828af387151536213b790aabb8cddb8d3dc11538405f150204bd904c0c7972"
+    },
+    {
+      "id": "security_harness/results.py:decide:195:19:1235:boolean:0",
+      "status": "KILLED",
+      "mutant_sha256": "74873a826a8d56e9cc71e78ec005a77fc55095037aaff812d0172c5c30465aa0"
+    },
+    {
+      "id": "security_harness/results.py:decide:197:20:1237:boolean:0",
+      "status": "KILLED",
+      "mutant_sha256": "493936a9ac9e4a0a2e1dca696e4b4f4449a09bba049bb4a09d6f33162aae2a8a"
+    },
+    {
+      "id": "security_harness/results.py:decide:206:20:1247:boolean:0",
+      "status": "KILLED",
+      "mutant_sha256": "08f79f3fd9b4ec917a50c4e13b559a43bbe8fa657b0299368b626ab188c605ee"
+    },
+    {
+      "id": "security_harness/results.py:decide:211:19:1255:compare:0",
+      "status": "KILLED",
+      "mutant_sha256": "496be3c701cdd74111aa5f6941353ea915f5b8fbfd840123ae1916a0e93e2c13"
+    },
+    {
+      "id": "security_harness/results.py:decide:211:19:1255:compare:1",
+      "status": "KILLED",
+      "mutant_sha256": "0a91907e2c9a34fac14513f9bdd9f531cf7f88ab3bfaf2dd3b81163cb28c6c5b"
+    },
+    {
+      "id": "security_harness/results.py:decide:188:20:1586:compare:0",
+      "status": "KILLED",
+      "mutant_sha256": "3fac6fd6fe232a2b10ddb2204e98f196cfc3de829866c72e4d1142a97d890e63"
+    },
+    {
+      "id": "security_harness/results.py:decide:190:24:1588:compare:0",
+      "status": "KILLED",
+      "mutant_sha256": "f75d9006f4d2bc639624d3339e6b6abc6c6c9c0c70bd54ad2436895e7181b55b"
+    },
+    {
+      "id": "security_harness/results.py:decide:190:82:1589:compare:0",
+      "status": "KILLED",
+      "mutant_sha256": "3ca059a97b9e7f0c34b9e123afc6513f48f6b01c07263c0a7b535f8e92753ca4"
+    },
+    {
+      "id": "security_harness/results.py:decide:191:24:1590:compare:0",
+      "status": "KILLED",
+      "mutant_sha256": "088f21717e8199926ae4ac9fcf9718d1464ce2a79fe648835614ac6a378b8654"
+    },
+    {
+      "id": "security_harness/results.py:decide:191:81:1591:compare:0",
+      "status": "KILLED",
+      "mutant_sha256": "7f690e5d7877f5913b648e9f4680374fe2e90ddce4df78954088005667d2e53a"
+    },
+    {
+      "id": "security_harness/results.py:decide:195:19:1598:negation:0",
+      "status": "KILLED",
+      "mutant_sha256": "066c87b11a9a8cc37a30a4473f6cdc13eec02ddb36cb9df309ace7e1d24713af"
+    },
+    {
+      "id": "security_harness/results.py:decide:195:51:1599:compare:0",
+      "status": "KILLED",
+      "mutant_sha256": "86e5db9d8e06a18b5158b940e23283d91cebc9dcff1b1087a950d615fedf6c52"
+    },
+    {
+      "id": "security_harness/results.py:decide:198:24:1603:negation:0",
+      "status": "KILLED",
+      "mutant_sha256": "f8e0bba647ee16ddcd2876e0fa2672a2e466be541c3f7951ba1b8e65bee969f1"
+    },
+    {
+      "id": "security_harness/results.py:decide:206:20:1621:compare:0",
+      "status": "KILLED",
+      "mutant_sha256": "4e5ed1593e658b59bbd72d28e0444f10a55cb0ed3e7881a9553f93edbc55df9a"
+    },
+    {
+      "id": "security_harness/results.py:decide:207:24:1622:compare:0",
+      "status": "KILLED",
+      "mutant_sha256": "963b70de85f40ac51a479c004b3635a2da2cb1bbe02bdc8376ef97c370e10232"
+    },
+    {
+      "id": "security_harness/results.py:decide:189:28:2071:boolean:0",
+      "status": "KILLED",
+      "mutant_sha256": "5736e2a3da2fb83d00bd00fc6cc4b527e5e2fb9cdcc0300e1ad0aeb95a706bd2"
+    },
+    {
+      "id": "security_harness/results.py:decide:189:28:2192:compare:0",
+      "status": "KILLED",
+      "mutant_sha256": "966b3dbfbf8cfc28f571c7a311b4d7413f7792c98b494809c005cf609a86dfc4"
+    },
+    {
+      "id": "security_harness/results.py:decide:189:62:2193:compare:0",
+      "status": "KILLED",
+      "mutant_sha256": "d9f5b3c8353588a6858a632df76847a80136b77fb6862f364818135b4cb01de0"
+    },
+    {
+      "id": "security_harness/results.py:decide:207:50:2227:negation:0",
+      "status": "KILLED",
+      "mutant_sha256": "2839e8ea6795c2d753e92208e6276aa4fb06f6f3b1f2b4fd74f6b1f0e7319865"
+    },
+    {
+      "id": "security_harness/github_http.py:strict_json:35:17:273:compare:0",
+      "status": "KILLED",
+      "mutant_sha256": "329ec693768529ad265c8f7fb41f5ca84e945d5602c8ec2f04b065a99690f400"
+    },
+    {
+      "id": "security_harness/preflight.py:check_metadata:64:7:116:compare:0",
+      "status": "KILLED",
+      "mutant_sha256": "73b663025f0c6dc3c755acdbe93910350670e3e14e946e8940d6eab026b02b31"
+    },
+    {
+      "id": "security_harness/preflight.py:check_metadata:66:7:118:boolean:0",
+      "status": "KILLED",
+      "mutant_sha256": "3c80bdf5e3e9a3a8404212e91547bfd2258f9c222023cf3bd80cec786b958926"
+    },
+    {
+      "id": "security_harness/preflight.py:check_metadata:68:7:120:negation:0",
+      "status": "KILLED",
+      "mutant_sha256": "adb75401dcc40c1e2a342643480fb9bbbaf9e0908a9cc1028334b98be9f43c9e"
+    },
+    {
+      "id": "security_harness/preflight.py:check_metadata:71:7:124:negation:0",
+      "status": "KILLED",
+      "mutant_sha256": "9a1fbbd96ef37f56ff15920932fc7818583eed97e643399f70a19474c3d2aa84"
+    },
+    {
+      "id": "security_harness/preflight.py:check_metadata:74:7:128:negation:0",
+      "status": "KILLED",
+      "mutant_sha256": "1219378a04560182c001712b2c263af51b8ab87aebe82e0c7f76f1adba2b0903"
+    },
+    {
+      "id": "security_harness/preflight.py:check_metadata:87:7:139:negation:0",
+      "status": "KILLED",
+      "mutant_sha256": "6edcf6c001806ee8b595d9ba7250c2bb71ab750f912c18bb067f0f910be51d61"
+    },
+    {
+      "id": "security_harness/preflight.py:check_metadata:66:7:240:compare:0",
+      "status": "KILLED",
+      "mutant_sha256": "6229fcd5981888bbf3042aefcfb30182b78affa1b26bfcbb7ce565e5e712b2fb"
+    },
+    {
+      "id": "security_harness/preflight.py:check_metadata:66:54:241:compare:0",
+      "status": "KILLED",
+      "mutant_sha256": "44ebfdc1e0c7a018d221da23bba1f21a6fe61a6682bf27072fb024e34849693a"
+    },
+    {
+      "id": "security_harness/preflight.py:check_metadata:74:11:258:compare:0",
+      "status": "KILLED",
+      "mutant_sha256": "824481958424084fc50679be58e32eae11d09229b52f6239abb3d052239298b3"
+    },
+    {
+      "id": "security_harness/preflight.py:check_metadata:79:12:267:boolean:0",
+      "status": "KILLED",
+      "mutant_sha256": "37a37626fcd7b94c1f7778d16b5e5559bd8a227d2ef1326d7f843129119b8486"
+    },
+    {
+      "id": "security_harness/preflight.py:check_metadata:85:11:273:compare:0",
+      "status": "KILLED",
+      "mutant_sha256": "bdd457ff21433d04e9743c7a350e5b2bcde57e4743a78175eaf69cc9a1381e34"
+    },
+    {
+      "id": "security_harness/preflight.py:check_metadata:79:12:447:compare:0",
+      "status": "KILLED",
+      "mutant_sha256": "b4cd0e46c0419c26886f685f41fe221aadda5ffa3f6a9fafa79b7d69dc150668"
+    },
+    {
+      "id": "security_harness/preflight.py:check_metadata:79:37:448:compare:0",
+      "status": "KILLED",
+      "mutant_sha256": "5ddcaef1cf3a71cb5bdd897b803ee117b82c0fce12e7ac3d4e5158cc4465cadc"
+    },
+    {
+      "id": "security_harness/preflight.py:check_metadata:80:51:451:compare:0",
+      "status": "KILLED",
+      "mutant_sha256": "b5964a393d68cc0217d984bab5d63da79645c251e6bc89f938b64c1a3f7303ba"
+    },
+    {
+      "id": "security_harness/preflight.py:check_metadata:87:15:657:compare:0",
+      "status": "KILLED",
+      "mutant_sha256": "5035a37751c619671bdd10aa2b6f4445e210ac9ca04a839df399c0496d50c7ea"
+    },
+    {
+      "id": "security_harness/preflight.py:validate_package_policy:99:8:147:boolean:0",
+      "status": "KILLED",
+      "mutant_sha256": "6b17090f80542fad78df895bf2274c113262ce8ead07d0488897e01d4ac196a4"
+    },
+    {
+      "id": "security_harness/preflight.py:validate_package_policy:99:8:295:compare:0",
+      "status": "KILLED",
+      "mutant_sha256": "7c3110c1f398199fa4f3a43ff6346eab0efd561a288e410fad61afdd66084378"
+    },
+    {
+      "id": "security_harness/preflight.py:validate_package_policy:99:57:296:compare:0",
+      "status": "KILLED",
+      "mutant_sha256": "1b6565ba46eb3bff012e91f1d3542825e32b9db4ff20978ccf6b53a70655564e"
+    },
+    {
+      "id": "security_harness/preflight.py:validate_package_policy:100:15:297:compare:0",
+      "status": "KILLED",
+      "mutant_sha256": "3e40ff9a54e277c25905496e98805c6e2d3cf49fb5c3ff5e315e414036f122c9"
+    },
+    {
+      "id": "security_harness/preflight.py:validate_package_policy:101:15:298:compare:0",
+      "status": "KILLED",
+      "mutant_sha256": "242ff93b0371c629120c1e31e152d21ab7ca366b218390efd865d678b987c048"
+    },
+    {
+      "id": "security_harness/preflight.py:validate_package_policy:102:15:299:compare:0",
+      "status": "KILLED",
+      "mutant_sha256": "15b655066c6f5b19983652d3761e1686ed38780b3c8be773e0a9e1fd82f1f8f9"
+    },
+    {
+      "id": "security_harness/preflight.py:validate_package_policy:103:15:300:negation:0",
+      "status": "KILLED",
+      "mutant_sha256": "082ad283d502d3146d8a0cb36eac1efa319c981a158ffe02ae1278b1f0f34247"
+    },
+    {
+      "id": "security_harness/preflight.py:validate_package_policy:104:15:301:negation:0",
+      "status": "KILLED",
+      "mutant_sha256": "d58ba69925587aa9a5674dce678cf827cfdc0199f2f8d473a16e78bb601e9e53"
+    },
+    {
+      "id": "security_harness/preflight.py:validate_package_policy:104:49:302:negation:0",
+      "status": "KILLED",
+      "mutant_sha256": "6c2d7a66bf6a00071e7b853f7cdd1125d259a928b3633bc60ed11630f320ed40"
+    },
+    {
+      "id": "security_harness/preflight.py:validate_package_policy:106:15:304:compare:0",
+      "status": "KILLED",
+      "mutant_sha256": "4df504e36399e22bf68ee178649c52df2b1563b6b29e73cbc1387375462e607e"
+    },
+    {
+      "id": "security_harness/preflight.py:validate_package_policy:103:19:492:compare:0",
+      "status": "KILLED",
+      "mutant_sha256": "08012810b133372ffbe7d5c40f971972be8fb5b89ae85335c3c9ac21d9acf745"
+    },
+    {
+      "id": "security_harness/preflight.py:validate_package_policy:103:19:492:compare:1",
+      "status": "KILLED",
+      "mutant_sha256": "6446757d806f130c3575cf13adc6cdcae37e12c06f36568ffc945eae214a5f2d"
+    },
+    {
+      "id": "security_harness/preflight.py:validate_package_policy:105:19:692:boolean:0",
+      "status": "KILLED",
+      "mutant_sha256": "fc42b76336fbd979aca07f269c349411ef5c3aff1e67e138afcf341494cbe2de"
+    },
+    {
+      "id": "security_harness/preflight.py:validate_package_policy:105:19:826:negation:0",
+      "status": "KILLED",
+      "mutant_sha256": "9ed9dbd6b75849901f9a95031e4d359d2688a1595dd0d269b0fd27d072aafec0"
+    },
+    {
+      "id": "security_harness/preflight.py:validate_package_policy:105:45:827:negation:0",
+      "status": "KILLED",
+      "mutant_sha256": "fc2f63e0ea7a50e4eada813188617d7fcbfa6e81e022c6d3df4c9712993e24c8"
+    },
+    {
+      "id": "security_harness/preflight.py:validate_package_policy:105:54:828:compare:0",
+      "status": "KILLED",
+      "mutant_sha256": "e8d4de225f81ce06a4e09b3a7f596e3749a84c22a320720e3b8de168851b109f"
+    },
+    {
+      "id": "security_harness/authorization.py:same:64:7:193:compare:0",
+      "status": "KILLED",
+      "mutant_sha256": "350f852480c179fbc5c95f6c35747a13deadfe272a0017ae9ed81914c63575f1"
+    },
+    {
+      "id": "security_harness/authorization.py:same:70:11:199:compare:0",
+      "status": "KILLED",
+      "mutant_sha256": "e3970641cabf9803a42cbe4f81c670cdc0fe0aeabb41cf54d86edbd227457e1e"
+    },
+    {
+      "id": "security_harness/authorization.py:same:67:15:450:boolean:0",
+      "status": "KILLED",
+      "mutant_sha256": "32c479f55d99cf2f17a8b0fe754acf25cf80143c1cd336dff817ea6051c88ef1"
+    },
+    {
+      "id": "security_harness/authorization.py:same:69:15:454:boolean:0",
+      "status": "KILLED",
+      "mutant_sha256": "907960195f6c735d6d0d7272a6d9be1c5e2ebbf54bc723a83d1d24dc42183188"
+    },
+    {
+      "id": "security_harness/authorization.py:same:67:15:1020:compare:0",
+      "status": "KILLED",
+      "mutant_sha256": "e49dd5e107756323867a55f9cc537b08d20b2220044ded9617757b6e0cd115f4"
+    },
+    {
+      "id": "security_harness/authorization.py:same:69:15:1026:compare:0",
+      "status": "KILLED",
+      "mutant_sha256": "58318b4c27eaf1d8905ca3ba3f55b7deeb4c4a5ea4452d3dc5314598bb40c075"
+    },
+    {
+      "id": "security_harness/isolation.py:verify_container:61:19:269:compare:0",
+      "status": "KILLED",
+      "mutant_sha256": "9489d539f7fa0408e24faa49ecd748b074b26ce5a84dd6027fe1d2cab0c65785"
+    },
+    {
+      "id": "security_harness/isolation.py:verify_container:62:25:270:compare:0",
+      "status": "KILLED",
+      "mutant_sha256": "75c28f19f9f4e39dea53d3882a6da7dc5bb828c5572cb3c6c320f7351a525e78"
+    },
+    {
+      "id": "security_harness/isolation.py:verify_container:63:22:271:compare:0",
+      "status": "KILLED",
+      "mutant_sha256": "7e10235a88aadae462ff0dcf20f5b33efdb76cbd4fab5b11182d396939202390"
+    },
+    {
+      "id": "security_harness/isolation.py:verify_container:64:20:272:boolean:0",
+      "status": "KILLED",
+      "mutant_sha256": "0dc2478a2adb15998088e232914fa8eb5962cff8a6f7e56e458cebe30e4b5451"
+    },
+    {
+      "id": "security_harness/isolation.py:verify_container:65:29:273:compare:0",
+      "status": "KILLED",
+      "mutant_sha256": "0c42ed1518c39e49f9e3f2d59f88bee7b99c50d05a85c5a44608637994bcc519"
+    },
+    {
+      "id": "security_harness/isolation.py:verify_container:66:18:274:boolean:0",
+      "status": "KILLED",
+      "mutant_sha256": "06e0367eafa0c59a578d89ef88532a73ed6a174aa60ebdb8a9f93dd5fa15f087"
+    },
+    {
+      "id": "security_harness/isolation.py:verify_container:67:16:275:compare:0",
+      "status": "KILLED",
+      "mutant_sha256": "9ce208ba94dbaffa1f7b8815b3b1678452c4fe9f0ad491b16022e3bad894b662"
+    },
+    {
+      "id": "security_harness/isolation.py:verify_container:68:16:276:compare:0",
+      "status": "KILLED",
+      "mutant_sha256": "b9ad3c371dc78bdac856664b5c4a123ec0512f3d96f9025ca884f59a21d722e4"
+    },
+    {
+      "id": "security_harness/isolation.py:verify_container:69:18:277:compare:0",
+      "status": "KILLED",
+      "mutant_sha256": "3ec8dc921a9e239cf395cd0b3f65d536f2d0d6fa55c2c9df6b09605fbbfd03a4"
+    },
+    {
+      "id": "security_harness/isolation.py:verify_container:70:16:278:compare:0",
+      "status": "KILLED",
+      "mutant_sha256": "2b44b6afe9b5adecf4f5e47fad88e7582531d14633bae3093b6c636e18e37c8a"
+    },
+    {
+      "id": "security_harness/isolation.py:verify_container:71:17:279:boolean:0",
+      "status": "KILLED",
+      "mutant_sha256": "79ecf6ca71ea2e712995e15e4f816daa3d9ca6587aa696655cb6b172c34dde4e"
+    },
+    {
+      "id": "security_harness/isolation.py:verify_container:59:58:453:boolean:0",
+      "status": "KILLED",
+      "mutant_sha256": "a2243a2c6e1230f1cb6457757611e861ac1482dc08f54ac9409058cd6e6a4340"
+    },
+    {
+      "id": "security_harness/isolation.py:verify_container:64:20:464:compare:0",
+      "status": "KILLED",
+      "mutant_sha256": "aeb7bf5a1ea1b77bb1f56cbd261a927d2c0d23d47d30ca70ad27f3f01a9fbc1b"
+    },
+    {
+      "id": "security_harness/isolation.py:verify_container:64:51:465:negation:0",
+      "status": "KILLED",
+      "mutant_sha256": "104bbbc8e8385a961550ec12f141bb304ffa3c7aacb3d10a2af8ae165fa5c3ca"
+    },
+    {
+      "id": "security_harness/isolation.py:verify_container:66:18:470:compare:0",
+      "status": "KILLED",
+      "mutant_sha256": "f223254bc61b167c4d714f11696f65995915c60952056f94e37a7fdf97b0236e"
+    },
+    {
+      "id": "security_harness/isolation.py:verify_container:66:53:471:compare:0",
+      "status": "KILLED",
+      "mutant_sha256": "8941e2bfd12e183f2b9ec6fab8e5eaaf3a793c1561ffa36e3842cc6cba7dec0a"
+    },
+    {
+      "id": "security_harness/isolation.py:verify_container:71:18:485:boolean:0",
+      "status": "KILLED",
+      "mutant_sha256": "9f538900c745d1a670ad5314d761140b1cef8de3bb423aef4efbff42ff4fc71a"
+    },
+    {
+      "id": "security_harness/isolation.py:verify_container:71:70:486:boolean:0",
+      "status": "KILLED",
+      "mutant_sha256": "d2cbbf5562cc16ec60d5f6cdea8f69fff5dc8fe67acad63bece2dd2fc331993e"
+    },
+    {
+      "id": "security_harness/isolation.py:verify_container:71:18:768:compare:0",
+      "status": "KILLED",
+      "mutant_sha256": "63ab2ecafc935b2c3cf2319664c0766a7e341c8dd20525149e608d47a999cffa"
+    },
+    {
+      "id": "security_harness/isolation.py:verify_container:71:38:769:compare:0",
+      "status": "KILLED",
+      "mutant_sha256": "4c6479046cc6496a9f477ce61c9fefa80ff9f5941c9144aececace7298a39761"
+    },
+    {
+      "id": "security_harness/isolation.py:verify_container:71:70:771:compare:0",
+      "status": "KILLED",
+      "mutant_sha256": "36ee5233349d66c2fbd9b71360102322d17f0daf25d56c1eba0117335e7326d4"
+    },
+    {
+      "id": "security_harness/isolation.py:verify_container:71:91:772:compare:0",
+      "status": "KILLED",
+      "mutant_sha256": "979f4e44eff99b3eab7aeeafab5c48ea6175b0023bdd13c64520e8dfd2c384ff"
+    },
+    {
+      "id": "security_harness/isolation.py:verify_container:73:53:776:negation:0",
+      "status": "KILLED",
+      "mutant_sha256": "43ba822457cd0d92fe6e76d8331f148787df74745d6f817c7be8a9cc212264f6"
+    },
+    {
+      "id": "security_harness/scope.py:validate_model_roe:36:8:56:boolean:0",
+      "status": "KILLED",
+      "mutant_sha256": "cae56760d96a26f8e80ab3f87bc98b1e114fd0ae0b113f4b590855a76b6dccf1"
+    },
+    {
+      "id": "security_harness/scope.py:validate_model_roe:42:8:60:boolean:0",
+      "status": "KILLED",
+      "mutant_sha256": "a39a60af6f9846161b9b2e3135530e5fe867626b125f1102f692e0ad3cf82c68"
+    },
+    {
+      "id": "security_harness/scope.py:validate_model_roe:36:8:98:negation:0",
+      "status": "KILLED",
+      "mutant_sha256": "2929c1d02d944a61dd34e80ecd63bd2e5aca867ee3d1f369f05821252e0af848"
+    },
+    {
+      "id": "security_harness/scope.py:validate_model_roe:36:52:99:negation:0",
+      "status": "KILLED",
+      "mutant_sha256": "8f8dc805bec07f9dd88d34f2ffcbbc9d0d09f05c80838902577022a13b815d0b"
+    },
+    {
+      "id": "security_harness/scope.py:validate_model_roe:38:15:101:compare:0",
+      "status": "KILLED",
+      "mutant_sha256": "28968d3501d18a94e7844aa9c4be69c6533f151be2de79512940bf0b2823f476"
+    },
+    {
+      "id": "security_harness/scope.py:validate_model_roe:39:15:102:negation:0",
+      "status": "KILLED",
+      "mutant_sha256": "4ca77fc08e67827c2ccd3fe8a93c7471bb38d2344d6e8757dd0fe8a34e3023f0"
+    },
+    {
+      "id": "security_harness/scope.py:validate_model_roe:42:8:108:negation:0",
+      "status": "KILLED",
+      "mutant_sha256": "4ff3458ad6e22c5448095c94ff47c1d1cb9cf5e4d00238d62574617a88f8e90f"
+    },
+    {
+      "id": "security_harness/scope.py:validate_model_roe:42:37:109:compare:0",
+      "status": "KILLED",
+      "mutant_sha256": "444315e1e3c163c9b792887c11a186a476339bc80e58ce4c6617def60e4afae5"
+    },
+    {
+      "id": "security_harness/scope.py:validate_model_roe:42:83:110:compare:0",
+      "status": "KILLED",
+      "mutant_sha256": "d5c7dabc0119ba65d559e43560352d0e747cae76b9fe0a7070d5ce98eea71941"
+    },
+    {
+      "id": "security_harness/scope.py:validate_model_roe:43:15:111:compare:0",
+      "status": "KILLED",
+      "mutant_sha256": "ff11a5642318fa76b28e2a526c101a0710503e80359bb4f3113aecf981ecdd85"
+    },
+    {
+      "id": "security_harness/scope.py:validate_model_roe:44:15:112:compare:0",
+      "status": "KILLED",
+      "mutant_sha256": "e40fd0831a9e686269fef78e577c57bafba772db35606de6f58003151489158a"
+    },
+    {
+      "id": "security_harness/scope.py:validate_model_roe:44:55:113:compare:0",
+      "status": "KILLED",
+      "mutant_sha256": "a8b49a298d467b2f8966b5edc5e410b8adaac5f789cdda128d655d2f26abb7f9"
+    },
+    {
+      "id": "security_harness/scope.py:validate_model_roe:45:15:114:negation:0",
+      "status": "KILLED",
+      "mutant_sha256": "be170c558d43e1a467d54b16dbc610cd72eacdff57e141fbd3205f1b6a463822"
+    },
+    {
+      "id": "security_harness/scope.py:validate_model_roe:45:48:115:negation:0",
+      "status": "KILLED",
+      "mutant_sha256": "161401b8704f10f6f7ed3b7388e639b46f2b9d3432898098669fd87967d3c0b0"
+    },
+    {
+      "id": "security_harness/scope.py:validate_model_roe:45:63:116:compare:0",
+      "status": "KILLED",
+      "mutant_sha256": "a8dd9fea0f0aa438f90ae9508893eecb7d3436198b83585f7bd241470a51c16b"
+    },
+    {
+      "id": "security_harness/scope.py:validate_model_roe:46:15:117:negation:0",
+      "status": "KILLED",
+      "mutant_sha256": "f9ce632d31ecd7568208cb495d2fd9169bc859dc24e5836b5942f0c375ae88bb"
+    },
+    {
+      "id": "security_harness/scope.py:validate_model_roe:46:59:118:negation:0",
+      "status": "KILLED",
+      "mutant_sha256": "93db868e64f9633ce7e6f243d531c38dfd451192cfb1e70a6ce96a83e4ba6f85"
+    },
+    {
+      "id": "security_harness/scope.py:validate_model_roe:47:15:119:compare:0",
+      "status": "KILLED",
+      "mutant_sha256": "e2151caafd2f0b7d79e5c545f930452a576e71fec99776171b808755644e4e97"
+    },
+    {
+      "id": "security_harness/scope.py:validate_model_roe:47:64:120:negation:0",
+      "status": "KILLED",
+      "mutant_sha256": "41a1a39c846d89845e255f0f5b82cfa788a5c015b6962891fc233c97ea2cda11"
+    },
+    {
+      "id": "security_harness/scope.py:validate_model_roe:48:15:121:compare:0",
+      "status": "KILLED",
+      "mutant_sha256": "216c41250b5e4055b608b0b6369aa68117e1522bbb5229f40f8aacb53e1db243"
+    },
+    {
+      "id": "security_harness/scope.py:validate_model_roe:48:49:122:negation:0",
+      "status": "KILLED",
+      "mutant_sha256": "13e7aecde37d4ebd674a440dd15dfcd0bc5f32025925de8b35b82e2ecf366a2b"
+    },
+    {
+      "id": "security_harness/scope.py:validate_model_roe:49:15:123:negation:0",
+      "status": "KILLED",
+      "mutant_sha256": "5944ad8a42982c7c1e320a186c3bd78f594bd9c8cc5d44ab3e73f3efb9b956fc"
+    },
+    {
+      "id": "security_harness/scope.py:validate_model_roe:39:19:190:compare:0",
+      "status": "KILLED",
+      "mutant_sha256": "3d3bc9ac36a4c958175921ce41630633d9130cc5b7d45fb0909017615fe0f50f"
+    },
+    {
+      "id": "security_harness/scope.py:validate_model_roe:41:36:196:compare:0",
+      "status": "KILLED",
+      "mutant_sha256": "cf0d939402a23ae88f9723ad83868df26c737b6f3b12e38558970ffe1a1403f1"
+    },
+    {
+      "id": "security_harness/scope.py:validate_model_roe:46:19:222:compare:0",
+      "status": "KILLED",
+      "mutant_sha256": "84606786b834d30d1f1f23e4e02b8ef1fb166b33ad9217deb2a55d50d5e6a218"
+    },
+    {
+      "id": "security_harness/scope.py:validate_model_roe:46:63:224:compare:0",
+      "status": "KILLED",
+      "mutant_sha256": "8f8a22de5d445aa86a0927594673655ec0f81b7364b0273742739a7d7a287cd1"
+    },
+    {
+      "id": "security_harness/scope.py:validate_model_roe:47:68:229:compare:0",
+      "status": "KILLED",
+      "mutant_sha256": "53c83bd10572ab064b70e27beca8e07d6e50eaff0e3fa9179b59f750ccf5d312"
+    },
+    {
+      "id": "security_harness/scope.py:validate_model_roe:47:68:229:compare:1",
+      "status": "KILLED",
+      "mutant_sha256": "4424ae3c19d7da256560c3d1afaf2e35a45fd5b7ed01a3d5c3616c04c8922994"
+    },
+    {
+      "id": "security_harness/scope.py:validate_model_roe:48:53:234:compare:0",
+      "status": "KILLED",
+      "mutant_sha256": "f89529bf408b42795d17dcb1700385df0c320891e1be65a05812d6bd0da71a49"
+    },
+    {
+      "id": "security_harness/scope.py:validate_model_roe:48:53:234:compare:1",
+      "status": "KILLED",
+      "mutant_sha256": "2c97bc41a971f095c65d2240d8631fc8624bc7ecba9d2a54cd499b078ee44d2d"
+    },
+    {
+      "id": "security_harness/scope.py:validate_model_roe:37:19:307:compare:0",
+      "status": "KILLED",
+      "mutant_sha256": "3cf4027838af1d063d557aae02239d09f35053ec24638f4a8fa839090e255fba"
+    },
+    {
+      "id": "security_harness/scope.py:valid_remote_hosts:59:12:66:boolean:0",
+      "status": "KILLED",
+      "mutant_sha256": "87aaea9fa9097f4e9840de7c506fba4a6b7cdd20ecef643d9905fbb5e5168b4d"
+    },
+    {
+      "id": "security_harness/scope.py:valid_remote_hosts:59:40:128:compare:0",
+      "status": "KILLED",
+      "mutant_sha256": "22aa76c315eb5df42ff8a46e039f1ff920861f505999323df068716bf36cacf3"
+    },
+    {
+      "id": "security_harness/scope.py:valid_remote_hosts:60:20:379:boolean:0",
+      "status": "KILLED",
+      "mutant_sha256": "dc9371553748e3ed4e4e055d55c2cba5dfe4c383bc9f3e514bd129df14f052cb"
+    },
+    {
+      "id": "security_harness/scope.py:valid_remote_hosts:60:44:489:compare:0",
+      "status": "KILLED",
+      "mutant_sha256": "433f47af33d9bd8bdd995dde3604f4edc671f454c63de979361b747e13080af5"
+    },
+    {
+      "id": "security_harness/scope.py:valid_remote_hosts:60:60:490:compare:0",
+      "status": "KILLED",
+      "mutant_sha256": "f2fca76066506f1b0dc3abc8d837c51be7e369aacb59bbb8caa9441e29de691b"
+    },
+    {
+      "id": "security_harness/scope.py:valid_remote_hosts:61:28:587:boolean:0",
+      "status": "KILLED",
+      "mutant_sha256": "1591bd1cea74e00e5a9c421349b7b74e21f33cec1b06c0dd29d1d7d7e68b9753"
+    },
+    {
+      "id": "security_harness/llm/benchmark.py:bounded_text:87:12:183:boolean:0",
+      "status": "KILLED",
+      "mutant_sha256": "c08b929d8c2be1ee066d649f9391377ccd52d34513165d5c0506c5d09b8e8225"
+    },
+    {
+      "id": "security_harness/llm/benchmark.py:bounded_text:87:12:297:compare:0",
+      "status": "KILLED",
+      "mutant_sha256": "facfad593a60c8878fb1af300bd4f82dff8fc2d2ffe340ae974a9545d7b7c501"
+    },
+    {
+      "id": "security_harness/llm/benchmark.py:bounded_text:87:35:298:compare:0",
+      "status": "KILLED",
+      "mutant_sha256": "f5c59df82b8c91ef1383085aa74860e04e3ea66341bfa2f62fde21754cf475c1"
+    },
+    {
+      "id": "security_harness/llm/benchmark.py:bounded_text:87:35:298:compare:1",
+      "status": "KILLED",
+      "mutant_sha256": "31758acc62336457b10a71531153a5d1b090ccde45e01464fc0737b0e7d51ff4"
+    },
+    {
+      "id": "security_harness/llm/benchmark.py:bounded_text:87:69:299:compare:0",
+      "status": "KILLED",
+      "mutant_sha256": "14050dfae1fc13ff8dd62fcb2ef117a1837461a7b60dca0b1ebb99b2a54dab7b"
+    },
+    {
+      "id": "security_harness/llm/benchmark.py:bounded_text:88:16:300:negation:0",
+      "status": "KILLED",
+      "mutant_sha256": "a5a5124a07c3327e223de017262f28471df8a9d44b90b933d95b372e2d541291"
+    },
+    {
+      "id": "security_harness/llm/benchmark.py:bounded_text:88:24:930:boolean:0",
+      "status": "KILLED",
+      "mutant_sha256": "69b77f495da32a7bbafb1a36f95bcb2cb2c8cfc4e2917dcca3a9249e237fc441"
+    },
+    {
+      "id": "security_harness/llm/benchmark.py:bounded_text:88:24:1104:compare:0",
+      "status": "KILLED",
+      "mutant_sha256": "869d523bf039c7e91808dc2df5e97d821b4916d100715503d9d4fdf1ad8c96a8"
+    },
+    {
+      "id": "security_harness/llm/benchmark.py:bounded_text:89:24:1105:compare:0",
+      "status": "KILLED",
+      "mutant_sha256": "3395b61f5e0b45864662927d1f47cc571ab4e618f58c9c6c6422143f53ec2db8"
+    },
+    {
+      "id": "security_harness/llm/benchmark.py:bounded_text:90:24:1106:compare:0",
+      "status": "KILLED",
+      "mutant_sha256": "096214d1427088141aa48b0a9e036ca5142b1834beef8f9571648c08d622c2c9"
+    },
+    {
+      "id": "security_harness/llm/benchmark.py:bounded_text:90:24:1106:compare:1",
+      "status": "KILLED",
+      "mutant_sha256": "4117da05d947d3b15253c68654dcaf235225c134eca8f9ace5709f6f9a665e59"
+    },
+    {
+      "id": "security_harness/llm/benchmark.py:bounded_text:90:54:1107:compare:0",
+      "status": "KILLED",
+      "mutant_sha256": "4fb17609640e9c65e0515c863001dd0e91d31d02986ad1e4b99132914f559234"
+    },
+    {
+      "id": "security_harness/llm/benchmark.py:bounded_text:90:54:1107:compare:1",
+      "status": "KILLED",
+      "mutant_sha256": "296df5d34e246a8000a16d06a8dc8aee5d1f4a5e19b1cf6fafecefbe923d7c21"
+    },
+    {
+      "id": "security_harness/llm/benchmark.py:validate_review:94:8:187:boolean:0",
+      "status": "KILLED",
+      "mutant_sha256": "c5c15e4a0e139c4c1e0017e06f3447c24d0b009d4bc0e5758485d838be013c23"
+    },
+    {
+      "id": "security_harness/llm/benchmark.py:validate_review:94:8:302:negation:0",
+      "status": "KILLED",
+      "mutant_sha256": "e9051e1bda955917bd5340f67f8207908436ad92f8340b3dfb395f0059993a7f"
+    },
+    {
+      "id": "security_harness/llm/benchmark.py:validate_review:94:39:303:compare:0",
+      "status": "KILLED",
+      "mutant_sha256": "ff78a0114ba0ac4d92c223d0b5a51e418a513488aa2abfb26633d8d6ae5485d0"
+    },
+    {
+      "id": "security_harness/llm/benchmark.py:validate_review:95:12:304:compare:0",
+      "status": "KILLED",
+      "mutant_sha256": "427445298a60f682940de14bdaa250a46baea3e1cc49a9c41e8b1b288db240be"
+    },
+    {
+      "id": "security_harness/llm/benchmark.py:validate_review:95:47:305:compare:0",
+      "status": "KILLED",
+      "mutant_sha256": "3661c18b88df38a9a93725ffa2ebb64151c412b13a441b6a6be9bade64c24b68"
+    },
+    {
+      "id": "security_harness/llm/benchmark.py:validate_review:96:12:306:negation:0",
+      "status": "KILLED",
+      "mutant_sha256": "3bebe94e995e1fc7fc93fda373e890aaa60d1e4648a82246493461e47c1a4d1b"
+    },
+    {
+      "id": "security_harness/llm/benchmark.py:validate_review:96:49:307:compare:0",
+      "status": "KILLED",
+      "mutant_sha256": "a3a4dd67a6e66dc1ff06f08c210d869c8f3fa0de5cdc1506abe50e317938d703"
+    },
+    {
+      "id": "security_harness/llm/benchmark.py:validate_review:97:12:308:compare:0",
+      "status": "KILLED",
+      "mutant_sha256": "5e7d66fda55ac2dc419de4af25aa1dfd4e1e278b8af747e908397d1d8316dd5b"
+    },
+    {
+      "id": "security_harness/llm/benchmark.py:validate_review:97:42:309:compare:0",
+      "status": "KILLED",
+      "mutant_sha256": "3d99ac691eb07b02c22d0fffb00525a9f51439a48163c25f0bb8da0834d88a95"
+    },
+    {
+      "id": "security_harness/llm/benchmark.py:validate_review:101:12:321:boolean:0",
+      "status": "KILLED",
+      "mutant_sha256": "89fb1baf26ebe3a7346170312f43d96e1ef81930c7c6753702bf208b89ff1664"
+    },
+    {
+      "id": "security_harness/llm/benchmark.py:validate_review:106:11:323:compare:0",
+      "status": "KILLED",
+      "mutant_sha256": "d8fc473e74ae45e5d0c73a08e044d930d6430c0a26693c2fbb1e997b3ea6b028"
+    },
+    {
+      "id": "security_harness/llm/benchmark.py:validate_review:109:11:327:compare:0",
+      "status": "KILLED",
+      "mutant_sha256": "3ba9012e73745cb6547e2d46ebc80eb1a01f2f1448534ab285214a8f0c7babb1"
+    },
+    {
+      "id": "security_harness/llm/benchmark.py:validate_review:97:70:492:compare:0",
+      "status": "KILLED",
+      "mutant_sha256": "d345feffda2aa1846086fab5b3de7c70836bb6ec479ba1b4ac3ace67348f081c"
+    },
+    {
+      "id": "security_harness/llm/benchmark.py:validate_review:101:12:502:negation:0",
+      "status": "KILLED",
+      "mutant_sha256": "e03df7f58fb4159481b00594de45ffda4bdbb0dd186c39de88f6a83a315623fe"
+    },
+    {
+      "id": "security_harness/llm/benchmark.py:validate_review:101:45:503:compare:0",
+      "status": "KILLED",
+      "mutant_sha256": "44dbe4fa08d780e68c07e9d6d3703a05c84b1e8910e788e5e791b51126c82c42"
+    },
+    {
+      "id": "security_harness/llm/benchmark.py:validate_review:102:16:504:compare:0",
+      "status": "KILLED",
+      "mutant_sha256": "b408077648fb95a2ff731a637266161abe292e21f94fbe2e2cce8dbda9166044"
+    },
+    {
+      "id": "security_harness/llm/benchmark.py:validate_review:102:46:505:compare:0",
+      "status": "KILLED",
+      "mutant_sha256": "a4b06e096bfe1380b9ad951476f99670ca25c16ca9cf20fa2f1056363b674f09"
+    },
+    {
+      "id": "security_harness/llm/benchmark.py:validate_review:103:16:506:negation:0",
+      "status": "KILLED",
+      "mutant_sha256": "1d98ae9c275b8f1255758e8234f00f5f0b4c131446af982d49effdaa583cb538"
+    },
+    {
+      "id": "security_harness/llm/benchmark.py:validate_review:104:16:507:negation:0",
+      "status": "KILLED",
+      "mutant_sha256": "b2aa4e3d66f0c4d5c815ee846a1fbef8152a0987287c8af8876e002e10731aca"
+    },
+    {
+      "id": "security_harness/llm/benchmark.py:validate_review:103:20:741:compare:0",
+      "status": "KILLED",
+      "mutant_sha256": "cc16477a4736b63b1b7580c1fb96656fd0b1536f5c8dc23bc918b6162456cc75"
+    },
+    {
+      "id": "security_harness/llm/benchmark.py:validate_review:103:20:741:compare:1",
+      "status": "KILLED",
+      "mutant_sha256": "bc0e5bcc3d3f766cdc907ffdeeb9c897e88569cb118c842dac7d97d99cc4ec76"
+    },
+    {
+      "id": "security_harness/llm/benchmark.py:parse_review:116:7:202:compare:0",
+      "status": "KILLED",
+      "mutant_sha256": "e13f7d01a7c4a0a102f1e71197c64b44fd9a69e546e70e7d55b76cdfce14b2ac"
+    }
+  ],
+  "baselines": [
+    {
+      "target": "security_harness/results.py",
+      "tests": 81,
+      "selection": [
+        "tests/test_policy.py",
+        "tests/test_security_properties.py"
+      ],
+      "passed": true,
+      "normalized_passed": true
+    },
+    {
+      "target": "security_harness/github_http.py",
+      "tests": 143,
+      "selection": [
+        "tests/test_trusted_publisher.py",
+        "tests/test_security_properties.py"
+      ],
+      "passed": true,
+      "normalized_passed": true
+    },
+    {
+      "target": "security_harness/preflight.py",
+      "tests": 36,
+      "selection": [
+        "tests/test_preflight.py"
+      ],
+      "passed": true,
+      "normalized_passed": true
+    },
+    {
+      "target": "security_harness/authorization.py",
+      "tests": 10,
+      "selection": [
+        "tests/test_response_comparison.py"
+      ],
+      "passed": true,
+      "normalized_passed": true
+    },
+    {
+      "target": "security_harness/isolation.py",
+      "tests": 18,
+      "selection": [
+        "tests/test_isolation.py",
+        "-m",
+        "not integration"
+      ],
+      "passed": true,
+      "normalized_passed": true
+    },
+    {
+      "target": "security_harness/scope.py",
+      "tests": 58,
+      "selection": [
+        "tests/test_scope.py",
+        "tests/test_model_hardening.py::test_model_roe_rejects_malformed_destination_allowlists",
+        "tests/test_model_hardening.py::test_model_roe_boundaries_are_inclusive",
+        "tests/test_model_hardening.py::test_remote_host_allowlist_size_boundary"
+      ],
+      "passed": true,
+      "normalized_passed": true
+    },
+    {
+      "target": "security_harness/llm/benchmark.py",
+      "tests": 89,
+      "selection": [
+        "tests/test_model_benchmark.py",
+        "--deselect=tests/test_model_benchmark.py::test_review_cli_supervision_and_explicit_live_opt_in",
+        "--deselect=tests/test_model_benchmark.py::test_review_cli_accepts_large_budgets_only_within_the_total_cap",
+        "tests/test_security_properties.py"
+      ],
+      "passed": true,
+      "normalized_passed": true
+    }
+  ],
+  "source_sha256": {
+    "security_harness/results.py": "7385ee5944816a90c6e163d0dec6ad376a0718892a27b41b108beae06dbfe3aa",
+    "security_harness/github_http.py": "447860a5b89af8d0be32e2887253cade75bf761100e31ffe91722b36d29c5f87",
+    "security_harness/preflight.py": "1535541402bd311c16fc4eb368fa0197f91f03004830f5f6a02bcaecc54e2010",
+    "security_harness/authorization.py": "d7be1c2b3fe065a423695b58882348240667d4762ba0b1390f99975456e22930",
+    "security_harness/isolation.py": "78d84c427a74180a5682a025d4472d5c6dbdb3d69c8b9db14e4c07b622735bea",
+    "security_harness/scope.py": "0487783068cb28b0cdeac38626aa59df9c1e02cb118c45f9fe4500811de5e20c",
+    "security_harness/llm/benchmark.py": "a8c30022e38284b0f7d10ed31e946320e43d93aef91750fd1319a7f8c151bfa1"
+  },
+  "python": "3.12.15",
+  "test_tools": {
+    "pytest": "9.1.1",
+    "hypothesis": "6.168.3",
+    "sortedcontainers": "2.4.0"
+  },
+  "limitations": "Trusted local predicates only; not a sandbox or full-repository score.",
+  "snapshot_sha256": "58c2bd77423793a7d19e7382894571417c805955acfe4ed54fc75143ddcdbcb7",
+  "counts": {
+    "KILLED": 206,
+    "SURVIVED": 0,
+    "TIMEOUT": 0,
+    "ERROR": 0
+  },
+  "mutation_score": 1.0,
+  "cleanup_completed": true
+}

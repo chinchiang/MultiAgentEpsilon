@@ -1,0 +1,4 @@
+#!/bin/sh
+# 僅供離線測試，不支援 GitHub 操作。 / OFFLINE TEST PROFILE ONLY: no GitHub operations are supported.
+printf "%s\n" "OFFLINE TEST PROFILE: gh is disabled; inject an offline runner" >&2
+exit 126
