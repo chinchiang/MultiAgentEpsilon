@@ -7,12 +7,12 @@ import math
 import os
 from pathlib import Path
 import stat
-import sys
 import time
 from uuid import uuid4
+from recovery import restore_protection, read_recovery_evidence
 from migration import FIELDS, SCOPE, run, assess_outcome, preflight_valid
 from github_adapter import GhTransport, GitHubAdapter, ROOT, need, strict_json
-from runtime import Journal, ProcessLock, ProtectedRemote, sync_json, termination_guard, recovery_signals
+from runtime import Journal, ProcessLock, ProtectedRemote, sync_json, termination_guard
 
 
 def digest(value):
@@ -22,7 +22,7 @@ def digest(value):
 def tool_digests(workspace):
     directory = workspace / 'scratch/controlled_migration'
     return {name: hashlib.sha256((directory/name).read_bytes()).hexdigest()
-            for name in ('migration.py', 'command.py', 'github_adapter.py', 'runtime.py')}
+            for name in ('migration.py', 'command.py', 'github_adapter.py', 'runtime.py', 'recovery.py')}
 
 
 def read_private(path):
@@ -70,23 +70,10 @@ def clear_active(state):
         os.close(descriptor)
 
 
-def recover(remote, original):
-    # 到期授權仍允許原範圍的必要恢復；不做合併或任何其他寫入。
-    with recovery_signals():
-        while True:
-            try:
-                remote.set_ruleset(original)
-                if remote.read_ruleset(recovery=True) == original:
-                    return {'status': 'RESTORED', 'restored': True, 'accepted': False}
-                print('RECOVERY_READBACK_MISMATCH', file=sys.stderr, flush=True)
-            except KeyboardInterrupt:
-                return {'status': 'RECOVERY_REQUIRED', 'restored': False, 'accepted': False}
-            except Exception as error:
-                print('RECOVERY_RETRY '+type(error).__name__, file=sys.stderr, flush=True)
-            try:
-                time.sleep(2)
-            except KeyboardInterrupt:
-                return {'status': 'RECOVERY_REQUIRED', 'restored': False, 'accepted': False}
+def recover(remote, original, *, evidence=None, clock=None):
+    summary = restore_protection(remote, original, evidence=evidence, clock=clock)
+    return {'status': 'RESTORED' if summary['restored'] else 'RECOVERY_REQUIRED',
+            'restored': summary['restored'], 'accepted': False, 'recovery': summary}
 
 
 def main(argv=None, *, workspace=ROOT, transport_factory=GhTransport):
@@ -140,24 +127,13 @@ def main(argv=None, *, workspace=ROOT, transport_factory=GhTransport):
                 need(saved_plan == plan and saved_auth == auth, 'RECOVERY_SCOPE')
                 saved = read_private(directory/'recovery.json')['ruleset']
                 need(saved == plan['expected_ruleset'], 'RECOVERY_RULE_DRIFT')
-                journal = Journal.resume(directory)
+                evidence = read_recovery_evidence(directory/'events.jsonl')
+                journal = Journal.resume(directory, preserve_events=evidence['corrupt'])
                 remote = ProtectedRemote(GitHubAdapter(transport_factory(write_enabled=True, evidence=journal), saved), journal)
                 remote.saved, remote.original = True, saved
-                with journal.path.open('r', encoding='utf-8') as stream:
-                    raw_events = stream.read(8*1024**2+1)
-                need(len(raw_events) <= 8*1024**2, 'RECOVERY_EVENTS_LIMIT')
-                try:
-                    events = [json.loads(line) for line in raw_events.splitlines()]
-                    attempted = any(e.get('event') == 'write_intent' and e.get('operation') == 'ruleset'
-                                    and e.get('payload', {}).get('enforcement') == 'disabled' for e in events)
-                except (ValueError, TypeError):
-                    attempted = True  # 不完整紀錄保守視為可能已送出。
-                if attempted:
-                    result = recover(remote, saved)
-                else:
-                    restored = remote.read_ruleset(recovery=True) == saved
-                    result = {'status': 'RESTORED' if restored else 'RECOVERY_REQUIRED',
-                              'restored': restored, 'accepted': False, 'remote_writes': 0}
+                result = recover(remote, saved, evidence=evidence)
+                if not evidence['possibly_disabled']:
+                    result['remote_writes'] = 0
             else:
                 directory = state/(datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')+'-'+uuid4().hex[:8])
                 journal = Journal(directory)
@@ -169,7 +145,7 @@ def main(argv=None, *, workspace=ROOT, transport_factory=GhTransport):
                 remote = ProtectedRemote(GitHubAdapter(transport_factory(write_enabled=True, evidence=journal), plan['expected_ruleset']), journal)
                 result = run(plan, remote, execute=True, authorization=auth)
             journal.save('result.json', result)
-            if result.get('restored') is True or result.get('remote_writes') == 0:
+            if result.get('restored') is True:
                 clear_active(state)
             return output({**result, 'evidence_directory': str(directory)},
                           0 if result.get('accepted') or (args.recover and result.get('restored'))

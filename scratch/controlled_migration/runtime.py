@@ -2,10 +2,19 @@
 import fcntl
 import json
 import os
+import stat
 import sys
 from pathlib import Path
 from datetime import datetime, timezone
 from uuid import uuid4
+
+
+def recovery_warning(message):
+    """盡力輸出固定恢復告警；Best-effort fixed recovery diagnostic output."""
+    try:
+        print(message, file=sys.stderr, flush=True)
+    except (OSError, ValueError):
+        pass
 
 
 def sync_json(path, value):
@@ -31,17 +40,29 @@ class Journal:
         self.path.touch(mode=0o600)
 
     @classmethod
-    def resume(cls, directory):
+    def resume(cls, directory, *, preserve_events=False):
         instance = cls.__new__(cls)
         instance.directory = Path(directory)
         instance.path = instance.directory/'events.jsonl'
-        if instance.directory.is_symlink() or instance.path.is_symlink() or not instance.path.is_file():
+        info = instance.directory.stat()
+        if (instance.directory.is_symlink() or not stat.S_ISDIR(info.st_mode)
+                or info.st_uid != os.getuid() or info.st_mode & 0o077
+                or instance.path.is_symlink() or (instance.path.exists() and not instance.path.is_file())):
+            raise ValueError('JOURNAL_PATH')
+        if preserve_events:
+            instance.path = instance.directory/('recovery-events-'+uuid4().hex+'.jsonl')
+            try:
+                instance.path.touch(mode=0o600, exist_ok=False)
+            except OSError:
+                pass  # 私有側錄無法建立時仍可恢復。 / Recovery must survive unavailable logging.
+        elif not instance.path.is_file():
             raise ValueError('JOURNAL_PATH')
         return instance
 
     def record(self, event, **data):
         value = {'time': datetime.now(timezone.utc).isoformat(), 'event': event, **data}
-        with self.path.open('a', encoding='utf-8') as stream:
+        fd = os.open(self.path, os.O_WRONLY | os.O_APPEND | os.O_CREAT | os.O_NOFOLLOW, 0o600)
+        with os.fdopen(fd, 'a', encoding='utf-8') as stream:
             stream.write(json.dumps(value, ensure_ascii=False) + '\n')
             stream.flush()
             os.fsync(stream.fileno())
@@ -87,7 +108,7 @@ class ProtectedRemote:
         except OSError:
             if not restoring:
                 raise
-            print('RECOVERY_JOURNAL_UNAVAILABLE: continuing restore', file=sys.stderr)
+            recovery_warning('RECOVERY_JOURNAL_UNAVAILABLE: continuing restore')
         self.remote.set_ruleset(payload)
         try:
             self.journal.record('write_returned', operation='ruleset')
@@ -100,7 +121,7 @@ class ProtectedRemote:
         try:
             self.journal.record('ruleset_readback', ruleset=value)
         except OSError:
-            print('RECOVERY_READBACK_JOURNAL_UNAVAILABLE', file=sys.stderr)
+            recovery_warning('RECOVERY_READBACK_JOURNAL_UNAVAILABLE')
         return value
 
     def merge(self, head):
@@ -154,7 +175,7 @@ def termination_guard():
         nonlocal received
         received += 1
         if _restoring.get() and received == 1:
-            print('RECOVERY_CONTINUES_AFTER_SIGTERM', file=sys.stderr, flush=True)
+            recovery_warning('RECOVERY_CONTINUES_AFTER_SIGTERM')
             return
         raise KeyboardInterrupt('SIGTERM')
     previous = signal.signal(signal.SIGTERM, terminate)

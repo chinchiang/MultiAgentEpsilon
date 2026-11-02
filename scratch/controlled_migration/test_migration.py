@@ -325,3 +325,31 @@ def test_recovery_failures_emit_operator_alerts(capsys):
     result = run(PLAN, OnceUnavailable(), execute=True, authorization=consent(), clock=Clock())
     assert result['restored'] is True
     assert 'RECOVERY_RETRY' in capsys.readouterr().err
+
+
+def test_normal_coordinator_exposes_common_recovery_summary_and_preserves_counts():
+    remote = GitHub()
+    result = run(PLAN, remote, execute=True, authorization=consent(), clock=Clock())
+    assert result['recovery']['attempts'] == 1
+    assert result['recovery']['restored'] is True
+    assert result['remote_writes'] == 3
+    assert result['status'] == 'PENDING_ACCEPTANCE'
+
+
+def test_clock_failure_after_disable_does_not_discard_confirmed_recovery():
+    clock = Clock()
+    samples = 0
+    def monotonic():
+        nonlocal samples
+        samples += 1
+        if samples > 1:
+            raise OSError('clock unavailable')
+        return 0
+    clock.monotonic = monotonic
+    remote = GitHub()
+    result = run(PLAN, remote, execute=True, authorization=consent(), clock=clock)
+    assert result['restored'] is True
+    assert result['recovery']['incident'] is True
+    assert result['recovery']['time_reliable'] is False
+    assert remote.events.index('active') < remote.events.index('inspect')
+    assert 'merge' not in remote.events

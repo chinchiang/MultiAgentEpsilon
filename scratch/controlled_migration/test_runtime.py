@@ -92,7 +92,7 @@ def workspace_with_receipt(tmp_path):
     source = Path(__file__).parent
     tools = tmp_path/'scratch/controlled_migration'
     tools.mkdir(parents=True)
-    for name in ('migration.py', 'command.py', 'github_adapter.py', 'runtime.py'):
+    for name in ('migration.py', 'command.py', 'github_adapter.py', 'runtime.py', 'recovery.py'):
         shutil.copyfile(source/name, tools/name)
     plans = tmp_path/'scratch/certifi-controlled-migration-20261102'
     plans.mkdir()
@@ -175,7 +175,7 @@ def test_readonly_outcome_verification_refuses_disabled_protection(tmp_path, cap
     assert not any(path == 'pulls/64' for _, path, _ in transport.requests)
 
 
-@pytest.mark.parametrize('change', ['expired', 'wrong_head', 'unapproved', 'public_file', 'tool_changed'])
+@pytest.mark.parametrize('change', ['expired', 'wrong_head', 'unapproved', 'public_file', 'tool_changed', 'recovery_changed'])
 def test_receipt_failure_never_creates_remote_adapter(tmp_path, capsys, change):
     import time
     from command import main
@@ -188,6 +188,8 @@ def test_receipt_failure_never_creates_remote_adapter(tmp_path, capsys, change):
         auth['authorized'] = False
     elif change == 'public_file':
         receipt.chmod(0o644)
+    elif change == 'recovery_changed':
+        (tmp_path/'scratch/controlled_migration/recovery.py').write_text('# changed after approval')
     elif change == 'tool_changed':
         (tmp_path/'scratch/controlled_migration/migration.py').write_text('# changed after approval')
     receipt.write_text(json.dumps(auth))

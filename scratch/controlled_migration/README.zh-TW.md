@@ -33,7 +33,7 @@
 
 ## 正式執行前的人工準備
 
-`authorization.template.json` 刻意維持 `authorized=false`、`expires_at=0`。它綁定完整範圍、審閱過的設定及四個執行模組的 SHA-256。工具不會自行將它改成已授權。
+`authorization.template.json` 刻意維持 `authorized=false`、`expires_at=0`。它綁定完整範圍、審閱過的設定及五個執行模組的 SHA-256。工具不會自行將它改成已授權。
 
 擁有者必須另外明確核准例外操作，重新查核上游安全公告，確認維護凍結、備援人員與獨立恢復連線；之後由操作人員將核准依據記入新的授權檔，設定十分鐘內的 Unix 到期時間及備援人員。授權檔須為目前使用者擁有的 regular file，權限 `0600`，不可是符號連結。範本不能直接通過；工具或設定變更後，舊授權也不能通過。不得把 Q1–Q7 的設計同意當成例外授權。
 
@@ -52,6 +52,8 @@
 
 `SIGTERM` 轉為取消，由協調器進入恢復。恢復途中再次收到中斷則交接備援，保留 `active.json`，回報 `RECOVERY_REQUIRED`；不得宣稱已恢復。工具無法在 `SIGKILL`、整台主機斷線或 API 長期不可用時保證恢復。維護凍結與獨立備援仍為必要條件。
 
+首次執行與程序重啟都使用 `recovery.py` 的共同恢復入口。重啟依最早已落盤的停用意圖計算已經過的時間，不重新給予 120 秒；接續以程序內單調時鐘計時。時間缺失、格式不可靠或時鐘不可用時立即標為事件並繼續恢復。回傳的 `recovery` 摘要包含本輪嘗試次數、恢復確認、事件標記、時間可靠性、可判定的經過秒數與最後錯誤，保留既有頂層狀態、退出碼及計數語義。
+
 程序重啟後，只使用原核准檔與原操作紀錄恢復，不重送合併；原授權到期也不妨礙同範圍的必要恢復：
 
 ```bash
@@ -60,7 +62,7 @@
   --authorization scratch/controlled_migration/authorization.approved.json
 ```
 
-此命令只能處理 `active.json` 指向的操作，不能指定任意規則或其他 PR。若能確認未曾記錄停用意圖，只讀回設定；紀錄不完整則保守視為可能已停用。恢復後完整讀回一致，才清除 active 標記。執行版本改變、紀錄損壞或原核准檔遺失時會停止，需備援管理者依保留的 `recovery.json` 審核恢復；不要刪除現場紀錄以繞過保護。
+此命令只能處理 `active.json` 指向的操作，不能指定任意規則或其他 PR。完整事件紀錄能確認未曾停用時只讀回設定；讀回不符或未知時保留 active 標記，不能用零次嘗試結案。事件紀錄損壞、截斷、UTF-8 無法解碼、超限或遺失時，只有在原授權、計畫、恢復快照及可信路徑均通過驗證後，才保守視為可能已停用並恢復。原始損壞紀錄保留，恢復紀錄另寫私人側錄檔；紀錄或告警無法輸出時仍嘗試必要恢復。恢復結果須完整讀回確認，且最後報告成功落盤，才清除 active 標記。工具版本改變、基礎資料損壞、路徑不可信或原核准檔遺失時仍會停止，需備援管理者審核；不要刪除現場紀錄以繞過保護。
 
 ## 狀態與退出碼
 
@@ -76,7 +78,7 @@
 
 ## 檔案與信任邊界
 
-`migration.py` 負責協調，`github_adapter.py` 負責 GitHub 傳輸與來源驗證，`runtime.py` 負責持久化、鎖與訊號，`command.py` 負責模式、授權與重新啟動。只信任目前使用者控制的工作目錄與已安裝的 `gh`；本工具不防禦同帳號惡意修改程式或 credential store。GitHub merge API 只原子鎖定 head，無法原子鎖定 base，須靠維護凍結、即時查核與合併後 parents 驗證。
+`migration.py` 負責協調，`github_adapter.py` 負責 GitHub 傳輸與來源驗證，`runtime.py` 負責持久化、鎖與訊號，`command.py` 負責模式、授權與重新啟動，`recovery.py` 集中共同恢復策略與有界事件證據判讀。只信任目前使用者控制的工作目錄與已安裝的 `gh`；本工具不防禦同帳號惡意修改程式或 credential store。GitHub merge API 只原子鎖定 head，無法原子鎖定 base，須靠維護凍結、即時查核與合併後 parents 驗證。
 
 本目錄僅明確納入工具、測試、未授權範本與必要參考檔；執行紀錄與原始查核資料仍保留在忽略版控的 `scratch/`。工具另行提交至獨立分支，PR #64 仍只有 requirements.lock 修正。程式與離線測試已完成；真實環境的唯讀查核、備援演練與遠端執行仍未進行。GitHub 介接器不重新查詢 PyPI／OSV，正式操作前仍須另外確認上游安全公告與既有工程評估的有效性。
 
@@ -106,3 +108,8 @@ Read-only preflight applies the complete predicate and exits with BLOCKED/2 when
 Persistent snapshots and write intents are synced before mutation. A process lock and active-operation marker prevent a second coordinator. Only one exact-head merge request is permitted. Uncertain responses restore protection before outcome inspection; the 60-second merge cutoff and 120-second recovery target never justify abandoning recovery. Logging failures must not block restoration.
 
 Restart recovery uses `--execute --recover --authorization <original-approved-file>`, only restores the active operation, and never retries a merge. Expired original authorization remains usable solely for necessary recovery. SIGTERM enters recovery; interruption during recovery requires backup handoff. SIGKILL, host loss, and prolonged API failure still require the independent recovery route. Exit code 0 denotes a successful dry run, read-only preflight, confirmed recovery, or fully accepted migration; 3 means restored but pending/failed acceptance; 2 indicates a blocker or required recovery. Raw responses and operation records remain local in ignored scratch directories. Only explicitly selected tool/test/reference files are versioned on the separate tools branch.
+
+
+Both initial and restarted recovery use `recovery.py`. Restart retains elapsed time from the earliest durable disable intent and continues with a monotonic clock. Unreliable timing escalates an incident while restoration continues. A common `recovery` summary reports attempts, confirmed restoration, incident state, time reliability, known elapsed seconds, and the last error; existing top-level statuses, counters, and exit codes retain their meanings.
+
+Corrupt, truncated, oversized, unreadable, or missing event data permits conservative restoration only after the saved authorization, plan, snapshot, active-operation scope, and trusted paths pass validation. Preserve corrupt source data and use a private sidecar for recovery events. Logging failure must not block necessary restoration. Valid records proving no disable require readback only; unconfirmed readback never clears the active marker merely because attempts are zero. All five executable modules, including recovery.py, are bound by authorization digests.

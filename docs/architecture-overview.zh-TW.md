@@ -147,9 +147,12 @@ MultiAgentEpsilon/
 │       ├── github_adapter.py
 │       ├── migration.py
 │       ├── mutation-success.fixture.json
+│       ├── recovery.py
 │       ├── runtime.py
 │       ├── test_github.py
 │       ├── test_migration.py
+│       ├── test_recovery.py
+│       ├── test_recovery_cli.py
 │       └── test_runtime.py
 ├── scripts/
 │   ├── __init__.py

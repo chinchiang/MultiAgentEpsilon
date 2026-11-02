@@ -1,6 +1,7 @@
 """限定 PR #64 與指定規則集的 GitHub 介接器。"""
 from copy import deepcopy
 from migration import FIELDS, SCOPE
+from runtime import recovery_warning
 
 
 def need(condition, code):
@@ -261,7 +262,7 @@ class GhTransport:
             except OSError:
                 if path != 'rulesets/24512048':
                     raise
-                print('RECOVERY_HTTP_JOURNAL_UNAVAILABLE', file=sys.stderr, flush=True)
+                recovery_warning('RECOVERY_HTTP_JOURNAL_UNAVAILABLE')
         return response if binary else strict_json(response)
 
     def items(self, path, key=None, *, deadline=None, clock=None):

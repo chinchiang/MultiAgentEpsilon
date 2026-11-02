@@ -7,8 +7,7 @@ inspect_outcome 必須查核合併內容與正式 CI，不可將未查核的資�
 from copy import deepcopy
 import time
 import re
-import sys
-from runtime import recovery_signals
+from recovery import restore_protection
 
 SCOPE = {
     'repository': 'chinchiang/MultiAgentEpsilon', 'pr': 64, 'ruleset_id': 24512048,
@@ -82,31 +81,16 @@ def run(plan, remote, *, execute=False, authorization=None, clock=None):
     finally:
         result['restored'] = False
         result['restore_payload'] = deepcopy(original)
-        with recovery_signals():
-            while not result['restored']:
-                try:
-                    result['remote_writes'] += 1
-                    remote.set_ruleset(original)
-                    readback = remote.read_ruleset(recovery=True)
-                    result['restored'] = {k: readback[k] for k in FIELDS} == original
-                    if not result['restored']:
-                        raise RuntimeError('RESTORE_READBACK_DRIFT')
-                except KeyboardInterrupt:
-                    result['status'] = 'RECOVERY_REQUIRED'
-                    result['errors'].append('RECOVERY_INTERRUPTED_USE_BACKUP')
-                    return result
-                except Exception as error:
-                    result['errors'].append('RESTORE_' + type(error).__name__)
-                    result['errors'] = result['errors'][-100:]
-                    label = 'RECOVERY_INCIDENT' if clock.monotonic() - started >= 120 else 'RECOVERY_RETRY'
-                    print(label+' '+type(error).__name__, file=sys.stderr, flush=True)
-                    # 不因 120 秒目標已過而放棄恢復；只重送同一恢復 payload。
-                    try:
-                        clock.sleep(2)
-                    except KeyboardInterrupt:
-                        result['status'] = 'RECOVERY_REQUIRED'
-                        return result
-    result['window_exceeded'] = clock.monotonic() - started >= 120
+        summary = restore_protection(remote, original, clock=clock, started=started)
+        result['recovery'] = summary
+        result['remote_writes'] += summary['attempts']
+        result['restored'] = summary['restored']
+        result['errors'] = (result['errors']+summary['errors'])[-100:]
+        if not summary['restored']:
+            result['status'] = 'RECOVERY_REQUIRED'
+            return result
+    elapsed = result['recovery']['elapsed_seconds']
+    result['window_exceeded'] = elapsed is not None and elapsed >= 120
     try:
         result['outcome'] = remote.inspect_outcome()
     except (Exception, KeyboardInterrupt) as error:
