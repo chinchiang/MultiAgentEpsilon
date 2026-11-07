@@ -18,7 +18,7 @@
 
 登入憑證隨每次 schema 產生；session 使用隨機 opaque 權杖，資料庫只存權杖雜湊，15 分鐘到期，登出即刪除。這是 fixture 的最小認證，不是完整登入安全方案，尚未驗證 MFA、防暴力破解或生產等級 session 政策。HTTP 僅本機，沒有 TLS 合規聲明。
 
-受測操作為讀取、更新、刪除及租戶匯出，尚未提供建立等完整產品 CRUD。更新採單一具 tenant／owner／role 條件的 SQL，避免先查後寫的授權窗口。測試包含 44 個案例（含刪除、過期與已登出工作階段、各端點的匿名／偽造身分、越界 ID 與 NUL 輸入，以及延遲副作用），會查 PostgreSQL 真實副作用；另有真實 HTTP 啟動／登入 smoke。可信 CI 在無網路容器中執行候選 fixture，由容器外的 oracle 經受限 HTTP bridge 與獨立資料庫查詢評分；本機開發另有在 loopback 執行真實 HTTP 的版本。兩者都屬灰箱，不能稱為完整純黑箱 DAST。
+受測操作為讀取、更新、刪除及租戶匯出，尚未提供建立等完整產品 CRUD。更新採單一具 tenant／owner／role 條件的 SQL，避免先查後寫的授權窗口。測試包含 48 個案例（含隨機權杖與未列出方法／路由的契約外探測、含刪除、過期與已登出工作階段、各端點的匿名／偽造身分、越界 ID 與 NUL 輸入，以及延遲副作用），會查 PostgreSQL 真實副作用；另有真實 HTTP 啟動／登入 smoke。可信 CI 在無網路容器中執行候選 fixture，由容器外的 oracle 經受限 HTTP bridge 與獨立資料庫查詢評分；本機開發另有在 loopback 執行真實 HTTP 的版本。兩者都屬灰箱，不能稱為完整純黑箱 DAST。
 
 刻意缺陷版只省略物件存取的 tenant／owner 約束，保留相同測試介面。預期抓到 bob／carol 的非法讀寫刪除各一次，加上 admin 跨租戶讀取、寫入與刪除，共 9 個違規；這組精確案例記錄在政策的 `seeded_defect_case_ids`，數量相同但換成其他案例失敗也不算通過。正式 server 腳本只允許 fixed variant；測試程式必須明確指定 vulnerable。
 
@@ -51,7 +51,7 @@ Flow: test → HTTP/ASGI → server-side authorization → PostgreSQL. Scanner/r
 
 Credentials are generated per schema; opaque random sessions are stored as hashes, expire after 15 minutes, and are deleted on logout. This minimal fixture authentication does not establish MFA, brute-force resistance, production session policy, or TLS compliance.
 
-The API supports read/update/delete and tenant export, not complete product CRUD. Conditional SQL binds tenant/owner/role in one write, avoiding an authorization gap between checking and changing data. The 44-case oracle includes deletion, expired and logged-out sessions, anonymous/forged identities on every endpoint, out-of-range IDs, NUL input, delayed side effects, and real PostgreSQL side effects, with a real HTTP login smoke test. CI runs candidate fixtures in networkless containers; an external oracle uses a bounded HTTP bridge and independent database queries. The loopback developer variant and isolated version are gray-box tests, not complete black-box DAST.
+The API supports read/update/delete and tenant export, not complete product CRUD. Conditional SQL binds tenant/owner/role in one write, avoiding an authorization gap between checking and changing data. The 48-case oracle includes out-of-contract probes (a random bearer token, unlisted methods and routes), deletion, expired and logged-out sessions, anonymous/forged identities on every endpoint, out-of-range IDs, NUL input, delayed side effects, and real PostgreSQL side effects, with a real HTTP login smoke test. CI runs candidate fixtures in networkless containers; an external oracle uses a bounded HTTP bridge and independent database queries. The loopback developer variant and isolated version are gray-box tests, not complete black-box DAST.
 
 The vulnerable variant removes object-level owner/tenant checks while retaining the interface. Exactly nine specified violations must appear: bob/carol unauthorized read/write/delete and admin cross-tenant read/write/delete. Same-count substitutions do not pass. The server entry point permits only the fixed variant; tests explicitly select the vulnerable one.
 

@@ -66,6 +66,36 @@ MUTATIONS.update({
         'or {"id": "", "tenant": "", "role": ""}\n'),
     # 回應後才排程的跨租戶寫入；舊 oracle 的前後快照看不到。 / A cross-tenant write scheduled after the response,
     # invisible to per-request before/after snapshots.
+    # 只擋舊 oracle 用過的假權杖，以及曾發出或仍在資料表中的權杖；其他從未見過的權杖一律當成 admin。既有的過期與登出
+    # 案例都看不到，只有隨機權杖探測能發現。 / Rejects only the old oracle's forged token and tokens it issued or still
+    # stores; any never-seen token becomes admin. Expired and logged-out cases cannot see it; only the random probe can.
+    'unknown_token_admin_fallback': [(
+        '            token = secrets.token_urlsafe(32)\n',
+        '            token = secrets.token_urlsafe(32)\n'
+        '            issued.add(hashlib.sha256(token.encode()).hexdigest())\n'), (
+        '    def principal(',
+        '    issued = set()\n\n    def principal('), (
+        '        if not user:\n            raise HTTPException(401, "authentication required")\n        return user',
+        '        if not user and authorization != "Bearer invalid" and token_hash not in issued:\n'
+        '            with connect(dsn, schema) as conn:\n'
+        '                known = conn.execute("SELECT 1 FROM sessions WHERE token_hash=%s", (token_hash,)).fetchone()\n'
+        '            if not known:\n'
+        '                user = {"id": "admin", "tenant": "t1", "role": "admin"}\n'
+        '        if not user:\n            raise HTTPException(401, "authentication required")\n        return user')],
+    # 契約外、未驗證身分的 PUT 後門。 / An unauthenticated PUT backdoor outside the contract.
+    'unauthenticated_put_route': (
+        '\n    return app',
+        '\n    @app.put("/items/{item_id}")\n'
+        '    def put_item(item_id: int, body: dict):\n'
+        '        with connect(dsn, schema) as conn:\n'
+        '            conn.execute("UPDATE items SET value=%s WHERE id=%s", (str(body.get("value")), item_id))\n'
+        '        return {}\n\n    return app'),
+    # 契約外的建立路由。 / A create route outside the contract.
+    'hidden_create_route': (
+        '\n    return app',
+        '\n    @app.post("/items", status_code=201)\n'
+        '    def create_item(body: dict):\n'
+        '        return {"created": True}\n\n    return app'),
     'delayed_cross_tenant_write': (
         '        if not row:\n            raise HTTPException(404, "item not found")\n\n    return app',
         '        if not row:\n            raise HTTPException(404, "item not found")\n'
@@ -92,6 +122,9 @@ EXPECTED = {
     'patch_weaker_session_check': {'anonymous write denied', 'forged bearer write denied',
                                    'expired session write denied', 'logged-out session write denied'},
     'delayed_cross_tenant_write': {'no delayed or out-of-band state changes'},
+    'unknown_token_admin_fallback': {'random bearer token denied'},
+    'unauthenticated_put_route': {'unlisted item method rejected without side effect'},
+    'hidden_create_route': {'unlisted item create not found'},
     'denied_read_header_leak': {'bob: unauthorized read denied without data',
                                 'carol: unauthorized read denied without data', 'admin cross-tenant denied'},
     'admin_cross_tenant_delete': {'admin cross-tenant delete denied without side effect'},
@@ -111,9 +144,12 @@ def test_real_candidate_mutations_are_blocked(tmp_path, mutation):
     shutil.copyfile(ROOT / 'requirements.lock', tmp_path / 'requirements.lock')
     app = tmp_path / 'fixture_app/app.py'
     source = app.read_text()
-    old, new = MUTATIONS[mutation]
-    assert source.count(old) == (2 if mutation == 'denied_write_changes_other_row' else 1), 'mutation must still apply to the actual candidate'
-    app.write_text(source.replace(old, new, 1))
+    # 多處修改的變體以 (old, new) 清單表示。 / A multi-site mutation is a list of (old, new) pairs.
+    pairs = MUTATIONS[mutation] if isinstance(MUTATIONS[mutation], list) else [MUTATIONS[mutation]]
+    for old, new in pairs:
+        assert source.count(old) == (2 if mutation == 'denied_write_changes_other_row' else 1), 'mutation must still apply to the actual candidate'
+        source = source.replace(old, new, 1)
+    app.write_text(source)
     observed = run_isolated(tmp_path)
     cases = observed['cases']
     validate_cases(cases, POLICY['gate_contracts']['AUTH'])
