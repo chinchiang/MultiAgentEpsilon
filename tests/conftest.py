@@ -28,5 +28,24 @@ def pytest_report_header(config):
     return lines
 
 
+
+@pytest.fixture(autouse=True)
+def _offline_docker(request, monkeypatch):
+    """非整合測試不得依賴 Docker daemon：孤兒容器清掃看到空清單，其他 docker 呼叫直接失敗。
+
+Non-integration tests must not need a Docker daemon: the orphan-container sweep sees an empty list and any other
+docker call fails loudly. Tests that fake docker themselves override this; integration tests use the real daemon."""
+    if request.node.get_closest_marker("integration"):
+        return
+    import subprocess
+    from security_harness import isolation
+
+    def docker(*args, check=True, timeout=45):
+        if args[:2] == ("ps", "-aq"):
+            return subprocess.CompletedProcess(("docker", *args), 0, "", "")
+        raise RuntimeError("non-integration test called docker / 非整合測試呼叫了 docker")
+    monkeypatch.setattr(isolation, "docker", docker)
+
+
 # 發布器證據 fixture 由多個測試檔共用。 / The publisher evidence fixture is shared by several test modules.
 from tests.test_trusted_publisher import bundle  # noqa: E402,F401

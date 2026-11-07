@@ -40,7 +40,7 @@ def response_body(response):
                       parse_constant=invalid_constant) if response.content else None
 
 
-def headers_match(response):
+def headers_match(response, allow=None):
     """標頭也屬於回應契約：只允許固定的 date、server、content-type、相符的 content-length 與單一 connection: close，避免資料藏在標頭。
 
 Headers are part of the response contract: only the fixed date, server and content-type
@@ -49,9 +49,12 @@ Headers are part of the response contract: only the fixed date, server and conte
     if (b"connection", b"close") in actual:
         # bridge 每次要求關閉連線，伺服器回送一次相同的逐跳標頭。 / The bridge closes every connection and the server echoes it once.
         actual.remove((b"connection", b"close"))
-    if [name for name, _ in actual] != sorted(RESPONSE_HEADERS | ({b"content-length"} if response.content else set())):
+    expected = RESPONSE_HEADERS | ({b"content-length"} if response.content else set()) | ({b"allow"} if allow else set())
+    if [name for name, _ in actual] != sorted(expected):
         return False
     values = dict(actual)
+    if allow and values[b"allow"] != allow:
+        return False
     return (bool(DATE_HEADER.fullmatch(values[b"date"])) and values[b"server"] == b"uvicorn"
             and values[b"content-type"] == b"application/json"
             and values.get(b"content-length", b"%d" % len(response.content)) == b"%d" % len(response.content))
@@ -91,7 +94,11 @@ Restore only this run's synthetic schema after a failed case, avoiding cascades.
                                    [tuple(row[c] for c in columns) for row in state[table]])
 
 
-def evaluate(client, dsn, schema, passwords, connect, settle=SETTLE_SECONDS):
+def evaluate(client, dsn, schema, passwords, connect, settle=SETTLE_SECONDS, stop=None):
+    """stop 在靜置後停止候選程序，再做最終快照；之後候選不可能再寫入。
+
+When given, stop() halts the candidate after the settle period and before the final snapshot,
+so no candidate write can arrive after the last comparison."""
     cases = []
     initial = snapshot(dsn, schema, connect)
     seeded_items = [{"id": i, "tenant": tenant, "owner": name, "value": name + "-private"}
@@ -109,9 +116,9 @@ def evaluate(client, dsn, schema, passwords, connect, settle=SETTLE_SECONDS):
             restore(dsn, schema, connect, model["state"])
         return deepcopy(model["state"])
 
-    def check(name, method, path, status, body, *, expected=None, **kwargs):
+    def check(name, method, path, status, body, *, expected=None, allow=None, **kwargs):
         before = observe()
-        response = getattr(client, method)(path, **kwargs)
+        response = client.request(method.upper(), path, **kwargs)
         try:
             actual_body = response_body(response)
             body_matches = same(actual_body, body)
@@ -119,7 +126,7 @@ def evaluate(client, dsn, schema, passwords, connect, settle=SETTLE_SECONDS):
             body_matches = False
         after = snapshot(dsn, schema, connect)
         target = expected or before
-        passed = response.status_code == status and body_matches and headers_match(response) and after == target
+        passed = response.status_code == status and body_matches and headers_match(response, allow) and after == target
         cases.append({"case": name, "passed": passed})
         if passed:
             model["state"] = target
@@ -256,6 +263,17 @@ def evaluate(client, dsn, schema, passwords, connect, settle=SETTLE_SECONDS):
           {"detail": [{"type": "string_pattern_mismatch", "loc": ["body", "value"],
                        "msg": "String should match pattern '^[^\\x00]*$'", "input": "a\x00b",
                        "ctx": {"pattern": "^[^\\x00]*$"}}]}, headers=headers['bob'], json={"value": "a\x00b"})
+    # 黑箱只能證明已知契約；另探測契約外的權杖、方法與路由，必須一律拒絕且無副作用。 / A black box only proves the known
+    # contract, so also probe tokens, methods and routes outside it: each must be refused without side effects.
+    check("random bearer token denied", "get", "/items/1", 401, denied_body,
+          headers={"Authorization": "Bearer " + secrets.token_urlsafe(32)})
+    check("unlisted item method rejected without side effect", "put", "/items/3", 405,
+          {"detail": "Method Not Allowed"}, allow=b"GET", headers=headers["carol"],
+          json={"value": "put-update", "owner": "admin", "tenant": "t1"})
+    check("unlisted item create not found", "post", "/items", 404, {"detail": "Not Found"},
+          headers=headers["carol"], json={"id": 9, "value": "created", "owner": "carol", "tenant": "t1"})
+    check("unlisted route not found", "get", "/" + secrets.token_hex(8), 404, {"detail": "Not Found"},
+          headers=headers["carol"])
     literal = "'; DELETE FROM items; --"
     expected = expect(lambda state: state['items'].__setitem__(1, {**state['items'][1], 'value': literal}))
     check("SQL-like update remains literal data", "patch", "/items/2", 200, expected['items'][1],
@@ -267,8 +285,11 @@ def evaluate(client, dsn, schema, passwords, connect, settle=SETTLE_SECONDS):
     expected = expect(lambda state: state.__setitem__('items', [i for i in state['items'] if i['id'] != 1]))
     check("same-tenant admin delete allowed", "delete", "/items/1", 204, None,
           expected=expected, headers=headers['admin'])
-    # 靜置後再比對一次，讓排程在回應之後的寫入也被看見。 / Settle, then compare again so writes scheduled after a response are seen.
+    # 靜置讓排程中的寫入落地，再停止候選做最終比對，之後不會再有任何寫入。 / Settle so scheduled writes land, then
+    # stop the candidate for the final comparison, after which no write can arrive.
     time.sleep(settle)
+    if stop is not None:
+        stop()
     observe()
     cases.append({"case": DRIFT_CASE, "passed": not model["drift"]})
     return cases
