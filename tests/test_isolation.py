@@ -115,18 +115,26 @@ def inspected(**host_overrides):
     host = {"NetworkMode": "none", "ReadonlyRootfs": True, "Privileged": False, "CapDrop": ["ALL"], "CapAdd": None,
             "SecurityOpt": ["no-new-privileges"], "Memory": isolation.MEMORY_BYTES,
             "MemorySwap": isolation.MEMORY_BYTES, "PidsLimit": isolation.PIDS_LIMIT, "NanoCpus": 1_000_000_000,
-            "Ulimits": [{"Name": "nofile", "Soft": isolation.NOFILE_LIMIT, "Hard": isolation.NOFILE_LIMIT}]}
+            "Ulimits": [{"Name": "nofile", "Soft": isolation.NOFILE_LIMIT, "Hard": isolation.NOFILE_LIMIT}],
+            "PidMode": "", "IpcMode": "private", "UsernsMode": "", "CgroupnsMode": "private", "Devices": [],
+            "Runtime": "runc", "Tmpfs": {"/tmp": "rw,size=16m"}}
     host.update(host_overrides)
     return {"HostConfig": host, "Config": {"User": "10001:10001", "Image": "ref"}, "Image": "sha256:" + "a" * 64,
-            "Mounts": [{"Destination": "/candidate"}]}
+            "State": {"Status": "created"},
+            "Mounts": [{"Type": "bind", "Source": "/w/candidate", "Destination": "/candidate", "RW": False}]}
+
+
+EXPECTED_MOUNTS = [("bind", "/w/candidate", "/candidate", False)]
 
 
 def test_verified_container_records_every_checked_control():
     from security_harness.isolation import verify_container
-    evidence = verify_container(inspected(), user="10001:10001", image_id="sha256:" + "a" * 64, image_ref="ref")
+    evidence = verify_container(inspected(), user="10001:10001", image_id="sha256:" + "a" * 64, image_ref="ref",
+                                mounts=EXPECTED_MOUNTS, tmpfs={"/tmp": "rw,size=16m"})
     assert evidence["network"] == "none" and evidence["mount_destinations"] == ["/candidate"]
     assert set(evidence["verified"]) == {"network", "readonly_root", "privileged", "cap_drop", "no_new_privileges",
-                                         "memory", "pids", "cpus", "nofile", "user", "image"}
+                                         "memory", "pids", "cpus", "nofile", "user", "image", "not_started",
+                                         "namespaces", "devices", "runtime", "mounts", "tmpfs"}
 
 
 @pytest.mark.parametrize("override,field", [
@@ -134,11 +142,45 @@ def test_verified_container_records_every_checked_control():
     ({"Privileged": True}, "privileged"), ({"CapDrop": []}, "cap_drop"), ({"CapAdd": ["NET_RAW"]}, "cap_drop"),
     ({"SecurityOpt": []}, "no_new_privileges"), ({"Memory": 0}, "memory"), ({"MemorySwap": -1}, "memory"),
     ({"PidsLimit": None}, "pids"), ({"NanoCpus": 0}, "cpus"), ({"Ulimits": None}, "nofile"),
+    ({"PidMode": "host"}, "namespaces"), ({"IpcMode": "host"}, "namespaces"), ({"UsernsMode": "host"}, "namespaces"),
+    ({"CgroupnsMode": "host"}, "namespaces"), ({"Devices": [{"PathOnHost": "/dev/kmsg"}]}, "devices"),
+    ({"Runtime": "other"}, "runtime"), ({"Tmpfs": {"/tmp": "rw,exec"}}, "tmpfs"),
 ])
 def test_any_weakened_isolation_control_is_refused(override, field):
     from security_harness.isolation import verify_container
     with pytest.raises(RuntimeError, match=f"mismatch: {field}"):
-        verify_container(inspected(**override), user="10001:10001")
+        verify_container(inspected(**override), user="10001:10001", tmpfs={"/tmp": "rw,size=16m"})
+
+
+@pytest.mark.parametrize("mount,expected", [
+    ({"RW": True}, EXPECTED_MOUNTS),  # 唯讀掛載被改成可寫。 / A read-only mount became writable.
+    ({"Source": "/host"}, EXPECTED_MOUNTS),  # 掛到別的 host 路徑。 / A different host path is mounted.
+    ({}, EXPECTED_MOUNTS + [("bind", "/w/extra", "/extra", False)]),  # 少一個預期掛載。 / An expected mount is missing.
+])
+def test_unexpected_mounts_are_refused(mount, expected):
+    from security_harness.isolation import verify_container
+    data = inspected()
+    data["Mounts"][0].update(mount)
+    with pytest.raises(RuntimeError, match="mismatch: mounts$"):
+        verify_container(data, user="10001:10001", mounts=expected)
+
+
+def test_started_container_is_refused():
+    # 只在 create 後、start 前核對；已啟動代表候選程式可能已在未核對的設定下執行。 / Verify only between create
+    # and start: a started container may already have run candidate code under unverified settings.
+    from security_harness.isolation import verify_container
+    data = inspected()
+    data["State"]["Status"] = "running"
+    with pytest.raises(RuntimeError, match="mismatch: not_started$"):
+        verify_container(data, user="10001:10001")
+
+
+def test_evaluation_creates_containers_without_starting_them():
+    from security_harness.isolation import run_flags
+    assert run_flags("n", "a" * 32, "create")[:2] == ["create", "--pull=never"]
+    assert run_flags("n", "a" * 32)[:2] == ["run", "--detach"]
+    with pytest.raises(ValueError, match="^invalid docker verb$"):
+        run_flags("n", "a" * 32, "exec")
 
 
 @pytest.mark.parametrize("kwargs,field", [
