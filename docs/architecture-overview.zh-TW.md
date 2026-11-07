@@ -84,6 +84,8 @@ PR 使用 `.github/workflows/security.yml` 的 `pull_request_target`：evaluator
 | 可信審查與 CI 證據 | [`check_trusted_changes.py`](../scripts/check_trusted_changes.py)、[`verify_required_check.py`](../scripts/verify_required_check.py)、[`write_ci_provenance.py`](../scripts/write_ci_provenance.py)、[`check_publishable_evidence.py`](../scripts/check_publishable_evidence.py) |
 | 尚待部署的發布器 | [`trusted_publisher.py`](../security_harness/trusted_publisher.py)、[`publish_trusted_check.py`](../scripts/publish_trusted_check.py)、[`prepare_publisher_deployment.py`](../scripts/prepare_publisher_deployment.py)、[`deploy/trusted-publisher/`](../deploy/trusted-publisher/) |
 
+共同 GitHub 信任判定模組（GitHub trust module）位於 [`github_trust.py`](../security_harness/github_trust.py)：透過 GitHub reader 蒐集完整的審查與執行來源證據，供變更守門檢查（guard）、可信發布程式（publisher）及必要檢查驗證（required-check）使用。守門檢查的推送後核准與發布程式的唯一 PR 要求各有明確流程；簽章、artifact 與發布仍由發布程式負責。來源證據僅在單次命令內重用，發布成功前仍重新讀取可變狀態，沒有跨次快取或原子快照保證。
+
 ## 目錄結構
 
 以下列出受版本管理的完整目錄與檔案，包含本次新增圖表；`__init__.py` 為 Python 套件入口。生成物、套件快取、Git 內部資料與私人附件不列入原始碼目錄樹。
@@ -206,6 +208,7 @@ MultiAgentEpsilon/
 │   ├── fixture_database.py
 │   ├── github_http.py
 │   ├── github_readonly.py
+│   ├── github_trust.py
 │   ├── inputs.py
 │   ├── isolation.py
 │   ├── lifecycle.py
@@ -231,6 +234,7 @@ MultiAgentEpsilon/
 │   ├── test_dependencies.py
 │   ├── test_expect_block.py
 │   ├── test_github_readonly.py
+│   ├── test_github_trust.py
 │   ├── test_gitleaks.py
 │   ├── test_governance_consistency.py
 │   ├── test_import_boundaries.py
@@ -264,6 +268,7 @@ MultiAgentEpsilon/
 ├── .env.example
 ├── .gitattributes
 ├── .gitignore
+├── AGENTS.md
 ├── CLAUDE.md
 ├── CODING_STANDARDS.md
 ├── GLOSSARY.md
@@ -376,6 +381,8 @@ Main push evaluates its own commit. Manual workflow uses chosen ref and distinct
 ## Components and directory structure
 
 The Chinese section's linked component table and complete repository tree use unchanged language-neutral paths and are shared by both editions. Installation: scripts/bootstrap.py/build_runtime.py, requirements.lock/tools.lock. Execution: run_security.py/security_worker.py/audit.py. Scope/input/policy: scope.py/inputs.py/results.py and security JSON. G1/G2: preflight.py/dependencies.py/secrets.py/scan_content.py/candidate_git.py. Isolation/oracle: isolation.py/container_http.py/authorization.py/fixture_database.py/fixture_app. Lifecycle: lifecycle.py/limits.py/cleanup_runs.py and llm/lifecycle.py. Models: gateway.py/adapters.py/lmstudio.py/transport.py/output_schema.py. Reviews: model_review.py/benchmark*.py/review_adjudicate.py/model_compare.py/comparison.py. CI: check_trusted_changes.py/verify_required_check.py/write_ci_provenance.py/check_publishable_evidence.py. Deployment: trusted_publisher.py/publish_trusted_check.py/prepare_publisher_deployment.py and deploy/trusted-publisher.
+
+The shared [GitHub trust module](../security_harness/github_trust.py) collects complete review and run-source evidence through the GitHub reader for the guard, publisher and required-check verifier. Explicit flows preserve the guard's post-push approval and the publisher's unique-PR requirement; signatures, artifacts and publication remain in the publisher. Source evidence is reused only within one command. Mutable state is still reread before success; there is no cross-command cache or atomic-snapshot guarantee.
 
 Directory purposes: .github CI/review ownership; deploy production templates; docs architecture/coverage/acceptance; fixture_app synthetic target; scripts operational entries; security protected policy/tools/cases; security_harness trusted core (llm model path); tests contracts/mutations/isolation/recovery. __init__.py marks packages. The tracked tree excludes generated files, caches, Git internals, and private attachments.
 

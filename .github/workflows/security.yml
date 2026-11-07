@@ -3,6 +3,10 @@ name: Security pilot
 on:
   push:
     branches: [main]
+  schedule:
+    # lock 依賴的新弱點不會觸發 push；每天重評 main，不必等下一個 PR 才發現。 / A new advisory against a locked
+    # dependency triggers no push; re-evaluating main daily surfaces it without waiting for the next PR.
+    - cron: '23 0 * * *'
   pull_request_target:
     branches: [main]
     # edited 用於改 base 的重評估；不可在 job 層級略過：略過的同名檢查會被規則集當成通過。 / edited covers base
