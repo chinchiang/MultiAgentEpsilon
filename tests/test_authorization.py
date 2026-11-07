@@ -15,7 +15,7 @@ def test_identical_oracle_rejects_vulnerable_and_accepts_fixed():
     vulnerable = run_authorization(dsn, "vulnerable")
     fixed = run_authorization(dsn, "fixed")
     contract = json.loads((Path(__file__).resolve().parents[1] / "security/policy.json").read_text())["gate_contracts"]["AUTH"]
-    assert len(vulnerable) == len(fixed) == len(contract["case_ids"]) == 44
+    assert len(vulnerable) == len(fixed) == len(contract["case_ids"]) == 48
     failed = {x["case"] for x in vulnerable if not x["passed"]}
     assert failed == set(contract["seeded_defect_case_ids"]) == {
         "bob: unauthorized read denied without data",

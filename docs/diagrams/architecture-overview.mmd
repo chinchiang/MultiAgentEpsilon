@@ -3,18 +3,19 @@ flowchart TB
     Trust["受信任基準／政策／RoE<br/>Trusted baseline / policy / RoE"] --> Run
     subgraph Evaluator["可信評估端 / Trusted evaluator"]
         Run["supervisor／限額 worker<br/>Registered, bounded execution"] --> Scan["G1：來源／SBOM／OSV；G2：機密<br/>Provenance / SCA / secret scanning"]
-        Scan --> Oracle["AUTH：44 案例、完整副作用與延遲變動<br/>44 cases / full state / delayed writes"]
+        Scan --> Oracle["AUTH：48 案例、完整副作用、延遲變動與契約外探測<br/>48 cases / full state / delayed writes / probes"]
         Oracle --> Decision["確定性判定／故障即阻擋<br/>Deterministic ALLOW / BLOCK"]
         Decision --> Report["摘要綁定與清理證據<br/>Bound report and cleanup"]
     end
     Oracle <-->|"HTTP bridge／獨立 DB 查核<br/>Independent database checks"| Isolation["隔離 app／DB：無網路、限權與限額<br/>Networkless, bounded containers"]
     subgraph Models["獨立模型路徑 / Independent advisory path"]
         Cases["固定合成案例／不含答案<br/>Fixed blind synthetic cases"] --> Gateway["呼叫前預留／有限額循序呼叫<br/>Durable reservations / bounded calls"]
-        Gateway --> Cloud["Gemini／Claude Sonnet<br/>v2 已驗收；v3 待真實驗收<br/>v2 accepted; v3 live pending"]
-        Gateway --> Local["LM Studio／Nemotron 文字介面<br/>Offline tested; live pending<br/>離線完成；真實端點待驗收"]
-        Gateway -.-> GLM["GLM：真實連線暫停<br/>Live connection paused"]
+        Gateway --> Cloud["Gemini／Claude Sonnet<br/>v2 已驗收；v3 小樣本已實測<br/>v2 accepted; small v3 live samples"]
+        Gateway --> Local["LM Studio／Nemotron、Qwen<br/>離線完成；GPU 真實驗收待辦<br/>Offline tested; GPU live acceptance pending"]
+        Gateway --> GLM["GLM：地端公司 LLM 閘道<br/>小樣本已實測；較大樣本待辦<br/>On-prem gateway; small live samples"]
         Cloud --> Score["嚴格驗證／本機評分／分批比較<br/>Strict validation / local scoring / batch comparison"]
         Local --> Score
+        GLM --> Score
         Score --> Advisory["僅供參考，不決定閘門<br/>Advisory only; no gate authority"]
     end
     Source ~~~ Cases
@@ -27,4 +28,4 @@ flowchart TB
     Signed -.-> Publisher["專用發布器程式已備妥，尚未部署<br/>Dedicated publisher prepared, not deployed"]
     Publisher -.->|"待綁定專用 App<br/>Dedicated source binding pending"| Rules
     classDef pending fill:#fff4dc,stroke:#a67822,stroke-dasharray:5 5;
-    class GLM,Publisher pending;
+    class Publisher pending;
