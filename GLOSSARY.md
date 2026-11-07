@@ -22,6 +22,18 @@ _避免_：run 的 attempt（單獨使用時）、check 的 run
 
 ## 受監督執行
 
+**supervisor**：
+啟動一次執行、擁有其期限與清理，並在清理完成後才發布判定的父程序。
+_避免_：父程序、runner、launcher
+
+**worker**：
+在 supervisor 底下實際執行評估或模型呼叫的子程序；只能寫入自己的進度與待定判定，不能自行發布判定。
+_避免_：子程序（單獨使用時）、job、executor
+
+**計畫**：
+supervisor 在放行 worker 之前就決定、worker 不得更改的事實：評估什麼、依哪份 RoE 與政策、在什麼限額下執行。worker 開始前與 supervisor 收尾時都要核對同一份計畫。
+_避免_：設定、config、報告（報告是 worker 產出的證據）
+
 **受監督執行**：
 由 supervisor 啟動一個 worker 並負責到底的一次執行：在期限與訊號下等它結束，停止它留下的所有程序群組，清除它的資源，最後關閉證據。
 _避免_：job、task、子程序執行
@@ -59,6 +71,18 @@ The workflow run and run attempt that produced a given check run. A rerun keeps 
 _Avoid_: the run's attempt (on its own), the check's run
 
 ## Supervised runs
+
+**Supervisor**:
+The parent process that starts a run, owns its deadline and cleanup, and publishes a decision only after cleanup completes.
+_Avoid_: parent, runner, launcher
+
+**Worker**:
+The child process that does a run's evaluation or model calls under a supervisor; it may write only its own progress and pending decision, never publish a decision itself.
+_Avoid_: child (on its own), job, executor
+
+**Plan**:
+The facts a supervisor decides before releasing a worker and the worker may not change: what to evaluate, under which RoE and policy, and within which limits. The worker checks the plan before it starts and the supervisor checks it again when it finishes.
+_Avoid_: settings, config, report (the report is the worker's evidence)
 
 **Supervised run**:
 One run that a supervisor starts a worker for and owns to the end: it waits for the worker under a deadline and signals, stops every process group the worker left, removes its resources and finally closes the evidence.

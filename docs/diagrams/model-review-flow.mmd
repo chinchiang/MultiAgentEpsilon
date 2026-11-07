@@ -4,7 +4,7 @@ flowchart TB
     Initial --> Config["驗證供應商設定與工具<br/>Validate adapter configuration"]
     Config --> Reserve["I/O 前保存呼叫 ID／摘要／詞元預留<br/>Persist reservation before network I/O"]
     Reserve --> Request["同案同輪相同盲測內容／循序呼叫<br/>Identical opaque requests; sequential calls"]
-    Request --> Adapter["mock／Gemini／Bedrock／LM Studio<br/>GLM 真實連線暫停 / GLM live paused"]
+    Request --> Adapter["mock／Gemini／Bedrock／GLM／LM Studio<br/>依 RoE 授權的介接器 / RoE-authorized adapters"]
     Adapter -->|"LM Studio"| Local["LM Studio 先查模型清單，再推論<br/>Exact model discovery before chat"]
     Adapter -->|"其他 / Others"| Valid
     Local --> Valid{"正常結束／嚴格 JSON、引用與行號？<br/>Valid completion and semantic evidence?"}

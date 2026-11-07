@@ -26,8 +26,8 @@ from pathlib import Path
 if __name__ == "__main__":
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from security_harness.github_readonly import GitHubReader, ReadOnlyGitHub
-from security_harness.trusted_publisher import (GITHUB_ACTIONS_APP_ID, Denied, head_scope, related_pull_path,
-                                               validate_run_base)
+from security_harness.github_http import Denied
+from security_harness.github_trust import GITHUB_ACTIONS_APP_ID, GitHubTrust
 
 REQUIRED_CHECK = "trusted-security-pilot"
 ACTIONS_APP_ID = GITHUB_ACTIONS_APP_ID
@@ -52,9 +52,7 @@ def verify(reader, number):
     statuses = reader.items(f"commits/{head}/statuses")
     need(all(s["context"] != REQUIRED_CHECK for s in statuses), "FOREIGN_STATUS_SOURCE")
     sources = []
-    pull_requests = reader.items(related_pull_path("", pr).lstrip("/"))
-    histories = {p["number"]: reader.items(f"issues/{p['number']}/timeline")
-                 for p in pull_requests if head_scope(p) == head_scope(pr)}
+    source_evidence = GitHubTrust(reader).run_base(pr, BASE_BRANCH)
     for check in checks:
         # 其他 App 的同名檢查不被規則集採計， / A same-named check from another app is not what the ruleset counts, but it
         # 但仍代表此 head 有竄改跡象。 / still signals tampering on this head.
@@ -64,7 +62,7 @@ def verify(reader, number):
         need(run["event"] == "pull_request_target" and run["path"] == WORKFLOW_PATH
              and run["head_sha"] == head, "UNTRUSTED_CHECK_SOURCE")
         try:
-            validate_run_base(run, pr, pull_requests, BASE_BRANCH, histories)
+            source_evidence.validate(run)
         except ValueError as exc:
             raise Denied(str(exc)) from None
         sources.append({"check_run_id": check["id"], "run_id": run["id"], "run_attempt": source["run_attempt"],

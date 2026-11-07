@@ -18,6 +18,8 @@
 
 這是 Linux 容器邊界，仍共用 host kernel，不能宣稱抵抗 kernel／runtime 漏洞。正式敵意多租戶使用仍應採專用短生命週期 VM／microVM、受控 worker 身分與平台隔離。候選合成 app 可以破壞自己的資料或服務，這會導致測試失敗，不可把 app 自報結果當 oracle。
 
+host 端的 worker 與操作者使用同一個 uid。supervisor 只把白名單內的變數交給 worker（見[取消與孤兒回收](coverage-lifecycle-acceptance.zh-TW.md)與[模型閘道](model-gateway.zh-TW.md)），這只能擋住經由繼承取得秘密；已被入侵、能執行任意程式碼的 worker，仍讀得到同一個 uid 下其他程序的 `/proc/<pid>/environ`（包括 supervisor 及其上層程序啟動時的環境），以及 `~/.config/gh`、`~/.aws` 等憑證檔；在 WSL 上開著 interop 時，還能執行 Windows 端的 `gh.exe` 等 credential helper，並讀取 `/mnt/c`。security worker 能使用 Docker socket，等同 host 的 root 權限；model worker 本來就持有本次所選供應商的金鑰。CI 上啟動 worker 的步驟，環境都不帶權杖，`GH_TOKEN` 只設在不執行 worker 的受保護變更檢查步驟；但 GitHub 代管 runner 的使用者本來就有免密碼 sudo，取得 root 的 worker 仍能從 runner 程序的記憶體取得本 job 的唯讀權杖，也能竄改同一個 job 之後的步驟，以及之後要上傳、簽章的證據。在本機執行 `run_security.py` 時，shell 不要 export `GH_TOKEN`；執行模型 supervisor 時，只設本次要用的供應商金鑰。這只能減少經由環境變數的暴露，憑證檔與 credential helper 裡的權杖照樣拿得到。要真正擋住被入侵的 worker，須以不同的 uid 執行 worker，且 worker 不能使用 Docker socket；在 WSL 上還須關閉 interop，並限制 `/mnt/c` 的存取；CI 上則須讓 worker 影響不到同一個 job 之後的證據檢查與上傳。
+
 ## 案例、輸入與錯誤證據
 
 - `security/policy.json` 的 `gate_contracts` 指定 gate kind 與必要 case ID。AUTH 必須恰好涵蓋唯一集合；數量、findings 與逐案例結果須一致。schema 3 拒絕舊版（schema 1、2）證據及不同 run ID 的混用。G2 另須有候選儲存庫 本身的 HEAD 歷史（`history_required`）；沒有 `.git`、沒有 commit，或位於外層儲存庫 之中的子目錄都不能取得 ALLOW。
@@ -87,7 +89,7 @@ python3 -I scripts/dev_db.py start
 python3 -I scripts/dev_db.py stop
 ```
 
-隔離回歸會執行缺陷版、修正版，以及在候選匯入時嘗試寫入唯讀來源／入口、讀取 evaluator／Docker socket／權杖、建立 IP 出向連線的探測。必要結果為：完整 44 案例、缺陷版恰好政策 `seeded_defect_case_ids` 的 9 個 findings／BLOCK、修正版 0 findings／ALLOW。另有錯誤密碼登入、404 洩漏、匯出夾帶跨租戶資料、其他資料列被非法修改、admin 寫入條件越過租戶邊界、過期工作階段、跨租戶刪除、寫入端點較弱的工作階段檢查，回應後才排程的跨租戶寫入，以及拒絕讀取時以回應標頭外洩資料共十種變體，必須產生指定 AUTH findings；評估前也會核對兩個容器的網路、唯讀根目錄、權限、記憶體、程序數、使用者與映像；socket 改指向 host 測試端點必須失敗且端點不得收到連線。
+隔離回歸會執行缺陷版、修正版，以及在候選匯入時嘗試寫入唯讀來源／入口、讀取 evaluator／Docker socket／權杖、建立 IP 出向連線的探測。必要結果為：完整 48 案例、缺陷版恰好政策 `seeded_defect_case_ids` 的 9 個 findings／BLOCK、修正版 0 findings／ALLOW。另有錯誤密碼登入、404 洩漏、匯出夾帶跨租戶資料、其他資料列被非法修改、admin 寫入條件越過租戶邊界、過期工作階段、跨租戶刪除、寫入端點較弱的工作階段檢查，回應後才排程的跨租戶寫入，以及拒絕讀取時以回應標頭外洩資料共十種變體，必須產生指定 AUTH findings；評估前也會核對兩個容器的網路、唯讀根目錄、權限、記憶體、程序數、使用者與映像；socket 改指向 host 測試端點必須失敗且端點不得收到連線。
 
 候選 lock digest 必須等於已驗證 runtime lock digest；尚不支援任意候選依賴映像建置。受保護變更使用禁用 rename 折疊的 diff，同時判斷刪除與新增路徑。結果 schema 3 使用版本化逐檔 manifest，不能沿用 schema 2 的 gate 證據。
 
@@ -114,6 +116,8 @@ Coverage, scan scope, and early-error evidence are enforced, and candidate code 
 7. Before releasing the worker, the supervisor decides the plan: candidate path, variant, limits, RoE and policy digests, and the evaluator digest. It passes the plan digest to the worker on the command line. A worker whose report no longer matches that digest writes nothing and exits 2. The worker reads the RoE and policy once each and blocks if their digests differ from the plan. At finish the supervisor checks the report's plan fields again, blocks on any difference and restores its own values. The candidate's content is not in the plan: the supervisor has no rlimits and does not walk an untrusted tree for the worker. The worker computes the subject digest and checks it again at the end.
 
 Linux containers still share a kernel; this is not kernel/runtime-exploit resistance. Hostile multi-tenancy needs dedicated short-lived VM/microVM workers and platform isolation. Candidate damage to its own synthetic data/service should fail tests; self-reported results are never the oracle.
+
+Host-side workers run under the operator's uid. The supervisor passes workers only allowlisted variables (see [cancellation and orphan reaping](coverage-lifecycle-acceptance.zh-TW.md#en) and the [model gateway](model-gateway.zh-TW.md#en)), which stops secrets from being inherited and nothing more: a compromised worker that can run arbitrary code can still read the `/proc/<pid>/environ` of other processes under that uid, including the environment the supervisor and its ancestors started with, and credential files such as `~/.config/gh` and `~/.aws`; on WSL with interop enabled it can also run Windows credential helpers such as `gh.exe` and read `/mnt/c`. The security worker can use the Docker socket, which is equivalent to host root, and the model worker holds the selected providers' keys by design. In CI no step that starts a worker has a token in its environment (`GH_TOKEN` is set only on the protected-changes check, which runs no worker), but the GitHub-hosted runner user already has passwordless sudo, so a worker that gains root can still take this job's read-only token from the runner's process memory and tamper with later steps of the same job and with the evidence later uploaded and signed. When running `run_security.py` locally, do not export `GH_TOKEN` in that shell, and give a model supervisor only the keys of the providers it will use. This only reduces exposure through environment variables; tokens in credential files and credential helpers remain reachable. Containing a compromised worker would need a separate uid for the worker and no Docker socket access, interop disabled and `/mnt/c` access restricted on WSL, and in CI a worker that cannot affect the same job's later evidence checks and uploads.
 
 ## Cases, input, and error evidence
 
@@ -179,7 +183,7 @@ python3 -I scripts/dev_db.py start
 python3 -I scripts/dev_db.py stop
 ```
 
-Isolation regressions attempt writes to read-only source/entrypoint, reads of evaluator/Docker socket/tokens, and IP egress. Required results: exact 44 cases; fixed zero findings/ALLOW; seeded exact nine policy IDs/BLOCK. Ten additional real-container variants cover wrong-password login, 404 disclosure, cross-tenant export, hidden unrelated-row mutation, admin cross-tenant writes, expired sessions, cross-tenant deletion, a weaker write-endpoint session check, a cross-tenant write scheduled after the response, and a denied read that leaks the row through a response header. Both containers' network, read-only root, privileges, memory, process, user and image settings are verified before evaluation. Redirecting the HTTP socket to a host endpoint must fail without contacting that endpoint.
+Isolation regressions attempt writes to read-only source/entrypoint, reads of evaluator/Docker socket/tokens, and IP egress. Required results: exact 48 cases; fixed zero findings/ALLOW; seeded exact nine policy IDs/BLOCK. Ten additional real-container variants cover wrong-password login, 404 disclosure, cross-tenant export, hidden unrelated-row mutation, admin cross-tenant writes, expired sessions, cross-tenant deletion, a weaker write-endpoint session check, a cross-tenant write scheduled after the response, and a denied read that leaks the row through a response header. Both containers' network, read-only root, privileges, memory, process, user and image settings are verified before evaluation. Redirecting the HTTP socket to a host endpoint must fail without contacting that endpoint.
 
 Candidate lock must match verified runtime lock; arbitrary candidate dependency images are unsupported. Protected diffs disable rename collapsing and check both old/new paths. Schema 3 uses versioned per-file manifests. See [remote gaps](remote-merge-protection.zh-TW.md#en).
 

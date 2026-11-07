@@ -12,7 +12,7 @@ Vibe Coding 資安測試框架的第一個可執行試點：Python 3.12、FastAP
 
 ![目前系統架構](docs/diagrams/architecture-overview.svg)
 
-[完整架構、安全測試／多模型／CI 流程與目錄結構](docs/architecture-overview.zh-TW.md)依已合併的實作整理。實線為已實作路徑；虛線依標籤表示 GLM 真實連線暫停、復原路徑或專用 App 尚待部署。模型報告僅供參考，ALLOW／BLOCK 仍由確定性政策及外部 oracle 判定。
+[完整架構、安全測試／多模型／CI 流程與目錄結構](docs/architecture-overview.zh-TW.md)依已合併的實作整理。實線為已實作路徑；虛線依標籤表示復原路徑或專用 App 尚待部署。模型報告僅供參考，ALLOW／BLOCK 仍由確定性政策及外部 oracle 判定。
 
 ```text
 MultiAgentEpsilon/
@@ -52,6 +52,8 @@ python3 -I scripts/dev_db.py start
 
 沒有 Docker 或 PostgreSQL 時，可先以 `.venv/bin/python -m pytest -m "not integration"` 執行離線子集；完整驗收仍須包含整合測試。靜態檢查為 `.venv/bin/ruff check .`，文件檢查為 `python3 -I scripts/check_docs.py`，pytest 會把任何警告視為失敗。
 
+改動後先只跑改到的測試檔，例如 `.venv/bin/python -m pytest tests/test_check_docs.py`，通過後再跑上面的完整測試。`.tools/gitleaks` 由 `bootstrap.py` 下載並驗證；沒有先執行 bootstrap 時，用到 Gitleaks 的測試會因為找不到掃描器而失敗。
+
 CI runner 以一般使用者（非 root）執行。若本機或容器內以 root 執行，pytest 標頭會顯示警告；root 可讀取權限為 000 的目錄，權限相關測試會走不同分支。推送前請以一般使用者再跑一次，例如 `runuser -u <使用者> -- .venv/bin/python -m pytest -m "not integration" --basetemp=<該使用者可寫目錄>`（checkout 與 `.venv` 須對該使用者可讀）。2026-10-10 main 曾因此失敗一次。
 
 `bootstrap.py` 先核對 PyPI 套件、固定版本、所有 lock 雜湊、7 天冷卻期與 wheel 可用性；驗證 Gitleaks 官方 release checksum 及固定 binary digest，再跑 G2。成功後才下載與安裝 hash-verified wheels，禁用 source builds、額外 index 與隱含依賴解析。首版使用明確核准的 23 個套件；依賴更新需重新審查，不自動擴充 allowlist。
@@ -64,7 +66,7 @@ CI runner 以一般使用者（非 root）執行。若本機或容器內以 root
 
 結果 schema 為第 3 版，拒絕舊版 gate 證據：每筆 gate 綁定相同 run ID、subject 與 policy digest。subject 使用 `worktree-manifest-v1`，雜湊明確編碼的逐檔路徑、型態、執行權限、大小及內容 SHA-256。AUTH 必須包含政策指定的唯一案例集合；缺漏、重複、未知 ID 或彙總不一致均 BLOCK。
 
-AUTH 有 44 個必要案例，包含錯誤密碼及不存在帳號、admin 的同租戶寫入（允許）與跨租戶寫入（拒絕且無副作用），以及寫入與匯出端點對匿名、偽造、過期與已登出身分的拒絕。oracle 自行維護預期狀態，案例之間或最後靜置期間出現的延遲寫入也會失敗。拒絕回應、讀取及匯出依合成 API 契約比對完整 JSON 與型別，拒絕重複 key；回應標頭也屬於契約，只允許固定的 date、server、content-type、相符的 content-length，以及 bridge 關閉連線時回送的 `connection: close`，額外標頭或 cookie 都使案例失敗；每個案例核對完整 users／items／sessions 快照與允許的變更。這是合成 fixture 的契約，不是任意 API 的通用回應規則。十種已重現缺陷（含 admin 寫入條件越過租戶邊界、寫入端點較弱的工作階段檢查、回應後才排程的跨租戶寫入，以及拒絕讀取時把資料放進回應標頭）的真實隔離回歸見 `tests/test_adversarial_authorization.py`。
+AUTH 有 48 個必要案例（含契約外的隨機權杖、未列出的方法與路由探測），包含錯誤密碼及不存在帳號、admin 的同租戶寫入（允許）與跨租戶寫入（拒絕且無副作用），以及寫入與匯出端點對匿名、偽造、過期與已登出身分的拒絕。oracle 自行維護預期狀態，案例之間或最後靜置期間出現的延遲寫入也會失敗。拒絕回應、讀取及匯出依合成 API 契約比對完整 JSON 與型別，拒絕重複 key；回應標頭也屬於契約，只允許固定的 date、server、content-type、相符的 content-length，以及 bridge 關閉連線時回送的 `connection: close`，額外標頭或 cookie 都使案例失敗；每個案例核對完整 users／items／sessions 快照與允許的變更。這是合成 fixture 的契約，不是任意 API 的通用回應規則。十種已重現缺陷（含 admin 寫入條件越過租戶邊界、寫入端點較弱的工作階段檢查、回應後才排程的跨租戶寫入，以及拒絕讀取時把資料放進回應標頭）的真實隔離回歸見 `tests/test_adversarial_authorization.py`。
 
 每次執行在解析設定前建立 `artifacts/<run-id>/report.json`；錯誤只保存階段與例外類型，不記錄敏感例外文字。`artifacts/latest.txt` 是 security run 索引；bootstrap、preflight 與 runtime-build 使用各自的索引。這些是未簽章的執行證據，不是可信 attestation。`python3 -I scripts/dev_db.py status` 可查詢本地開發資料庫是否執行中；停止並刪除它：
 
@@ -79,7 +81,7 @@ python3 -I scripts/dev_db.py stop
 | G0／G4 | [試點授權矩陣與威脅](docs/pilot-scope.zh-TW.md) | 真實應用 owner、完整威脅建模及適用性核准 |
 | G1 | PyPI metadata、固定版本／hash、冷卻期、wheel-only；鎖定檔 CycloneDX SBOM、OSV 精確版本漏洞查詢 | 安裝映像清冊、KEV／EPSS、惡意套件行為、其他生態系 |
 | G2 | 真實 Gitleaks、遮罩、工作樹及候選 HEAD 可達 blobs、限額 gzip／zip／tar 展開 | 伺服器端 Push Protection、遠端不可得歷史／快取、金鑰撤銷 |
-| 授權回歸 | 登入負例、同角色、跨租戶、管理者讀寫、欄位限制、登出、各端點身分狀態、輸入邊界、延遲副作用及完整 fixture 狀態；44 個案例 | 完整 G5／Web/API 黑箱掃描、TLS／CSRF／JWT／SSRF |
+| 授權回歸 | 登入負例、同角色、跨租戶、管理者讀寫、欄位限制、登出、各端點身分狀態、輸入邊界、延遲副作用、契約外探測及完整 fixture 狀態；48 個案例 | 完整 G5／Web/API 黑箱掃描、TLS／CSRF／JWT／SSRF |
 | 政策與證據 | 嚴格結果格式、故障阻擋、subject／policy digest、基準變更檢查、CI 簽章與來源驗證 | 專用可信發布器正式部署、例外生命週期、普通開發者的完整遠端繞過驗收 |
 | CI | 遠端 main／PR 正反例、固定 actions SHA、最小權限、早期拒絕證據與清理；main 規則已讀回 | 專用可信來源尚未部署，普通開發者繞過驗收仍未完成 |
 | 多模型 | [受限 gateway 與模型 adapter](docs/model-gateway.zh-TW.md)、[合成盲測與裁決試點](docs/blind-review.zh-TW.md)；地端 LM Studio（Nemotron、Qwen）與公司 LLM 閘道（GLM；DeepSeek 已停用） | 地端模型真實驗收、兩個以上真實家族的多輪穩定性、完整 G6／偏誤驗收 |
@@ -92,7 +94,7 @@ G2 與 subject digest 共用輸入清冊：生成物名稱只在儲存庫根目�
 
 ## CI 啟用界線
 
-[security.yml](.github/workflows/security.yml) 改用 `pull_request_target`，只執行 base SHA 的 evaluator、安裝程序與測試；候選 checkout 僅作資料，只有限定的 `fixture_app` 來源會送入無網路容器。評估工作的權杖權限為 contents/read、pull-requests/read 與 actions/read，不提供模型或部署金鑰；獨立簽署工作另有 id-token/write 與 attestations/write。所有路徑（包含 fixture、README 與文件）都須經可信、具寫入權限的獨立審查者對最新 head 核准。main push 與手動執行亦使用同一評分路徑；手動選取的 workflow ref 代表維護者選定的 evaluator，不能自動當成已核准基準。因此 main 上的 workflow 手動執行時，檢查名稱固定為 `manual-security-evaluation`、artifact 為 `manual-security-*`。`workflow_dispatch` 使用所選 ref 的 YAML，有推送權限者在自己分支改掉 job 名稱仍可產生同名檢查，所以審查者仍須以下述工具核對來源。執行完畢前，CI 會用發布程式的同一套證據契約自我檢查（`check_publishable_evidence.py`），證據與契約不一致時該 run 直接失敗。
+[security.yml](.github/workflows/security.yml) 改用 `pull_request_target`，只執行 base SHA 的 evaluator、安裝程序與測試；候選 checkout 僅作資料，只有限定的 `fixture_app` 來源會送入無網路容器。評估工作的權杖權限為 contents/read、pull-requests/read 與 actions/read，不提供模型或部署金鑰；獨立簽署工作另有 id-token/write 與 attestations/write。所有路徑（包含 fixture、README 與文件）都須經可信、具寫入權限的獨立審查者對最新 head 核准。main push、每日排程與手動執行亦使用同一評分路徑。排程在每天 00:23 UTC 重評 main，沒有新推送也會重跑 bootstrap，讓 lock 依賴的新弱點不必等到下一個 PR 才發現；排程執行和 push 一樣使用正式檢查名稱，但只附在 main 的提交上，`verify_required_check.py` 與發布程式都只採計 `pull_request_target`。排程失敗的通知只寄給最後修改 `cron` 那一行的人，而且要對方開著 Actions 通知。公開儲存庫 60 天沒有活動時，GitHub 會停用排程，要到 Actions 頁面重新啟用這個 workflow。手動選取的 workflow ref 代表維護者選定的 evaluator，不能自動當成已核准基準。因此 main 上的 workflow 手動執行時，檢查名稱固定為 `manual-security-evaluation`、artifact 為 `manual-security-*`。`workflow_dispatch` 使用所選 ref 的 YAML，有推送權限者在自己分支改掉 job 名稱仍可產生同名檢查，所以審查者仍須以下述工具核對來源。執行完畢前，CI 會用發布程式的同一套證據契約自我檢查（`check_publishable_evidence.py`），證據與契約不一致時該 run 直接失敗。
 
 新執行入口預設受保護。基準更新需由可信 reviewer 對目前 head SHA 獨立核准；guard 即時查核 GitHub PR／reviews，撤回核准、換版或作者自行核准皆不放行；提交身分可以自報，所以 guard 也會讀回 main 目前套用的規則，規則集的「最後推送須經他人核准」（`require_last_push_approval`）若未啟用，一律以 `LAST_PUSH_APPROVAL` 阻擋。只合併 base 的 update-branch 推送不會讓舊核准失效，GitHub 還會把核准的 commit 改指新 head；因此 guard 另讀取 head 分支的伺服器推送紀錄（Activity API），推送到目前 head 之前送出的核准不採計，找不到推送紀錄時以 `LAST_PUSH_UNKNOWN` 阻擋。此 run 仍以舊基準判定，合併後才成為下一輪基準。
 
@@ -173,6 +175,8 @@ python3 -I scripts/dev_db.py stop
 
 Without Docker or PostgreSQL, `.venv/bin/python -m pytest -m "not integration"` runs the offline subset; full acceptance still includes integration tests. Static checks run with `.venv/bin/ruff check .`, documentation checks with `python3 -I scripts/check_docs.py`, and pytest treats every warning as an error.
 
+After a change, run the changed test files first, for example `.venv/bin/python -m pytest tests/test_check_docs.py`, then the full suite above. `bootstrap.py` downloads and verifies `.tools/gitleaks`; without bootstrap, the tests that use Gitleaks fail because the scanner is missing.
+
 The CI runner is an ordinary non-root user. When run as root locally or in a container, the pytest header prints a warning: root can read mode-000 directories, so permission-dependent tests take other branches. Before pushing, rerun as an ordinary user, for example `runuser -u <user> -- .venv/bin/python -m pytest -m "not integration" --basetemp=<a directory that user can write>` (the checkout and `.venv` must be readable by that user). Main failed once for this reason on October 10.
 
 Bootstrap validates the approved 23-package inventory against PyPI identity, pinned versions, all lock hashes, a seven-day cooling period, and wheel availability. It verifies the scanner's release checksum and pinned binary digest, runs G2, and checks exact-version OSV results before installation. Only verified wheels are installed, with hashes required and source builds, extra indexes, and implicit dependency resolution disabled. Dependency updates require review.
@@ -181,7 +185,7 @@ The runtime uses a pinned Python image and verified wheels in an offline build. 
 
 `expect_block.py` requires exactly the nine policy-listed defects: unauthorized read/write/delete by bob and carol, and cross-tenant read/write/delete by admin. A different set with the same count, or a tool error, does not pass. The fixed pipeline returns 0 for this bounded pilot's ALLOW and 1 for BLOCK. ERROR, TIMEOUT, zero required targets, missing gates, stale evidence, and mismatched run/subject/policy bindings cannot pass. Positive actions and full database side effects are also checked.
 
-Evidence schema 3 uses a `worktree-manifest-v1` digest over explicit paths, types, executable classification, sizes, and SHA-256 content. AUTH requires the exact unique set of 44 cases and consistent case/finding totals. Cases cover login failures, ownership, tenants, admin delegation, field changes, logout, expiration, deletion, every authenticated endpoint under anonymous/forged/expired/logged-out identities, and input boundaries. Full typed JSON, response headers (only the fixed date, server, content-type, a matching content-length, and the `connection: close` echoed for the bridge) and users/items/sessions snapshots are checked; the oracle keeps its own expected state, so delayed writes between cases or during a final settle period fail. These are contracts of the synthetic API, not universal API rules. Ten concrete mutation families have isolated regressions.
+Evidence schema 3 uses a `worktree-manifest-v1` digest over explicit paths, types, executable classification, sizes, and SHA-256 content. AUTH requires the exact unique set of 48 cases (including probes outside the contract: a random bearer token and unlisted methods and routes) and consistent case/finding totals. Cases cover login failures, ownership, tenants, admin delegation, field changes, logout, expiration, deletion, every authenticated endpoint under anonymous/forged/expired/logged-out identities, and input boundaries. Full typed JSON, response headers (only the fixed date, server, content-type, a matching content-length, and the `connection: close` echoed for the bridge) and users/items/sessions snapshots are checked; the oracle keeps its own expected state, so delayed writes between cases or during a final settle period fail. These are contracts of the synthetic API, not universal API rules. Ten concrete mutation families have isolated regressions.
 
 Reports are created before configuration parsing at `artifacts/<run-id>/report.json`; failures store stages and exception types, not sensitive exception text. `latest.txt` points only to security runs; other operations have separate indexes. Local reports are unsigned. CI separately signs its uploaded evidence ZIP. Model supervision records workers/AWS groups before execution, publishes completion after cleanup, and supports later janitor recovery after SIGKILL.
 
@@ -192,7 +196,7 @@ Reports are created before configuration parsing at `artifacts/<run-id>/report.j
 | G0/G4 | Synthetic scope, authorization matrix, threat examples | Product owner, full threat model, approved applicability |
 | G1 | PyPI provenance, pinned hashes, cooling, wheel-only installation, declared-lock CycloneDX SBOM, OSV queries | Installed-image inventory, KEV/EPSS, malicious-package behavior, other ecosystems |
 | G2 | Gitleaks; worktree and candidate-HEAD history; bounded gzip/ZIP/tar expansion and metadata scanning | Server-side push protection, unavailable history/caches, credential revocation |
-| AUTH | 44 synthetic authentication/authorization and side-effect cases | Complete product DAST, TLS, CSRF, JWT, SSRF testing |
+| AUTH | 48 synthetic authentication/authorization, side-effect and out-of-contract probe cases | Complete product DAST, TLS, CSRF, JWT, SSRF testing |
 | Policy/evidence | Strict contracts, failure blocking, digests, protected changes, CI signatures and source verification | Dedicated publisher deployment, exception lifecycle, complete developer-role remote probes |
 | Models | Mock, Gemini, Bedrock, GLM and DeepSeek interfaces (DeepSeek disabled in the RoE); LM Studio text interface (Nemotron, Qwen) and batch comparison; on-prem IEC gateway authorized for GLM | Real on-prem acceptance, larger cross-family stability/bias studies |
 
@@ -202,7 +206,7 @@ gzip/ZIP/tar expansion is bounded and also scans comments, names, extra fields, 
 
 ## CI and merge boundaries
 
-`pull_request_target` executes the base evaluator, installation, and tests. Candidate checkout is data; only scoped fixture Python reaches a networkless container. Evaluator permissions are read-only for contents, PRs, and Actions; no model/deployment keys are supplied. A fresh signing job holds OIDC/attestation write permissions. The final `trusted-security-pilot` succeeds only after evaluation, signing and the separate trusted mutation job all succeed. Manual runs use distinct names and cannot replace the formal required check. CI validates its evidence with the publisher's contract before upload.
+`pull_request_target` executes the base evaluator, installation, and tests. Candidate checkout is data; only scoped fixture Python reaches a networkless container. Evaluator permissions are read-only for contents, PRs, and Actions; no model/deployment keys are supplied. A fresh signing job holds OIDC/attestation write permissions. The final `trusted-security-pilot` succeeds only after evaluation, signing and the separate trusted mutation job all succeed. Manual runs use distinct names and cannot replace the formal required check. Main pushes, the daily schedule and manual runs share the same scoring path. A daily scheduled run at 00:23 UTC re-evaluates main and reruns bootstrap even without a push, so a new advisory against a locked dependency surfaces without waiting for the next PR. Like push runs it reports under the formal names, but only on main's commits; `verify_required_check.py` and the publisher count only `pull_request_target` runs. A failed scheduled run notifies only the user who last changed the `cron` line, and only if they have Actions notifications on. GitHub disables schedules in a public repository after 60 days without activity; re-enable the workflow from the Actions page. CI validates its evidence with the publisher's contract before upload.
 
 Every path, including fixture and documentation, requires an independent, write-capable trusted reviewer approving the current head. Live GitHub checks reject stale/dismissed/self approvals and contributors to the PR commits. Because commit identities are self-asserted, the guard also reads back the rules applied to main and blocks with `LAST_PUSH_APPROVAL` unless the ruleset still requires last-push approval (`require_last_push_approval`). A base-only update-branch push keeps earlier approvals and GitHub re-points their commit to the new head, so the guard also reads the head branch's server-recorded pushes (Activity API): approvals submitted before the push of the current head do not count, and a missing push record blocks with `LAST_PUSH_UNKNOWN`. A baseline update is evaluated by the old baseline; only after legitimate merging does it become the next baseline.
 
