@@ -21,7 +21,7 @@
 .venv/bin/python -I scripts/model_review.py --live --provider gemini --output-tokens 1024
 
 # 同一批各家取得相同案例／輸出預算。8192-token 總額度內，可選子集分批驗證。 / Providers receive the same cases/output budgets per batch; select subsets within the 8,192-token total.
-# 已有真實驗收的配對是 Gemini／Bedrock；GLM 尚未取得真實推論，僅為介面範例。 / Gemini/Bedrock have live paired evidence; GLM is an interface example without live inference acceptance.
+# Gemini／Bedrock 有真實配對驗收；GLM 已經地端閘道完成小樣本實測（見里程碑狀態）。 / Gemini/Bedrock have live paired evidence; GLM has small on-prem gateway live samples (see milestone status).
 .venv/bin/python -I scripts/model_review.py --live --provider gemini --provider bedrock \
   --case B01 --case B02 --case B03 --case B04 --output-tokens 1024
 
@@ -126,7 +126,7 @@ This pilot compares judgments of fixed synthetic snippets; voting never replaces
 .venv/bin/python -m pytest tests/test_model_benchmark.py
 ```
 
-The default injection suite uses two deliberately disagreeing mock reviewers and six cases (12 calls). Boundaries similarly uses six vulnerable/fixed authorization, traversal, and SSRF cases. Live providers need explicit --live and configured identities/models/routes. GLM examples describe the interface, not completed inference; live GLM is paused. LM Studio is separately configured in its [guide](lmstudio.zh-TW.md#en).
+The default injection suite uses two deliberately disagreeing mock reviewers and six cases (12 calls). Boundaries similarly uses six vulnerable/fixed authorization, traversal, and SSRF cases. Live providers need explicit --live and configured identities/models/routes. Live GLM goes through the RoE-authorized on-prem IEC gateway; small live samples are recorded in [milestone status](milestone-status.zh-TW.md#en). LM Studio is separately configured in its [guide](lmstudio.zh-TW.md#en).
 
 Default output is 512 tokens per call, optionally 1,024, 2,048 or 4,096. Each batch permits at most 16 calls and 8,192 reserved output tokens. Reasoning models such as GLM and DeepSeek count reasoning tokens as output and mostly truncate at 1,024; use 2,048 (four calls per batch), or 4,096, the gateway's per-call ceiling, for harder cases that still truncate (two calls per batch). Requests and HTTP I/O are bounded by 30 seconds; the whole run uses min(130, 20 × calls + 10) seconds and may expire first. Different budgets/subsets are different experiments. No automatic retries, added providers, or hidden budget increases occur.
 

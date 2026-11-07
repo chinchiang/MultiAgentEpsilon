@@ -90,7 +90,11 @@
         "expired session export denied",
         "no delayed or out-of-band state changes",
         "out-of-range item id rejected as input error",
-        "NUL byte in update rejected without side effect"
+        "NUL byte in update rejected without side effect",
+        "random bearer token denied",
+        "unlisted item method rejected without side effect",
+        "unlisted item create not found",
+        "unlisted route not found"
       ],
       "seeded_defect_case_ids": [
         "bob: unauthorized read denied without data",

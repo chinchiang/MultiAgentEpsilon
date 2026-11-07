@@ -5,7 +5,7 @@ from copy import deepcopy
 from datetime import timedelta
 import json
 
-from hypothesis import given, settings, strategies as st
+from hypothesis import example, given, settings, strategies as st
 import pytest
 from security_harness.results import validate_cases, seeded_defects
 from security_harness.trusted_publisher import strict_json, Denied
@@ -77,6 +77,9 @@ def test_duplicate_json_keys_rejected_at_any_depth(key, value):
 
 @PROPERTY
 @given(st.integers(min_value=1, max_value=400))
+# 邊界值固定列出，不依賴產生器是否剛好抽到。 / Pin the boundaries instead of relying on the generator to draw them.
+@example(1)
+@example(400)
 def test_readable_text_length_and_invisible_boundaries(size):
     assert bounded_text('x' * size)
     assert not bounded_text('x' * 401)
