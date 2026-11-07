@@ -359,7 +359,7 @@ def container(identifier, run_id, minutes_old):
 
 
 def test_janitor_removes_a_container_created_after_its_run_was_cleaned(tmp_path, monkeypatch):
-    # daemon 很慢時，容器可能在 cleanup 刪除 run 目錄之後才出現。 / A slow daemon can create a container after cleanup removed its run.
+    # daemon 很慢時，容器可能在 cleanup 刪除執行清冊之後才出現。 / A slow daemon can create a container after cleanup removed its run.
     fake = FakeDocker(container('late', 'a' * 32, minutes_old=11))
     monkeypatch.setattr(isolation, 'docker', fake)
     assert sweep_stale(tmp_path) == []
