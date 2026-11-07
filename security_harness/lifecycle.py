@@ -1,6 +1,7 @@
 """父程序管理執行目錄、程序群組與取消後清理。
 
 Parent-owned run directories, process groups and cleanup after cancellation."""
+import hashlib
 import json
 import os
 import re
@@ -220,6 +221,36 @@ SECURITY_WORKER_ENV = frozenset({
     "SSL_CERT_FILE", "SSL_CERT_DIR"})
 
 
+# supervisor 在放行 worker 前決定的計畫欄位；worker 報告中的這些欄位必須與 supervisor 持有的值相同。
+# / The plan fields the supervisor decides before releasing the worker; the worker's report must keep the values
+# the supervisor holds.
+SECURITY_IMMUTABLE = ('run_id', 'operation', 'created_at', 'variant', 'candidate', 'resource_limits',
+                      'policy_digest', 'roe_sha256', 'evaluator_digest')
+
+
+def plan_digest(report, fields):
+    """報告中計畫欄位的雜湊；supervisor 經命令列交給 worker，不經磁碟。 / Digest of a report's plan fields. The
+    supervisor hands it to the worker on the command line, never through the report on disk."""
+    plan = {key: report.get(key) for key in fields}
+    return hashlib.sha256(json.dumps(plan, sort_keys=True, separators=(',', ':')).encode()).hexdigest()
+
+
+def plan_changed(report, planned):
+    """報告中的計畫欄位是否與 supervisor 持有的值不同。 / Whether the report's plan fields differ from the values the
+    supervisor holds."""
+    return any(report.get(key) != value for key, value in planned.items())
+
+
+def matches_plan(report, digest):
+    """worker 讀回的報告是否仍是命令列摘要所指的計畫。 / Whether the report the worker read back is still the plan
+    its command-line digest names."""
+    return plan_digest(report, SECURITY_IMMUTABLE) == digest
+
+
+class PlanMismatch(ValueError):
+    """worker 報告與 supervisor 的計畫不同。 / The worker's report differs from the supervisor's plan."""
+
+
 def security_worker_environment(environ=os.environ):
     """security worker 的環境：只保留白名單內的變數。
 
@@ -238,6 +269,7 @@ def supervise(root, audit, command, max_seconds):
     group_terminated = False
     supervisor_error = None
     deadline = time.monotonic() + max_seconds
+    planned = {key: audit.data.get(key) for key in SECURITY_IMMUTABLE}
     try:
         for signum in (signal.SIGTERM, signal.SIGINT):
             handlers[signum] = signal.signal(signum, lambda number, frame: cancelled.append(number))
@@ -280,8 +312,12 @@ def supervise(root, audit, command, max_seconds):
             signal.signal(signum, handler)
     # 讀取 worker 最後原子保存的進度，不使用父程序舊副本。 / Read the worker's last atomically persisted progress, not a stale parent copy.
     audit.data = json.loads((audit.output / 'report.json').read_text())
+    # 發布的證據只能帶 supervisor 實際使用的計畫，不採用 worker 改過的值。 / Published evidence carries only the plan
+    # the supervisor actually used, never values the worker changed.
+    changed = plan_changed(audit.data, planned)
+    audit.data.update(planned)
     finalized = False
-    if (reason is None and not cancelled and cleanup_error is None and process is not None
+    if (not changed and reason is None and not cancelled and cleanup_error is None and process is not None
             and process.returncode in (0, 1) and audit.data['execution'] == 'AWAITING_CLEANUP'):
         finalized = True
         pending = audit.data.pop('pending_decision')
@@ -305,6 +341,10 @@ def supervise(root, audit, command, max_seconds):
         if stage in kinds and not any(r['gate'] == stage for r in audit.data['records']):
             audit.add(stage, reason, kinds[stage], 0, 0, 'supervisor stopped run')
         audit.data.update(execution=reason, decision='BLOCK', reasons=['supervisor ' + reason.lower()])
+    elif changed or (process is not None and process.returncode == 2):
+        # exit 2 表示 worker 讀回的計畫與命令列摘要不符。 / Exit 2 means the plan the worker read back did not match
+        # the digest on its command line.
+        audit.fail(PlanMismatch('worker report differs from the plan'))
     elif not finalized:
         # 只有完成清理交接後才能發布 worker 判定。 / Only the cleanup-gated handoff may publish a worker decision.
         audit.fail(RuntimeError('worker did not complete'))

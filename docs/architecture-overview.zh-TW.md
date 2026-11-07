@@ -30,11 +30,11 @@
 
 [Mermaid 原始檔](diagrams/security-flow.mmd) · [開啟 SVG](diagrams/security-flow.svg)
 
-1. `scripts/run_security.py` 先建立 run ID 與初始證據，再由 supervisor 登記擁有者及程序群組；持久化握手完成後才允許 worker 執行。
-2. worker 從受信任基準讀取 RoE、政策與工具設定，核對候選輸入及清冊摘要。G1 查核候選 lock 的套件資料、產生鎖定檔 SBOM 並向 OSV 查詢每個固定版本，G2 使用真實 Gitleaks 掃描工作樹、候選 HEAD 可達內容、提交／標籤中繼資料及限額封存展開。
+1. `scripts/run_security.py` 先建立 run ID 與初始證據，並決定計畫（候選路徑、版本、限額、RoE 與政策雜湊、評估者摘要），再由 supervisor 登記擁有者及程序群組；持久化握手完成後才允許 worker 執行，計畫摘要經命令列交給 worker。
+2. worker 先核對報告中的計畫與命令列摘要，再核對評估者摘要；RoE 與政策各只讀一次，雜湊須與計畫相符。之後讀取工具設定，核對候選輸入及清冊摘要。G1 查核候選 lock 的套件資料、產生鎖定檔 SBOM 並向 OSV 查詢每個固定版本，G2 使用真實 Gitleaks 掃描工作樹、候選 HEAD 可達內容、提交／標籤中繼資料及限額封存展開。
 3. G1／G2 完成且零 findings 才執行 AUTH。隔離 runtime 核對映像、可信啟動器與候選 lock，僅將受限的 `fixture_app/*.py` 來源送入 app 容器。
 4. 可信 oracle 在容器外透過 Docker exec 啟動容器內 HTTP bridge，並獨立查詢 PostgreSQL，先核對兩個容器實際套用的隔離設定，再啟動容器並核對 48 個授權案例（含契約外探測）的完整回應、資料庫副作用與延遲變動；最終比對前先終止候選容器。
-5. worker 的結果先保持 `AWAITING_CLEANUP`；父程序確認所屬程序群組、容器及暫存目錄已清理，才發布最終結果。設定錯誤、缺 gate、過期證據、摘要不一致或清理失敗均 BLOCK。
+5. worker 的結果先保持 `AWAITING_CLEANUP`；父程序確認所屬程序群組、容器及暫存目錄已清理，才發布最終結果。設定錯誤、計畫不符、缺 gate、過期證據、摘要不一致或清理失敗均 BLOCK；supervisor 收尾時也核對報告中的計畫欄位，不採用 worker 改過的值。
 
 app 與隔離 DB 都使用 `--network=none`，透過共享的 PostgreSQL Unix socket 通訊。app 為非 root、唯讀根目錄，無 Linux capabilities，具 CPU／記憶體／PID／tmpfs 限額，只取得合成最低權限 DB 帳號。容器外 oracle 使用自己的可信 seed 與連線；候選不能修改評分器、政策或最終報告。
 
@@ -352,9 +352,9 @@ run_security.py and model_review.py are independent. Deterministic evaluation ne
 
 [Mermaid](diagrams/security-flow.mmd) · [SVG](diagrams/security-flow.svg)
 
-The entry point creates run ID/initial evidence. Supervisor registers owner/groups durably before handshake releases the worker. Trusted RoE/policy/tools define input inventory and digests. G1 verifies lock provenance/builds declared-lock SBOM/queries each OSV version; G2 runs real Gitleaks over worktree, candidate HEAD-reachable content, commit/tag metadata, and bounded archives. Only complete clean G1/G2 permit AUTH. Runtime verifies image/launcher/lock before copying limited fixture_app Python into isolation.
+The entry point creates run ID/initial evidence and the plan (candidate path, variant, limits, RoE and policy digests, evaluator digest). Supervisor registers owner/groups durably before handshake releases the worker, and passes the plan digest on the command line. The worker checks the report's plan against that digest, then the evaluator digest, and reads the RoE and policy once each, accepting them only if their digests match the plan. Trusted RoE/policy/tools define input inventory and digests. G1 verifies lock provenance/builds declared-lock SBOM/queries each OSV version; G2 runs real Gitleaks over worktree, candidate HEAD-reachable content, commit/tag metadata, and bounded archives. Only complete clean G1/G2 permit AUTH. Runtime verifies image/launcher/lock before copying limited fixture_app Python into isolation.
 
-Host oracle drives an in-container Docker-exec HTTP bridge and independently checks PostgreSQL for all 48 complete response/state contracts. Worker stays AWAITING_CLEANUP until parent verifies owned groups/containers/temp directories gone. Configuration errors, missing gates, stale/mismatched evidence, and cleanup failures block.
+Host oracle drives an in-container Docker-exec HTTP bridge and independently checks PostgreSQL for all 48 complete response/state contracts. Worker stays AWAITING_CLEANUP until parent verifies owned groups/containers/temp directories gone. Configuration errors, plan mismatches, missing gates, stale/mismatched evidence, and cleanup failures block. At finish the supervisor checks the report's plan fields again and never adopts values the worker changed.
 
 App and DB use network=none and shared PostgreSQL Unix sockets. App is non-root/read-only/no capabilities with CPU/memory/PID/tmpfs limits and synthetic least-privilege DB access. Host oracle has independent trusted seed/connection; candidate cannot modify policy/evaluator/reports. dev_db.py's loopback development PostgreSQL is separate and not automatically permanent. Supervisor handles cancellation/timeouts; cleanup_runs.py handles dead owners using UID/boot ID/PID start time/inventory.
 

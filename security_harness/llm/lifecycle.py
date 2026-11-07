@@ -2,7 +2,6 @@
 
 Model supervisor and recovery using the shared run inventory, without Docker."""
 import fcntl
-import hashlib
 import json
 import math
 import os
@@ -14,8 +13,8 @@ import time
 from contextlib import contextmanager
 from pathlib import Path
 
-from ..lifecycle import (group_alive, identity, owner_alive, prepare_run, run_directory,
-                         temporary_directory, terminate_group)
+from ..lifecycle import (group_alive, identity, owner_alive, plan_digest as fields_digest, prepare_run,
+                         run_directory, temporary_directory, terminate_group)
 from ..results import write_json
 from .gateway import ModelError
 from .transport import AWS_CHILD_ENV, strict_json
@@ -33,9 +32,8 @@ def plan_digest(report):
 
 Digest of a blind review's immutable plan, budget, identities and per-request digests. The
     supervisor hands it to the worker on the command line, never through the report on disk."""
-    fixed = {key: report.get(key) for key in BLIND_REVIEW_IMMUTABLE}
-    fixed['request_sha256'] = [check.get('request_sha256') for check in report.get('checks', [])]
-    return hashlib.sha256(json.dumps(fixed, sort_keys=True, separators=(',', ':')).encode()).hexdigest()
+    requests = [check.get('request_sha256') for check in report.get('checks', [])]
+    return fields_digest({**report, 'request_sha256': requests}, (*BLIND_REVIEW_IMMUTABLE, 'request_sha256'))
 
 
 def persist(path, data):
