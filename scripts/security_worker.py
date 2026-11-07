@@ -10,7 +10,8 @@ ROOT = Path(__file__).resolve().parents[1]
 if __name__ == "__main__":
     sys.path.insert(0, str(ROOT))
 from security_harness.audit import AuditRun
-from security_harness.lifecycle import matches_plan, run_directory
+from security_harness.lifecycle import matches_plan
+from security_harness.supervision import run_directory
 from security_harness.limits import WORKER_RLIMITS, apply_rlimits
 from scripts.run_security import main
 

@@ -10,7 +10,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 if __name__ == "__main__":
     sys.path.insert(0, str(ROOT))
-from security_harness.lifecycle import SweepIncomplete, sweep_stale
+from security_harness.janitor import SweepIncomplete, sweep_stale
 
 def main(argv=None):
     argparse.ArgumentParser(description=__doc__).parse_args(argv)

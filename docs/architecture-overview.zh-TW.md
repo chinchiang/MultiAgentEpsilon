@@ -34,7 +34,7 @@
 2. worker 先核對報告中的計畫與命令列摘要，再核對評估者摘要；RoE 與政策各只讀一次，雜湊須與計畫相符。之後讀取工具設定，核對候選輸入及清冊摘要。G1 查核候選 lock 的套件資料、產生鎖定檔 SBOM 並向 OSV 查詢每個固定版本，G2 使用真實 Gitleaks 掃描工作樹、候選 HEAD 可達內容、提交／標籤中繼資料及限額封存展開。
 3. G1／G2 完成且零 findings 才執行 AUTH。隔離 runtime 核對映像、可信啟動器與候選 lock，僅將受限的 `fixture_app/*.py` 來源送入 app 容器。
 4. 可信 oracle 在容器外透過 Docker exec 啟動容器內 HTTP bridge，並獨立查詢 PostgreSQL，先核對兩個容器實際套用的隔離設定，再啟動容器並核對 48 個授權案例（含契約外探測）的完整回應、資料庫副作用與延遲變動；最終比對前先終止候選容器。
-5. worker 的結果先保持 `AWAITING_CLEANUP`；父程序確認所屬程序群組、容器及暫存目錄已清理，才發布最終結果。設定錯誤、計畫不符、缺 gate、過期證據、摘要不一致或清理失敗均 BLOCK；supervisor 收尾時也核對報告中的計畫欄位，不採用 worker 改過的值。
+5. worker 的結果先保持 `AWAITING_CLEANUP`；父程序確認所屬程序群組、容器及暫存目錄已清理，才發布最終結果。收尾全程持有清理鎖、訊號處理器仍有效：先寫判定為 BLOCK 的檢查點並更新最新指標，再刪除執行清冊；任何一步失敗都保留清冊，交給 janitor 回收。設定錯誤、計畫不符、缺 gate、過期證據、摘要不一致或清理失敗均 BLOCK；supervisor 收尾時也核對報告中的計畫欄位，不採用 worker 改過的值。
 
 app 與隔離 DB 都使用 `--network=none`，透過共享的 PostgreSQL Unix socket 通訊。app 為非 root、唯讀根目錄，無 Linux capabilities，具 CPU／記憶體／PID／tmpfs 限額，只取得合成最低權限 DB 帳號。容器外 oracle 使用自己的可信 seed 與連線；候選不能修改評分器、政策或最終報告。
 
@@ -77,7 +77,7 @@ PR 使用 `.github/workflows/security.yml` 的 `pull_request_target`：evaluator
 | 隔離與外部 oracle | [`isolation.py`](../security_harness/isolation.py)、[`container_http.py`](../security_harness/container_http.py)、[`authorization.py`](../security_harness/authorization.py)、[`fixture_database.py`](../security_harness/fixture_database.py)、[`fixture_app/app.py`](../fixture_app/app.py) |
 | 突變與性質測試 | [`mutation_check.py`](../scripts/mutation_check.py)、[`mutation_worker.py`](../scripts/mutation_worker.py)、[`test_security_properties.py`](../tests/test_security_properties.py) |
 | 文件與合併保護檢查 | [`check_docs.py`](../scripts/check_docs.py)、[`audit_merge_protection.py`](../scripts/audit_merge_protection.py) |
-| 程序生命週期與回收 | [`lifecycle.py`](../security_harness/lifecycle.py)、[`limits.py`](../security_harness/limits.py)、[`cleanup_runs.py`](../scripts/cleanup_runs.py)；模型另用 [`llm/lifecycle.py`](../security_harness/llm/lifecycle.py) |
+| 程序生命週期與回收 | [`supervision.py`](../security_harness/supervision.py)（受監督執行：登記、握手、期限、群組停止、收尾協定與監督結果，以及共用的基本環境）、[`lifecycle.py`](../security_harness/lifecycle.py)（security 角色）、[`janitor.py`](../security_harness/janitor.py)、[`limits.py`](../security_harness/limits.py)、[`cleanup_runs.py`](../scripts/cleanup_runs.py)；模型另用 [`llm/lifecycle.py`](../security_harness/llm/lifecycle.py) |
 | LM Studio、批次比較與遠端主機授權 | [`lmstudio.py`](../security_harness/llm/lmstudio.py)、[`comparison.py`](../security_harness/llm/comparison.py)、[`config.py`](../security_harness/llm/config.py) |
 | 模型 transport／adapter | [`gateway.py`](../security_harness/llm/gateway.py)、[`adapters.py`](../security_harness/llm/adapters.py)、[`transport.py`](../security_harness/llm/transport.py)、[`output_schema.py`](../security_harness/llm/output_schema.py) |
 | 盲審、評分與註記 | [`model_review.py`](../scripts/model_review.py)、[`benchmark.py`](../security_harness/llm/benchmark.py)、[`benchmark_runner.py`](../security_harness/llm/benchmark_runner.py)、[`benchmark_score.py`](../security_harness/llm/benchmark_score.py)、[`review_adjudicate.py`](../scripts/review_adjudicate.py) |
@@ -211,6 +211,7 @@ MultiAgentEpsilon/
 │   ├── github_trust.py
 │   ├── inputs.py
 │   ├── isolation.py
+│   ├── janitor.py
 │   ├── lifecycle.py
 │   ├── limits.py
 │   ├── preflight.py
@@ -219,6 +220,7 @@ MultiAgentEpsilon/
 │   ├── scan_content.py
 │   ├── scope.py
 │   ├── secrets.py
+│   ├── supervision.py
 │   └── trusted_publisher.py
 ├── tests/
 │   ├── __init__.py
@@ -261,6 +263,7 @@ MultiAgentEpsilon/
 │   ├── test_scope.py
 │   ├── test_security_boundaries.py
 │   ├── test_security_properties.py
+│   ├── test_supervision.py
 │   ├── test_trusted_changes.py
 │   ├── test_trusted_publisher.py
 │   ├── test_verify_required_check.py
@@ -354,7 +357,7 @@ run_security.py and model_review.py are independent. Deterministic evaluation ne
 
 The entry point creates run ID/initial evidence and the plan (candidate path, variant, limits, RoE and policy digests, evaluator digest). Supervisor registers owner/groups durably before handshake releases the worker, and passes the plan digest on the command line. The worker checks the report's plan against that digest, then the evaluator digest, and reads the RoE and policy once each, accepting them only if their digests match the plan. Trusted RoE/policy/tools define input inventory and digests. G1 verifies lock provenance/builds declared-lock SBOM/queries each OSV version; G2 runs real Gitleaks over worktree, candidate HEAD-reachable content, commit/tag metadata, and bounded archives. Only complete clean G1/G2 permit AUTH. Runtime verifies image/launcher/lock before copying limited fixture_app Python into isolation.
 
-Host oracle drives an in-container Docker-exec HTTP bridge and independently checks PostgreSQL for all 48 complete response/state contracts. Worker stays AWAITING_CLEANUP until parent verifies owned groups/containers/temp directories gone. Configuration errors, plan mismatches, missing gates, stale/mismatched evidence, and cleanup failures block. At finish the supervisor checks the report's plan fields again and never adopts values the worker changed.
+Host oracle drives an in-container Docker-exec HTTP bridge and independently checks PostgreSQL for all 48 complete response/state contracts. Worker stays AWAITING_CLEANUP until parent verifies owned groups/containers/temp directories gone. Finalization holds the cleanup lock with the signal handlers still installed: it first writes a BLOCK checkpoint and moves the latest pointer, then removes the run inventory; if any step fails the inventory stays for the janitor. Configuration errors, plan mismatches, missing gates, stale/mismatched evidence, and cleanup failures block. At finish the supervisor checks the report's plan fields again and never adopts values the worker changed.
 
 App and DB use network=none and shared PostgreSQL Unix sockets. App is non-root/read-only/no capabilities with CPU/memory/PID/tmpfs limits and synthetic least-privilege DB access. Host oracle has independent trusted seed/connection; candidate cannot modify policy/evaluator/reports. dev_db.py's loopback development PostgreSQL is separate and not automatically permanent. Supervisor handles cancellation/timeouts; cleanup_runs.py handles dead owners using UID/boot ID/PID start time/inventory.
 
@@ -380,7 +383,7 @@ Main push evaluates its own commit. Manual workflow uses chosen ref and distinct
 
 ## Components and directory structure
 
-The Chinese section's linked component table and complete repository tree use unchanged language-neutral paths and are shared by both editions. Installation: scripts/bootstrap.py/build_runtime.py, requirements.lock/tools.lock. Execution: run_security.py/security_worker.py/audit.py. Scope/input/policy: scope.py/inputs.py/results.py and security JSON. G1/G2: preflight.py/dependencies.py/secrets.py/scan_content.py/candidate_git.py. Isolation/oracle: isolation.py/container_http.py/authorization.py/fixture_database.py/fixture_app. Lifecycle: lifecycle.py/limits.py/cleanup_runs.py and llm/lifecycle.py. Models: gateway.py/adapters.py/lmstudio.py/transport.py/output_schema.py. Reviews: model_review.py/benchmark*.py/review_adjudicate.py/model_compare.py/comparison.py. CI: check_trusted_changes.py/verify_required_check.py/write_ci_provenance.py/check_publishable_evidence.py. Deployment: trusted_publisher.py/publish_trusted_check.py/prepare_publisher_deployment.py and deploy/trusted-publisher.
+The Chinese section's linked component table and complete repository tree use unchanged language-neutral paths and are shared by both editions. Installation: scripts/bootstrap.py/build_runtime.py, requirements.lock/tools.lock. Execution: run_security.py/security_worker.py/audit.py. Scope/input/policy: scope.py/inputs.py/results.py and security JSON. G1/G2: preflight.py/dependencies.py/secrets.py/scan_content.py/candidate_git.py. Isolation/oracle: isolation.py/container_http.py/authorization.py/fixture_database.py/fixture_app. Lifecycle: supervision.py (supervised runs: registration, handshake, deadline, group stop, the finalization protocol and supervision outcome, and the shared base environment)/lifecycle.py (the security role)/janitor.py/limits.py/cleanup_runs.py and llm/lifecycle.py. Models: gateway.py/adapters.py/lmstudio.py/transport.py/output_schema.py. Reviews: model_review.py/benchmark*.py/review_adjudicate.py/model_compare.py/comparison.py. CI: check_trusted_changes.py/verify_required_check.py/write_ci_provenance.py/check_publishable_evidence.py. Deployment: trusted_publisher.py/publish_trusted_check.py/prepare_publisher_deployment.py and deploy/trusted-publisher.
 
 The shared [GitHub trust module](../security_harness/github_trust.py) collects complete review and run-source evidence through the GitHub reader for the guard, publisher and required-check verifier. Explicit flows preserve the guard's post-push approval and the publisher's unique-PR requirement; signatures, artifacts and publication remain in the publisher. Source evidence is reused only within one command. Mutable state is still reread before success; there is no cross-command cache or atomic-snapshot guarantee.
 

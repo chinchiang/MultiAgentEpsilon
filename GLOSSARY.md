@@ -34,6 +34,22 @@ _避免_：子程序（單獨使用時）、job、executor
 supervisor 在放行 worker 之前就決定、worker 不得更改的事實：評估什麼、依哪份 RoE 與政策、在什麼限額下執行。worker 開始前與 supervisor 收尾時都要核對同一份計畫。
 _避免_：設定、config、報告（報告是 worker 產出的證據）
 
+**受監督執行**：
+由 supervisor 啟動一個 worker 並負責到底的一次執行：在期限與訊號下等它結束，停止它留下的所有程序群組，清除它的資源，最後關閉證據。
+_避免_：job、task、子程序執行
+
+**監督結果**：
+一次受監督執行如何結束：worker 自行結束（帶結束碼）、逾時、取消、supervisor 出錯或清理失敗。它不表示是否放行；放行與否是判定。
+_避免_：判定、verdict、decision
+
+**清理交接**：
+worker 結束前留下的待定結果，只有在 supervisor 完成清理之後才能成為正式結果。
+_避免_：交接（單獨使用時）、handoff
+
+**執行清冊**：
+一次執行的擁有者與其登記程序群組的持久紀錄；擁有者死亡時，janitor 依它回收該執行。
+_避免_：復原清冊、run 目錄
+
 <a id="en"></a>
 
 # MultiAgentEpsilon glossary
@@ -67,3 +83,19 @@ _Avoid_: child (on its own), job, executor
 **Plan**:
 The facts a supervisor decides before releasing a worker and the worker may not change: what to evaluate, under which RoE and policy, and within which limits. The worker checks the plan before it starts and the supervisor checks it again when it finishes.
 _Avoid_: settings, config, report (the report is the worker's evidence)
+
+**Supervised run**:
+One run that a supervisor starts a worker for and owns to the end: it waits for the worker under a deadline and signals, stops every process group the worker left, removes its resources and finally closes the evidence.
+_Avoid_: job, task, child process run
+
+**Supervision outcome**:
+How a supervised run ended: the worker exited on its own (with its exit code), the deadline passed, the run was cancelled, the supervisor failed, or cleanup failed. It never says whether the change is allowed; that is the decision.
+_Avoid_: verdict, decision
+
+**Cleanup handoff**:
+The pending result a worker leaves before it exits, which becomes the real result only after the supervisor has finished cleanup.
+_Avoid_: handoff (on its own)
+
+**Run inventory**:
+The durable record of a run's owner and its registered process groups, from which a janitor reaps the run once its owner has died.
+_Avoid_: recovery inventory, run directory

@@ -13,7 +13,8 @@ if __name__ == "__main__":
     sys.path.insert(0, str(ROOT))
 from security_harness.llm.benchmark import OUTPUT_BUDGETS, PROVIDERS, SUITES, load_cases
 from security_harness.llm.benchmark_runner import initial_report
-from security_harness.llm.lifecycle import persist, plan_digest, supervise
+from security_harness.llm.lifecycle import plan_digest, supervise
+from security_harness.supervision import persist
 from scripts.model_smoke import require_model_roe
 
 

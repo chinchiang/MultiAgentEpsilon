@@ -119,16 +119,22 @@ asyncio.run(gateway.generate(Adapter(),Request(system='Synthetic',user='Syntheti
 
 def test_core_janitor_does_not_signal_a_reused_pid_after_reboot(tmp_path, monkeypatch):
     audit = AuditRun(tmp_path, 'security')
-    work = lifecycle.prepare_run(tmp_path, audit.data['run_id'])
+    from security_harness import isolation, supervision
+    from security_harness.janitor import sweep_stale
+    work = supervision.prepare_run(tmp_path, audit.data['run_id'], 'security')
     marker = json.loads((work / 'owner.json').read_text())
-    marker.update(boot='earlier-boot', worker_pid=os.getpid(), worker_start=lifecycle.identity(os.getpid()))
+    marker.update(boot='earlier-boot')
     write_json(work / 'owner.json', marker)
-    monkeypatch.setattr(lifecycle, 'terminate_group', lambda pid: pytest.fail('must not signal another boot'))
-    from security_harness import isolation
-    monkeypatch.setattr(isolation, 'cleanup_run', lambda run: None)
-    assert lifecycle.sweep_stale(tmp_path) == [audit.data['run_id']]
+    supervision.persist(work / 'groups' / f'{os.getpid()}.json', {
+        'pid': os.getpid(), 'start': supervision.identity(os.getpid()), 'boot': 'earlier-boot', 'uid': os.getuid(),
+        'role': 'worker'})
+    monkeypatch.setattr(supervision, 'terminate_group', lambda pid: pytest.fail('must not signal another boot'))
+    from tests.test_lifecycle import FakeDocker
+    monkeypatch.setattr(isolation, 'docker', FakeDocker())
+    assert sweep_stale(tmp_path) == [audit.data['run_id']]
     data = json.loads((audit.output / 'report.json').read_text())
     assert data['cleanup']['completed'] and data['cleanup']['boot_changed']
+    assert data['cleanup']['recovered_by_janitor'] and data['execution'] == 'CANCELLED'
 
 
 @pytest.mark.parametrize('mode,expected', [(0o700, 0o111), (0o710, 0o111), (0o744, 0o111),
@@ -289,16 +295,15 @@ def test_bedrock_array_keyword_omission_keeps_local_finding_limit():
 
 
 def test_core_worker_cannot_execute_before_durable_registration(tmp_path, monkeypatch):
-    from security_harness import isolation
-    monkeypatch.setattr(isolation, 'cleanup_run', lambda run: None)
     audit = AuditRun(tmp_path, 'security')
-    original_write = lifecycle.write_json
+    from security_harness import supervision
+    original_write = supervision.write_json
     def fail_registration(path, value):
-        if path.name == 'owner.json' and 'worker_pid' in value: raise OSError('synthetic registration failure')
+        if path.parent.name == 'groups': raise OSError('synthetic registration failure')
         original_write(path, value)
-    monkeypatch.setattr(lifecycle, 'write_json', fail_registration)
+    monkeypatch.setattr(supervision, 'write_json', fail_registration)
     command = [sys.executable, '-c', 'from pathlib import Path; Path("executed").write_text("unsafe")']
-    assert lifecycle.supervise(tmp_path, audit, command, 5) == 1
+    assert lifecycle.supervise(tmp_path, audit, command, 5, lambda run_id: None) == 1
     assert not (tmp_path / 'executed').exists()
     assert audit.data['decision'] == 'BLOCK' and audit.data['cleanup']['completed']
 
