@@ -39,11 +39,16 @@ PIDS_LIMIT = 128
 NOFILE_LIMIT = 4096
 
 
-def run_flags(name, run_id):
+def run_flags(name, run_id, verb="run"):
     # 不從網路拉映像；本機缺映像時失敗而非在評估期間下載。 / Never pull: a missing local image fails instead of downloading mid-evaluation.
-    flags = ["run", "--detach", "--pull=never", "--name", name, "--label", "epsilon.isolated=true",
+    # 評估用 create：先核對實際組態再 start，候選程式在核對前不會執行。 / Evaluation uses create, so candidate code
+    # cannot run before the applied configuration is verified.
+    if verb not in ("run", "create"):
+        raise ValueError("invalid docker verb")
+    flags = [verb, *(["--detach"] if verb == "run" else []), "--pull=never", "--name", name, "--label", "epsilon.isolated=true",
              "--label", "epsilon.run=" + run_id,
              "--network=none", "--read-only", "--cap-drop=ALL", "--security-opt=no-new-privileges",
+             "--ipc=private", "--cgroupns=private",
              "--cpus=1", f"--memory={MEMORY_BYTES}", f"--memory-swap={MEMORY_BYTES}",
              f"--pids-limit={PIDS_LIMIT}", f"--ulimit=nofile={NOFILE_LIMIT}:{NOFILE_LIMIT}", "--log-driver=none"]
     for variable in PROXY_NAMES:
@@ -51,11 +56,13 @@ def run_flags(name, run_id):
     return flags
 
 
-def verify_container(data, *, user, image_id=None, image_ref=None):
-    """評估前核對 Docker 實際套用的隔離設定，任一不符即拒絕。
+def verify_container(data, *, user, image_id=None, image_ref=None, mounts=None, tmpfs=None):
+    """容器啟動前核對 Docker 實際套用的隔離設定，任一不符即拒絕。
 
-Verify the isolation Docker actually applied before evaluation; any mismatch refuses."""
+Verify the isolation Docker actually applied before the container starts; any mismatch refuses.
+mounts lists (type, source, destination, writable); tmpfs maps destination to options."""
     host, config = data["HostConfig"], data["Config"]
+    applied_mounts = sorted((m["Type"], m["Source"], m["Destination"], m["RW"]) for m in data["Mounts"])
     ulimits = {u["Name"]: (u["Soft"], u["Hard"]) for u in host.get("Ulimits") or []}
     checks = {
         "network": host["NetworkMode"] == "none",
@@ -69,6 +76,12 @@ Verify the isolation Docker actually applied before evaluation; any mismatch ref
         "nofile": ulimits == {"nofile": (NOFILE_LIMIT, NOFILE_LIMIT)},
         "user": config["User"] == user,
         "image": (image_id is None or data["Image"] == image_id) and (image_ref is None or config["Image"] == image_ref),
+        "not_started": data["State"]["Status"] == "created",
+        "namespaces": (host["PidMode"], host["IpcMode"], host["UsernsMode"], host["CgroupnsMode"]) == ("", "private", "", "private"),
+        "devices": not host.get("Devices"),
+        "runtime": host.get("Runtime") == "runc",
+        "mounts": mounts is None or applied_mounts == sorted(mounts),
+        "tmpfs": tmpfs is None or (host.get("Tmpfs") or {}) == tmpfs,
     }
     failed = sorted(k for k, ok in checks.items() if not ok)
     if failed:
@@ -140,12 +153,17 @@ def run_isolated(candidate: Path, variant="fixed", run_id=None) -> dict:
         cleanup_errors = []
         try:
             db_image = json.loads((ROOT / "security/tools.lock.json").read_text())["postgres"]["image"]
-            docker(*run_flags(names[0], run_id), "--user", "999:999", "--env-file", str(env_file),
+            db_tmpfs = {"/var/lib/postgresql/data": "rw,uid=999,gid=999,size=256m", "/tmp": "rw,uid=999,gid=999,size=16m"}
+            docker(*run_flags(names[0], run_id, "create"), "--user", "999:999", "--env-file", str(env_file),
                    "--mount", f"type=bind,src={work / 'db'},dst=/var/run/postgresql",
                    "--mount", f"type=bind,src={hba},dst=/etc/epsilon-pg_hba.conf,readonly",
-                   "--tmpfs", "/var/lib/postgresql/data:rw,uid=999,gid=999,size=256m",
-                   "--tmpfs", "/tmp:rw,uid=999,gid=999,size=16m", db_image,
+                   *[a for path, options in db_tmpfs.items() for a in ("--tmpfs", f"{path}:{options}")], db_image,
                    "-c", "hba_file=/etc/epsilon-pg_hba.conf", "-c", "listen_addresses=")
+            db_isolation = verify_container(json.loads(docker("inspect", names[0]).stdout)[0], user="999:999",
+                                            image_ref=db_image, tmpfs=db_tmpfs,
+                                            mounts=[("bind", str(work / "db"), "/var/run/postgresql", True),
+                                                    ("bind", str(hba), "/etc/epsilon-pg_hba.conf", False)])
+            docker("start", names[0])
             for _ in range(80):
                 try:
                     if docker("exec", names[0], "cat", "/proc/1/comm", check=False).stdout.strip() != "postgres":
@@ -170,15 +188,19 @@ def run_isolated(candidate: Path, variant="fixed", run_id=None) -> dict:
             settings.write_text(json.dumps({"dsn": f"postgresql://epsilon_app:{app_password}@/epsilon_fixture?host=/run/epsilon-db",
                                             "schema": schema, "variant": variant}))
             settings.chmod(0o444)
-            docker(*run_flags(names[1], run_id), "--user", "10001:10001", "--tmpfs", "/tmp:rw,uid=10001,gid=10001,size=16m",
+            app_tmpfs = {"/tmp": "rw,uid=10001,gid=10001,size=16m"}
+            docker(*run_flags(names[1], run_id, "create"), "--user", "10001:10001", "--tmpfs", "/tmp:" + app_tmpfs["/tmp"],
                    "--mount", f"type=bind,src={work / 'candidate'},dst=/candidate,readonly",
                    "--mount", f"type=bind,src={work / 'db'},dst=/run/epsilon-db,readonly",
                    "--mount", f"type=bind,src={settings},dst=/run/fixture.json,readonly", runtime["image_id"])
-            # 先核對兩個容器的實際組態，再送出任何評估請求。 / Verify both containers' applied configuration before any evaluation request.
-            db_isolation = verify_container(json.loads(docker("inspect", names[0]).stdout)[0],
-                                            user="999:999", image_ref=db_image)
-            app_isolation = verify_container(json.loads(docker("inspect", names[1]).stdout)[0],
-                                             user="10001:10001", image_id=runtime["image_id"])
+            # 先核對實際組態再啟動，候選的匯入期程式碼不會在錯誤設定下執行。 / Verify the applied configuration
+            # before start, so candidate import-time code never runs under a wrong configuration.
+            app_isolation = verify_container(json.loads(docker("inspect", names[1]).stdout)[0], user="10001:10001",
+                                             image_id=runtime["image_id"], tmpfs=app_tmpfs,
+                                             mounts=[("bind", str(work / "candidate"), "/candidate", False),
+                                                     ("bind", str(work / "db"), "/run/epsilon-db", False),
+                                                     ("bind", str(settings), "/run/fixture.json", False)])
+            docker("start", names[1])
             client = BoundedClient(names[1])
             health_deadline = time.monotonic() + 20
             while time.monotonic() < health_deadline:
@@ -192,7 +214,9 @@ def run_isolated(candidate: Path, variant="fixed", run_id=None) -> dict:
                 time.sleep(0.1)
             else:
                 raise RuntimeError("isolated HTTP service unavailable")
-            cases = evaluate(client, dsn, schema, passwords, connect)
+            # 靜置後、最終快照前終止候選（SIGKILL），最終比對之後不會再有候選寫入。 / Kill the candidate after
+            # the settle period and before the final snapshot, so no candidate write can follow the last comparison.
+            cases = evaluate(client, dsn, schema, passwords, connect, stop=lambda: docker("kill", names[1]))
             evidence = {**app_isolation,
                         "database": db_isolation,
                         "oracle": "host oracle; bounded container HTTP bridge + independent database queries",
