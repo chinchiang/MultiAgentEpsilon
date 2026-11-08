@@ -101,13 +101,26 @@ mounts lists (type, source, destination, writable); tmpfs maps destination to op
             "verified": sorted(checks)}
 
 
-def cleanup_run(run_id):
+CLEANUP_ATTEMPTS = 5
+CLEANUP_INTERVAL = 0.5
+
+
+def cleanup_run(run_id, attempts=CLEANUP_ATTEMPTS):
+    """移除這次執行的容器，直到列表清空；被終止的 docker CLI 可能在第一次清理後才建立容器。
+
+Remove this run's containers until none are listed: a docker CLI that was being
+    killed can still create a container after the first sweep."""
     if not valid_run_id(run_id):
         raise ValueError("invalid isolation run ID")
-    # 清理不是安全測試期限；daemon 較慢時應等待，不能遺留容器。 / Cleanup is not a security deadline: a slow daemon must delay it, not leak containers.
-    ids = docker("ps", "-aq", "--filter", "label=epsilon.isolated=true", "--filter", "label=epsilon.run=" + run_id, timeout=30).stdout.split()
-    if ids:
+    for attempt in range(attempts):
+        # 清理不是安全測試期限；daemon 較慢時應等待，不能遺留容器。 / Cleanup is not a security deadline: a slow daemon must delay it, not leak containers.
+        ids = docker("ps", "-aq", "--filter", "label=epsilon.isolated=true", "--filter", "label=epsilon.run=" + run_id, timeout=30).stdout.split()
+        if not ids:
+            return
         docker("rm", "--force", *ids, timeout=30)
+        if attempt + 1 < attempts:
+            time.sleep(CLEANUP_INTERVAL)
+    raise RuntimeError("isolated containers remain after cleanup")
 
 
 def run_isolated(candidate: Path, variant="fixed", run_id=None) -> dict:

@@ -151,13 +151,6 @@ What the model role declares to a supervised run: no external resources, and clo
         return data
 
 
-def finish(root, run_id, *, providers=(), returncode=None, stop=None, expected_report=None):
-    """收尾一個 worker 已在 supervise 之外結束的模型執行。 / Finalize a model run whose worker already ended outside
-    supervise."""
-    return supervision.finalize(root, run_id, ModelRun(root, run_id, providers, expected_report), stop=stop,
-                                returncode=returncode)
-
-
 def recover(root, run_id, marker):
     """回收擁有者已死亡的模型執行：經同一套收尾協定以 CANCELLED 關閉證據並移除執行狀態。
 

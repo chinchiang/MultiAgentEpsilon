@@ -19,6 +19,7 @@ from security_harness.supervision import prepare_run
 
 
 from tests.model_evidence import provider_answer
+from tests import model_support
 
 
 @pytest.fixture(autouse=True)
@@ -68,7 +69,7 @@ def collect(tmp_path, monkeypatch=None):
     path = tmp_path/'artifacts'/report['run_id']/'report.json'
     life.persist(path,report);prepare_run(tmp_path,report['run_id'],operation='model-smoke')
     result = asyncio.run(runner.run_worker(tmp_path,report['run_id'],life.plan_digest(report)))
-    return life.finish(tmp_path,report['run_id'],providers=report['providers'],returncode=result,expected_report=report)
+    return model_support.finish(tmp_path,report['run_id'],providers=report['providers'],returncode=result,expected_report=report)
 
 
 def test_rounds_share_one_budget_and_preserve_opaque_ids(tmp_path):

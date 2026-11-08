@@ -242,8 +242,8 @@ def test_failed_cleanup_step_keeps_the_run_inventory_for_the_janitor(tmp_path, m
 
 
 def test_finalization_without_the_cleanup_lock_touches_neither_evidence_nor_inventory(tmp_path):
-    from security_harness.supervision import (CleanupLockUnavailable, cleanup_lock, finalize, prepare_run,
-                                              temporary_directory)
+    from security_harness.supervision import CleanupLockUnavailable, cleanup_lock, prepare_run, temporary_directory
+    from tests.model_support import finalize
     run_id = str(uuid.uuid4())
     work = prepare_run(tmp_path, run_id, 'fake-role')
     role = FakeRole()

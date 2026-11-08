@@ -17,6 +17,7 @@ from security_harness import supervision
 from security_harness.janitor import sweep_stale
 from security_harness.supervision import prepare_run, temporary_directory
 from security_harness.llm import lifecycle as life
+from tests import model_support
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -399,7 +400,7 @@ def test_smoke_report_that_changes_the_plan_is_not_accepted(tmp_path, tampered):
         changed = json.loads(path.read_text())
         changed['started_at'] = '2000-01-01T00:00:00+00:00'
         life.persist(path, changed)
-    data = life.finish(tmp_path, run_id, providers=['mock'], returncode=0, expected_report=report)
+    data = model_support.finish(tmp_path, run_id, providers=['mock'], returncode=0, expected_report=report)
     expected = ('INCOMPLETE', 'EVALUATION_INVALID') if tampered else ('COMPLETE', None)
     assert (data['status'], data['code']) == expected
 
@@ -425,7 +426,7 @@ def test_cancelled_run_never_publishes_a_complete_cleanup_handoff(tmp_path):
     prepare_run(tmp_path, run_id, operation='model-smoke')
     assert asyncio.run(run_worker(tmp_path, run_id, life.smoke_plan_digest(report))) == 0
     assert report_at_run(tmp_path, run_id)['status'] == 'AWAITING_CLEANUP'
-    data = life.finish(tmp_path, run_id, providers=['mock'], returncode=0, stop='CANCELLED', expected_report=report)
+    data = model_support.finish(tmp_path, run_id, providers=['mock'], returncode=0, stop='CANCELLED', expected_report=report)
     assert data['status'] == 'CANCELLED' and 'pending_status' not in data
     assert_clean(tmp_path, data)
 

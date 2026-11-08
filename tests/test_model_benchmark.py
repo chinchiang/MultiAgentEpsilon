@@ -22,6 +22,7 @@ from security_harness.supervision import prepare_run
 
 
 from tests.model_evidence import provider_answer
+from tests import model_support
 
 
 @pytest.fixture(autouse=True)
@@ -68,7 +69,7 @@ def collected(tmp_path, providers=None, case_ids=None):
     life.persist(path, report)
     prepare_run(tmp_path, report['run_id'], operation='model-smoke')
     code = asyncio.run(runner.run_worker(tmp_path, report['run_id'], plan_digest=life.plan_digest(report)))
-    data = life.finish(tmp_path, report['run_id'], providers=report['providers'], returncode=code, expected_report=report)
+    data = model_support.finish(tmp_path, report['run_id'], providers=report['providers'], returncode=code, expected_report=report)
     return data, path
 
 
@@ -222,7 +223,7 @@ def test_cancelled_collection_keeps_all_planned_cases_in_analysis(tmp_path, monk
         task.cancel()
         assert await task == 1
     asyncio.run(cancel())
-    data = life.finish(tmp_path, report['run_id'], stop='CANCELLED', expected_report=report)
+    data = model_support.finish(tmp_path, report['run_id'], stop='CANCELLED', expected_report=report)
     assert data['status'] == 'CANCELLED' and data['cleanup']['completed']
     assert data['analysis']['provider_metrics']['gemini']['unavailable'] == 2
 
@@ -338,7 +339,7 @@ def test_coordinated_budget_tampering_before_the_worker_starts_is_refused(tmp_pa
     # worker 綁定磁碟上的報告，因此由 supervisor 收尾時的核對拒絕它。 / The worker is bound to the report on disk,
     # so the supervisor's check at finish is what refuses it.
     assert asyncio.run(runner.run_worker(tmp_path, report['run_id'], plan_digest=life.plan_digest(tampered))) == 0
-    data = life.finish(tmp_path, report['run_id'], providers=report['providers'], returncode=0, expected_report=report)
+    data = model_support.finish(tmp_path, report['run_id'], providers=report['providers'], returncode=0, expected_report=report)
     assert (data['status'], data['code']) == ('INCOMPLETE', 'EVALUATION_INVALID')
 
 
@@ -353,7 +354,7 @@ def test_worker_spends_nothing_when_the_report_differs_from_the_supervisor_plan(
     prepare_run(tmp_path, report['run_id'], operation='model-smoke')
     returncode = asyncio.run(runner.run_worker(tmp_path, report['run_id'], plan_digest=life.plan_digest(report)))
     assert returncode != 0
-    data = life.finish(tmp_path, report['run_id'], providers=report['providers'], returncode=returncode,
+    data = model_support.finish(tmp_path, report['run_id'], providers=report['providers'], returncode=returncode,
                        expected_report=report)
     assert data['calls'] == [] and (data['status'], data['code']) == ('INCOMPLETE', 'EVALUATION_INVALID')
 
@@ -363,7 +364,7 @@ def test_worker_runs_normally_with_the_matching_plan_digest(tmp_path):
     life.persist(tmp_path / 'artifacts' / report['run_id'] / 'report.json', report)
     prepare_run(tmp_path, report['run_id'], operation='model-smoke')
     assert asyncio.run(runner.run_worker(tmp_path, report['run_id'], plan_digest=life.plan_digest(report))) == 0
-    data = life.finish(tmp_path, report['run_id'], providers=report['providers'], returncode=0, expected_report=report)
+    data = model_support.finish(tmp_path, report['run_id'], providers=report['providers'], returncode=0, expected_report=report)
     assert data['status'] == 'COMPLETE' and len(data['calls']) == 2
 
 
@@ -381,7 +382,7 @@ def test_single_immutable_field_tampering_is_refused(tmp_path, tamper):
     life.persist(path, tampered)
     prepare_run(tmp_path, report['run_id'], operation='model-smoke')
     asyncio.run(runner.run_worker(tmp_path, report['run_id'], plan_digest=life.plan_digest(tampered)))
-    data = life.finish(tmp_path, report['run_id'], providers=report['providers'], returncode=0, expected_report=report)
+    data = model_support.finish(tmp_path, report['run_id'], providers=report['providers'], returncode=0, expected_report=report)
     assert (data['status'], data['code']) == ('INCOMPLETE', 'EVALUATION_INVALID')
 
 
@@ -394,6 +395,6 @@ def test_parent_refuses_worker_success_when_benchmark_evaluation_is_invalid(tmp_
     corrupt = json.loads(path.read_text())
     corrupt['checks'][0]['case_sha256'] = '0' * 64
     life.persist(path, corrupt)
-    data = life.finish(tmp_path, report['run_id'], providers=report['providers'], returncode=0, expected_report=report)
+    data = model_support.finish(tmp_path, report['run_id'], providers=report['providers'], returncode=0, expected_report=report)
     assert data['status'] == 'INCOMPLETE' and data['code'] == 'EVALUATION_INVALID'
     assert data['analysis'] is None and data['cleanup']['completed']

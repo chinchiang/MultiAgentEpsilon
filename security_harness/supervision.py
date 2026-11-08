@@ -471,13 +471,6 @@ Run the worker in one supervised run and finalize it. Return the role's final cl
             return close_run(root, run_id, role, run)[1]
 
 
-def finalize(root, run_id, role, *, stop=None, returncode=None):
-    """收尾一個 worker 已在 supervise 之外結束的執行；回傳角色的最終結果。 / Finalize a run whose worker already ended
-    outside supervise. Return the role's final result."""
-    with finalization_lock(run_directory(root, run_id)):
-        return close_run(root, run_id, role, Ended(stop, returncode, time.monotonic()))[1]
-
-
 def recover(root, run_id, marker, role):
     """在 sweep_runs 已持有的清理鎖下，以取消收尾擁有者已死亡的執行；清理未完成時拋出例外。
 
