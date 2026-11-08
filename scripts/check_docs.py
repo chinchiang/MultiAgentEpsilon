@@ -138,7 +138,10 @@ def avoided_term_errors(name, source, tree, avoided):
 
 def validate(paths, root=ROOT):
     errors = []
-    avoided = [(term, term_pattern(term)) for term in avoided_terms(root)]
+    # 可信名詞表的避用詞一律適用，候選不能同時刪掉避用詞又使用它；候選新增的避用詞也一併檢查。 / The trusted
+    # glossary's avoided terms always apply, so a candidate cannot drop a term and use it in the same change; terms
+    # the candidate adds are checked too.
+    avoided = [(term, term_pattern(term)) for term in sorted(set(avoided_terms(ROOT)) | set(avoided_terms(root)))]
     markdown = [root / p for p in paths if p.endswith('.md')]
     for path in markdown:
         text = path.read_text(encoding='utf-8')
@@ -188,8 +191,14 @@ def validate(paths, root=ROOT):
             except ET.ParseError:
                 errors.append(f'{name}: invalid SVG / SVG 格式錯誤')
         if path.suffix == '.py':
-            source = path.read_text(encoding='utf-8')
-            tree = ast.parse(source)
+            try:
+                source = path.read_text(encoding='utf-8')
+                tree = ast.parse(source)
+            except (UnicodeDecodeError, SyntaxError, ValueError) as exc:
+                # 候選可能帶無法解析的檔案；列為錯誤，不以 traceback 結束。 / A candidate may carry an unparsable file;
+                # report it as an error instead of ending with a traceback.
+                errors.append(f'{name}: unparsable Python / 無法解析的 Python ({type(exc).__name__})')
+                continue
             errors.extend(avoided_term_errors(name, source, tree, avoided))
             for node, doc, _ in docstrings(tree):
                 if not re.search('[\u4e00-\u9fff]', doc) or not re.search('[A-Za-z]{3,}', doc):

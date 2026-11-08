@@ -28,7 +28,7 @@ def protected_changes(names):
     return list(names)
 
 
-def live_approval(number, head, base):
+def live_approval(number, head, base, refusals=None):
     policy = json.loads((ROOT / "security/trust-policy.json").read_text())
     # 此 guard 只實作獨立審查；政策若要求其他模式必須拒絕。 / This guard only implements independent review;
     # refuse a policy that asks for anything else.
@@ -39,7 +39,7 @@ def live_approval(number, head, base):
         raise ValueError("invalid trusted repository")
     reader = GitHubReader(ReadOnlyGitHub(), repo)
     return GitHubTrust(reader).baseline_approval(number, head, base, policy["baseline_reviewers"],
-                                                 os.environ.get("GITHUB_RUN_ID"))
+                                                 os.environ.get("GITHUB_RUN_ID"), refusals)
 
 
 def main():
@@ -57,9 +57,10 @@ def main():
     head = candidate_git.head(args.candidate)
     approval = None
     approval_error = None
+    refusals = []
     if args.pr:
         try:
-            approval = live_approval(args.pr, head, args.base)
+            approval = live_approval(args.pr, head, args.base, refusals)
         except Denied as exc:
             # 拒絕碼是固定診斷碼，可記入稽核檔。 / A refusal code is a fixed diagnostic code, safe to record.
             approval_error = f"Denied:{exc}"
@@ -69,6 +70,9 @@ def main():
     evidence = {"schema_version": 2, "base_sha": args.base, "candidate_sha": head,
                 "protected_changes": changed, "decision": "BLOCK" if blocked else "ALLOW",
                 "baseline_approval": approval, "approval_error": approval_error,
+                # 沒有核准時的固定診斷碼，例如 INDEPENDENT_APPROVAL_MISSING。 / The fixed diagnostic code when no
+                # approval counts, such as INDEPENDENT_APPROVAL_MISSING.
+                "approval_refusal": refusals[0] if refusals else None,
                 "policy": "trusted base remains authoritative for this run"}
     if args.output:
         args.output.parent.mkdir(parents=True, exist_ok=True)

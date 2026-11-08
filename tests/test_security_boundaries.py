@@ -385,7 +385,10 @@ def test_scoped_codeowner_rules_cannot_claim_an_unlisted_person_owns_every_path(
     assert codeowners_reviewers(owners) == expected
 
 
-def test_full_guard_fetches_and_excludes_the_rerun_actor(bundle, monkeypatch):
+@pytest.mark.parametrize('pusher,counts', [(None, True), ('CatGrocery', False)], ids=['rerun-only', 'head-pusher'])
+def test_full_guard_excludes_the_head_pusher_but_not_a_reviewer_who_reran(bundle, monkeypatch, pusher, counts):
+    # 審查者按重跑只讓自己成為 triggering actor，不是推送者，核准仍有效；推送 head 的人不能核准。 / A reviewer who
+    # re-runs only becomes the triggering actor, not a pusher, so the approval counts; whoever pushed the head cannot.
     from scripts import check_trusted_changes as guard
     reviewer = 'CatGrocery'
     bundle['reviews'][0]['user']['login'] = reviewer
@@ -402,12 +405,12 @@ def test_full_guard_fetches_and_excludes_the_rerun_actor(bundle, monkeypatch):
     github.add('actions/runs/100', bundle['run'])
     github.add('pulls?state=all&head=owner:feature', [bundle['pr']])
     github.add('issues/5/timeline', [])
-    github.cursor_listing('activity?ref=refs/heads/feature',
-                          [{'activity_type': 'push', 'after': 'b'*40, 'timestamp': '2026-10-13T07:00:09Z'}])
+    push = {'activity_type': 'push', 'after': 'b'*40, 'timestamp': '2026-10-13T07:00:09Z'}
+    github.cursor_listing('activity?ref=refs/heads/feature', [{**push, 'actor': {'login': pusher}} if pusher else push])
     github.add('rules/branches/main',
                [{'type': 'pull_request', 'ruleset_id': 1, 'parameters': {'require_last_push_approval': True}}])
     monkeypatch.setattr(guard, 'ReadOnlyGitHub', lambda: github)
-    assert guard.live_approval(5, 'b'*40, 'a'*40) is None
+    assert (guard.live_approval(5, 'b'*40, 'a'*40) is not None) is counts
     paths = [path for _, path, _ in github.requests]
     assert any(p.endswith('/actions/runs/100') for p in paths) and any(p.endswith('/issues/5/timeline') for p in paths)
 

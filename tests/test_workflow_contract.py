@@ -47,10 +47,24 @@ def test_only_the_guard_step_receives_a_token():
     assert "secrets." not in WORKFLOW
 
 
+def concurrency():
+    block = re.search(r"^concurrency:\n((?:  .*\n)+)", WORKFLOW, re.MULTILINE).group(1)
+    settings = dict(re.findall(r"^  (group|cancel-in-progress): (.+)$", block, re.MULTILINE))
+    assert set(settings) == {"group", "cancel-in-progress"}
+    return settings
+
+
 def test_manual_and_push_runs_never_share_a_cancellation_group():
-    group = re.search(r"^concurrency:\n(?:  #.*\n)*  group: (.+)$", WORKFLOW, re.MULTILINE).group(1)
-    assert "${{ github.event_name }}" in group
-    assert "cancel-in-progress: true" in WORKFLOW
+    assert "${{ github.event_name }}" in concurrency()["group"]
+
+
+def test_main_runs_never_cancel_each_other():
+    # 連續合併時，前一個 commit 的 push run 被取消會留下紅燈且沒有證據。 / Back-to-back merges used to cancel the
+    # previous commit's push run, leaving it red with no evidence.
+    settings = concurrency()
+    assert settings["group"].endswith("${{ github.event.pull_request.number || github.sha }}")
+    assert settings["cancel-in-progress"] == ("${{ github.event_name == 'pull_request_target' && "
+                                              "github.event.action != 'edited' }}")
 
 
 def completion_job():

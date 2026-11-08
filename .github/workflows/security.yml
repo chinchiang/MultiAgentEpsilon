@@ -26,8 +26,13 @@ permissions:
 
 concurrency:
   # 依事件區分，避免手動執行取消 main 可信 push。 / The event keeps a manual evaluation from cancelling the trusted push run on main.
-  group: trusted-security-${{ github.event_name }}-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: true
+  # PR 以編號分組；其他事件以 commit 分組，連續合併到 main 時各 commit 的證據都會跑完，不互相取消或排擠。 /
+  # A PR groups by number; every other event groups by commit, so back-to-back merges to main each finish their
+  # evidence instead of cancelling or displacing one another.
+  group: trusted-security-${{ github.event_name }}-${{ github.event.pull_request.number || github.sha }}
+  # 只有新推送取消 PR 進行中的評估；改標題或描述（edited）不取消，否則每次編輯都重跑 20 分鐘。 / Only a new push
+  # cancels a PR's in-progress evaluation; an edit of the title or body does not, or every edit restarts a 20-minute run.
+  cancel-in-progress: ${{ github.event_name == 'pull_request_target' && github.event.action != 'edited' }}
 
 jobs:
   trusted-security-pilot:
