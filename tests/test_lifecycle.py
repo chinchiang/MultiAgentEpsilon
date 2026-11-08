@@ -389,6 +389,9 @@ class FakeDocker:
             if self.rm_fails:
                 raise subprocess.CalledProcessError(1, args)
             self.removed.extend(args[2:])
+            # 與 docker 相同，移除後不再列出。 / Like docker, a removed container is no longer listed.
+            for identifier in args[2:]:
+                self.containers.pop(identifier, None)
             out = ''
         else:
             pytest.fail('unexpected docker call: ' + ' '.join(args))

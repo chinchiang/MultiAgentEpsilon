@@ -34,7 +34,7 @@ def test_orchestrator_blocks_incomplete_worker_output(tmp_path, monkeypatch, cas
     monkeypatch.setattr(run_security, "dependency_scan", lambda *a: {"findings": [], "sbom": {}})
     monkeypatch.setattr(run_security, "scan", lambda *a, **k: {"targets": 1, "findings": []})
     monkeypatch.setattr(isolation, "cleanup_run", lambda *a: None)
-    with patch.object(run_security.subprocess, "run", return_value=subprocess.CompletedProcess([], 0, json.dumps({"cases": cases, "isolation": {}}), "")):
+    with patch.object(run_security, "run_isolation_worker", return_value=subprocess.CompletedProcess([], 0, json.dumps({"cases": cases, "isolation": {}}), "")):
         assert run_security.main(audit) == 1
     data = report(tmp_path)
     assert data["decision"] == "BLOCK"
@@ -111,7 +111,7 @@ def test_timeout_cleans_owned_isolation_and_records_timeout(tmp_path, monkeypatc
     monkeypatch.setattr(run_security, "scan", lambda *a, **k: {"targets": 1, "findings": []})
     cleaned = []
     monkeypatch.setattr(isolation, "cleanup_run", cleaned.append)
-    with patch.object(run_security.subprocess, "run", side_effect=subprocess.TimeoutExpired("worker", 120)):
+    with patch.object(run_security, "run_isolation_worker", side_effect=subprocess.TimeoutExpired("worker", 120)):
         assert run_security.main(audit) == 1
     data = report(tmp_path)
     assert cleaned == [data["run_id"]]
@@ -186,7 +186,7 @@ def test_failed_authorization_worker_records_its_error_type_and_failed_checks(tm
     monkeypatch.setattr(run_security, "scan", lambda *a, **k: {"targets": 1, "findings": []})
     monkeypatch.setattr(isolation, "cleanup_run", lambda *a: None)
     failure = json.dumps({"error_type": "IsolationMismatch", "failed_checks": ["mounts"]})
-    with patch.object(run_security.subprocess, "run", return_value=subprocess.CompletedProcess([], 1, failure, "")):
+    with patch.object(run_security, "run_isolation_worker", return_value=subprocess.CompletedProcess([], 1, failure, "")):
         assert run_security.main(audit) == 1
     record = report(tmp_path)["records"][-1]
     assert record["gate"] == "AUTH" and record["execution"] == "ERROR"
@@ -199,3 +199,69 @@ def test_isolation_worker_reports_failed_checks_as_json(tmp_path):
                              capture_output=True, text=True, timeout=30)
     assert process.returncode == 1
     assert json.loads(process.stdout) == {"error_type": "ValueError", "failed_checks": []}
+
+
+def test_timed_out_isolation_worker_takes_its_children_with_it(tmp_path):
+    # 先前 subprocess.run 逾時只殺直接子程序，docker CLI 孫程序仍會在清理後建立容器。 / A timeout used to kill only the
+    # direct child; its docker CLI grandchildren could still create containers after cleanup.
+    marker = tmp_path / "grandchild.pid"
+    script = ("import subprocess,sys,time;"
+              f"p=subprocess.Popen([sys.executable,'-c','import time; time.sleep(60)']);"
+              f"open({str(marker)!r},'w').write(str(p.pid));time.sleep(60)")
+    with pytest.raises(subprocess.TimeoutExpired):
+        run_security.run_isolation_worker([sys.executable, "-c", script], 1)
+    grandchild = int(marker.read_text())
+    import os
+    import time
+    deadline = time.monotonic() + 3
+    while time.monotonic() < deadline:
+        try:
+            os.kill(grandchild, 0)
+        except ProcessLookupError:
+            break
+        state = Path(f"/proc/{grandchild}/stat").read_text().rsplit(")", 1)[1].split()[0] if Path(f"/proc/{grandchild}").exists() else "X"
+        if state == "Z":
+            break
+        time.sleep(0.05)
+    else:
+        pytest.fail("grandchild survived the timeout")
+
+
+def test_isolation_worker_output_is_returned_when_it_finishes():
+    done = run_security.run_isolation_worker([sys.executable, "-c", "print('ok')"], 10)
+    assert (done.returncode, done.stdout) == (0, "ok\n")
+
+
+class LateDocker:
+    """第一次清理後才出現另一個容器的 docker 假實作。 / A fake docker where a second container appears after the
+    first sweep."""
+
+    def __init__(self, rounds):
+        self.rounds = list(rounds)
+        self.removed = []
+
+    def __call__(self, *args, check=True, timeout=45):
+        if args[:2] == ("ps", "-aq"):
+            out = "".join(i + "\n" for i in (self.rounds.pop(0) if self.rounds else []))
+        elif args[:2] == ("rm", "--force"):
+            self.removed.extend(args[2:])
+            out = ""
+        else:
+            pytest.fail("unexpected docker call: " + " ".join(args))
+        return subprocess.CompletedProcess(args, 0, out, "")
+
+
+def test_cleanup_repeats_until_no_container_of_the_run_remains(monkeypatch):
+    fake = LateDocker([["first"], ["late"], []])
+    monkeypatch.setattr(isolation, "docker", fake)
+    monkeypatch.setattr(isolation, "CLEANUP_INTERVAL", 0)
+    isolation.cleanup_run("a" * 32)
+    assert fake.removed == ["first", "late"]
+
+
+def test_cleanup_fails_when_containers_keep_appearing(monkeypatch):
+    fake = LateDocker([["again"]] * 10)
+    monkeypatch.setattr(isolation, "docker", fake)
+    monkeypatch.setattr(isolation, "CLEANUP_INTERVAL", 0)
+    with pytest.raises(RuntimeError, match="isolated containers remain after cleanup"):
+        isolation.cleanup_run("a" * 32)

@@ -39,6 +39,28 @@ def sha256(data):
     return hashlib.sha256(data).hexdigest()
 
 
+def run_isolation_worker(command, timeout):
+    """在獨立 session 執行 isolation worker；逾時時終止整個程序群組，連同它的 docker CLI 子程序。
+
+Run the isolation worker in its own session. On timeout the whole process group is
+    terminated, including its docker CLI children, before the timeout is re-raised."""
+    from security_harness.supervision import terminate_group
+    process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, cwd=ROOT,
+                               start_new_session=True)
+    try:
+        stdout, stderr = process.communicate(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        # 尚未 wait 的子程序 PID 不會被重用，可直接以它為群組 ID。 / An unreaped child's PID cannot be reused, so it is
+        # safe to use as the group ID.
+        try:
+            terminate_group(process.pid)
+        finally:
+            process.kill()
+            process.communicate()
+        raise
+    return subprocess.CompletedProcess(command, process.returncode, stdout, stderr)
+
+
 class AuthorizationWorkerFailed(RuntimeError):
     def __init__(self, failure):
         super().__init__("authorization worker failed")
@@ -148,9 +170,8 @@ def main(audit, defer_final=False):
             try:
                 from security_harness.isolation import cleanup_run
                 try:
-                    process = subprocess.run([sys.executable, "-I", str(ROOT / "scripts/isolation_worker.py"),
-                                              str(candidate), variant, audit.data["run_id"]],
-                                             capture_output=True, text=True, timeout=roe["max_seconds"], cwd=ROOT)
+                    process = run_isolation_worker([sys.executable, "-I", str(ROOT / "scripts/isolation_worker.py"),
+                                                    str(candidate), variant, audit.data["run_id"]], roe["max_seconds"])
                 finally:
                     cleanup_run(audit.data["run_id"])
                 if process.returncode != 0:

@@ -228,6 +228,7 @@ MultiAgentEpsilon/
 │   ├── dependency_evidence.py
 │   ├── fake_github.py
 │   ├── model_evidence.py
+│   ├── model_support.py
 │   ├── test_adversarial_authorization.py
 │   ├── test_authorization.py
 │   ├── test_candidate_git.py
