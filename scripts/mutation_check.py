@@ -45,25 +45,87 @@ TARGETS = {
         ('tests/test_run_evidence.py::test_configuration_changed_after_planning_blocks_before_any_gate',
          'tests/test_run_evidence.py::test_plan_naming_other_configuration_bytes_blocks_before_any_gate',
          'tests/test_run_evidence.py::test_orchestrator_blocks_incomplete_worker_output')),
+    # guard 與 publisher 共用的審查規則；只選不呼叫 git 的測試（worker 禁止子程序）。 / Review rules shared by the guard and
+    # the publisher; only tests that never call git are selected, since the worker forbids subprocesses.
+    'security_harness/github_trust.py': (
+        ('validate_review', 'review_decision', 'approved_review', 'pr_commit_identities', 'validate_run_base',
+         'GitHubTrust.head_push', 'GitHubTrust.review_ids', 'GitHubTrust.baseline_approval'),
+        ('tests/test_github_trust.py', 'tests/test_trusted_publisher.py',
+         'tests/test_trusted_changes.py::test_baseline_approval_binds_independent_reviewer_and_current_head',
+         'tests/test_trusted_changes.py::test_listed_reviewer_without_write_access_cannot_approve_baseline',
+         'tests/test_trusted_changes.py::test_head_commit_identities_only_remove_approvals',
+         'tests/test_trusted_changes.py::test_live_approval_resolves_reviewer_permission_through_github',
+         'tests/test_trusted_changes.py::test_valid_approval_is_refused_when_last_push_approval_is_not_enforced',
+         'tests/test_trusted_changes.py::test_approval_submitted_before_the_head_was_pushed_does_not_count',
+         'tests/test_trusted_changes.py::test_unknown_push_time_of_the_head_fails_closed',
+         'tests/test_trusted_changes.py::test_long_branch_history_finds_the_head_push_in_one_read',
+         'tests/test_trusted_changes.py::test_head_push_beyond_the_newest_activity_page_fails_closed',
+         'tests/test_trusted_changes.py::test_reviewer_who_pushed_an_earlier_pr_commit_cannot_approve',
+         'tests/test_trusted_changes.py::test_incomplete_pr_commit_listing_fails_closed',
+         'tests/test_trusted_changes.py::test_guard_refuses_trust_policy_it_cannot_enforce',
+         'tests/test_trusted_changes.py::test_fork_pull_request_is_refused_with_its_own_code',
+         'tests/test_trusted_changes.py::test_bot_review_neither_blocks_silently_nor_counts',
+         'tests/test_trusted_changes.py::test_head_pusher_cannot_approve_even_when_commits_name_someone_else',
+         'tests/test_trusted_changes.py::test_approval_submitted_in_the_same_second_as_the_head_push_does_not_count',
+         'tests/test_trusted_changes.py::test_head_ref_outside_the_branch_name_pattern_is_refused',
+         'tests/test_trusted_changes.py::test_run_identity_must_be_a_positive_decimal_before_the_run_is_read',
+         'tests/test_trusted_changes.py::test_guard_applies_the_publisher_rules_to_drafts_and_shared_heads',
+        )),
     'security_harness/llm/benchmark.py': (
         ('bounded_text', 'validate_review', 'parse_review'), ('tests/test_model_benchmark.py', '--deselect=tests/test_model_benchmark.py::test_review_cli_supervision_and_explicit_live_opt_in',
                                                               '--deselect=tests/test_model_benchmark.py::test_review_cli_accepts_large_budgets_only_within_the_total_cap', 'tests/test_security_properties.py')),
 }
+# 突變總數上限；超過代表目標範圍失控，應拆分而非加長期限。 / Cap on the mutant total; exceeding it means the target set
+# grew out of hand and should be split rather than given a longer deadline.
+MAX_MUTANTS = 512
 SWAPS = {ast.Eq: ast.NotEq, ast.NotEq: ast.Eq, ast.Lt: ast.LtE, ast.LtE: ast.Lt,
          ast.Gt: ast.GtE, ast.GtE: ast.Gt, ast.In: ast.NotIn, ast.NotIn: ast.In,
          ast.Is: ast.IsNot, ast.IsNot: ast.Is}
 
 
+def target_functions(tree, functions):
+    """頂層函式與類別方法（名稱為 Class.method）。 / Top-level functions and class methods named Class.method."""
+    for node in tree.body:
+        if isinstance(node, ast.FunctionDef) and node.name in functions:
+            yield node.name, node
+        elif isinstance(node, ast.ClassDef):
+            for item in node.body:
+                if isinstance(item, ast.FunctionDef) and f'{node.name}.{item.name}' in functions:
+                    yield f'{node.name}.{item.name}', item
+
+
+def is_guard_statement(node):
+    """need(...) 呼叫或 raise Denied(...)：刪掉它就等於拿掉一道檢查。 / A need(...) call or raise Denied(...):
+    deleting it removes one check."""
+    if isinstance(node, ast.Expr) and isinstance(node.value, ast.Call):
+        return isinstance(node.value.func, ast.Name) and node.value.func.id == 'need'
+    if isinstance(node, ast.Raise) and isinstance(node.exc, ast.Call):
+        return isinstance(node.exc.func, ast.Name) and node.exc.func.id == 'Denied'
+    return False
+
+
+def delete_statement(tree, target):
+    for parent in ast.walk(tree):
+        for field in ('body', 'orelse', 'finalbody'):
+            statements = getattr(parent, field, None)
+            if isinstance(statements, list):
+                for index, statement in enumerate(statements):
+                    if statement is target:
+                        statements[index] = ast.Pass()
+                        return
+    raise AssertionError('guard statement has no parent list')
+
+
 def mutations(source, functions):
     tree = ast.parse(source)
     output = []
-    for function in tree.body:
-        if not isinstance(function, ast.FunctionDef) or function.name not in functions:
-            continue
+    for name, function in target_functions(tree, functions):
         positions = {id(n): i for i, n in enumerate(ast.walk(tree))}
         for node in ast.walk(function):
             options = []
-            if isinstance(node, ast.Compare):
+            if is_guard_statement(node):
+                options = [('delete', 0, None)]
+            elif isinstance(node, ast.Compare):
                 options = [('compare', i, SWAPS[type(op)]) for i, op in enumerate(node.ops) if type(op) in SWAPS]
             elif isinstance(node, ast.BoolOp):
                 options = [('boolean', 0, ast.Or if isinstance(node.op, ast.And) else ast.And)]
@@ -75,7 +137,9 @@ def mutations(source, functions):
                 # same-type nodes starting at one column (e.g. a and b or c) cannot be confused.
                 match = list(ast.walk(changed))[positions[id(node)]]
                 assert type(match) is type(node)
-                if kind == 'compare':
+                if kind == 'delete':
+                    delete_statement(changed, match)
+                elif kind == 'compare':
                     match.ops[index] = replacement()
                 elif kind == 'boolean':
                     match.op = replacement()
@@ -84,7 +148,7 @@ def mutations(source, functions):
                     match.operand = ast.UnaryOp(op=ast.Not(), operand=match.operand)
                 ast.fix_missing_locations(changed)
                 encoded = ast.unparse(changed) + '\n'
-                identity = f'{function.name}:{node.lineno}:{node.col_offset}:{positions[id(node)]}:{kind}:{index}'
+                identity = f'{name}:{node.lineno}:{node.col_offset}:{positions[id(node)]}:{kind}:{index}'
                 output.append((identity, encoded))
     return output
 
@@ -173,7 +237,7 @@ def run(root, output):
             original = path.read_text()
             mutants = mutations(original, functions)
             total += len(mutants)
-            if not mutants or total > 256:
+            if not mutants or total > MAX_MUTANTS:
                 raise ValueError('empty or oversized mutation inventory')
             code, count = run_tests(snapshot, tests, snapshot / 'baseline.log', 30)
             if code != 0 or classify(code, snapshot / 'baseline.xml', count) != 'SURVIVED':

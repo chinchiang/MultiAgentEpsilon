@@ -115,7 +115,7 @@ Accounts GitHub attributes any PR commit to. Self-asserted, so only ever used to
     return set().union(*(identities(c.get("author"), c.get("committer")) for c in commits))
 
 
-def approved_review(pr, reviews, head, base, reviewers, permissions, excluded=(), refusals=None):
+def approved_review(pr, reviews, head, base, reviewers, permissions, excluded, push, refusals=None):
     """只採計清單內具寫入權限、非作者或已知推送者的核准；排除名單只能移除核准，不能新增授權。
 
 An approval counts only from a listed, write-capable reviewer who is not the
@@ -123,7 +123,7 @@ An approval counts only from a listed, write-capable reviewer who is not the
     if pr["state"] != "open" or pr["head"]["sha"] != head or pr["base"]["sha"] != base:
         return None
     try:
-        ids = validate_review(pr, reviews, permissions, {"reviewers": reviewers}, set(excluded))
+        ids = review_decision(pr, reviews, permissions, reviewers, excluded, push)
     except Denied as exc:
         # 沒有核准仍回傳 None，但留下固定診斷碼，讓證據說明為何擋下。 / No approval still returns None, but the fixed
         # diagnostic code is kept so the evidence says why it blocked.
@@ -139,10 +139,32 @@ def parse_time(value):
 
 
 @dataclass(frozen=True)
+class HeadPush:
+    """伺服器記錄的 head 推送：時間與推送者。 / The server-recorded push of the head: its time and pushers."""
+    pushed: datetime
+    pushers: frozenset
+
+
+def review_decision(pr, reviews, permissions, reviewers, excluded, push):
+    """guard 與 publisher 共用的唯一審查規則：PR 須非 draft；head 推送當下或之前送出的核准視為 DISMISSED（只合併 base
+    的推送不會讓核准失效，GitHub 還會把 commit_id 改指新 head）；head 推送者與提交身分都不能核准。
+
+The one review rule shared by the guard and the publisher: the PR must not be a draft; an approval submitted at or
+    before the head push counts as DISMISSED (a base-only push keeps approvals and GitHub re-points their commit_id);
+    neither the head pusher nor any commit identity can approve."""
+    need(pr.get("draft") is False, "PR_NOT_REVIEWABLE")
+    need(isinstance(push, HeadPush), "LAST_PUSH_UNKNOWN")
+    reviews = [{**r, "state": "DISMISSED"} if r["state"] == "APPROVED" and parse_time(r["submitted_at"]) <= push.pushed
+               else r for r in reviews]
+    return validate_review(pr, reviews, permissions, {"reviewers": reviewers}, set(excluded) | push.pushers)
+
+
+@dataclass(frozen=True)
 class ReviewEvidence:
     reviews: list
     permissions: dict
     commit_identities: set
+    push: HeadPush
 
 
 class RunBaseEvidence:
@@ -181,68 +203,70 @@ class GitHubTrust:
         pulls = self._related_pulls(pr)
         return RunBaseEvidence(pr, pulls, base_branch, run_base_history(self._reader, pr, pulls))
 
-    def publication_review(self, number, pr, run, base_branch):
-        """蒐集發布前的審查證據，先驗證唯一 PR 與來源，再讀提交身分。 / Collect publication review evidence:
-        verify the unique PR and source before reading commit identities."""
-        reviews = self._reader.items(f'pulls/{number}/reviews')
-        permissions = self._permissions(reviews)
-        pulls = self._related_pulls(pr)
-        need([p['number'] for p in pulls if p['state'] == 'open' and head_scope(p) == head_scope(pr)] == [number],
-             'SHARED_PR_HEAD')
-        validate_run_base(run, pr, pulls, base_branch, run_base_history(self._reader, pr, pulls))
-        return ReviewEvidence(reviews, permissions, self._commit_identities(number, pr['head']['sha']))
+    def head_push(self, number, pr, base_branch):
+        """讀出 head 的推送時間與推送者，並拒絕 fork、共用 head、規則集未要求最後推送核准與無法確認的推送。
 
-    def review_ids(self, number, pr, reviewers, excluded):
-        """發布前重讀審查與權限，沿用已核對的排除身分。 / Reread reviews and permissions before publication,
-        retaining the previously verified excluded identities."""
-        reviews = self._reader.items(f"pulls/{number}/reviews")
-        return validate_review(pr, reviews, self._permissions(reviews), {'reviewers': reviewers}, excluded)
-
-    def baseline_approval(self, number, head, base, reviewers, run_id=None, refusals=None):
-        reader = self._reader
-        pr = reader.get(f"pulls/{number}")
+Read the head's push time and pushers; refuse a fork, a shared head, a ruleset that does not require last-push
+        approval and a push that cannot be established."""
         # fork 的分支不在 base repo 的 activity 裡，無法確認推送時間與推送者；明確拒絕。 / A fork's branch is not in the
         # base repository's activity, so its push time and pusher cannot be established; refuse explicitly.
         if (pr["head"].get("repo") or {}).get("id") != (pr["base"].get("repo") or {}).get("id"):
             raise Denied("FORK_PR_UNSUPPORTED")
-        # 提交身分可自報，真正擋下審查者自我核准的是規則集的最後推送核准；規則被關掉時不得放行。 / Commit identities
-        # are self-asserted, so the ruleset's last-push approval is what stops self-approval; refuse when it is off.
-        rules = reader.items("rules/branches/main")
-        if not any(rule.get("type") == "pull_request" and isinstance(rule.get("parameters"), dict)
-                   and rule["parameters"].get("require_last_push_approval") is True for rule in rules):
-            raise Denied("LAST_PUSH_APPROVAL")
-        reviews = reader.items(f"pulls/{number}/reviews")
-        # 只合併 base 的推送不會讓核准失效，GitHub 還會把 commit_id 改指新 head；改以伺服器記錄的推送時間判定。
-        # / A base-only push keeps approvals and GitHub re-points their commit_id; judge by the server-recorded push time.
         ref = pr["head"]["ref"]
         if not re.fullmatch(r"[A-Za-z0-9._/-]+", ref):
             raise Denied("HEAD_REF")
+        pulls = self._related_pulls(pr)
+        need([p["number"] for p in pulls if p["state"] == "open" and head_scope(p) == head_scope(pr)] == [number],
+             "SHARED_PR_HEAD")
+        # 提交身分可自報，真正擋下審查者自我核准的是規則集的最後推送核准；規則被關掉時不得放行。 / Commit identities
+        # are self-asserted, so the ruleset's last-push approval is what stops self-approval; refuse when it is off.
+        need(re.fullmatch(r"[A-Za-z0-9._/-]+", base_branch), "BASE_BRANCH")
+        rules = self._reader.items(f"rules/branches/{base_branch}")
+        if not any(rule.get("type") == "pull_request" and isinstance(rule.get("parameters"), dict)
+                   and rule["parameters"].get("require_last_push_approval") is True for rule in rules):
+            raise Denied("LAST_PUSH_APPROVAL")
         # activity 以 cursor 分頁、忽略 page，只讀由新到舊的第一頁。每筆 activity 都會移動分支，head 未變時最新一筆就是
         # head 的推送；不在第一頁即視為不明。 / Activity is cursor-paged and ignores page, so read only the newest-first
         # first page. Every activity moves the branch, so while the head is unchanged the newest one is the head push;
         # a head push beyond the first page counts as unknown.
-        head_pushes = [a for a in reader.get(f"activity?ref=refs/heads/{ref}&direction=desc") if a.get("after") == head]
+        head = pr["head"]["sha"]
+        head_pushes = [a for a in self._reader.get(f"activity?ref=refs/heads/{ref}&direction=desc")
+                       if a.get("after") == head]
         if not head_pushes:
             raise Denied("LAST_PUSH_UNKNOWN")
-        pushed = max(parse_time(a["timestamp"]) for a in head_pushes)
-        reviews = [{**r, "state": "DISMISSED"} if r["state"] == "APPROVED" and parse_time(r["submitted_at"]) <= pushed
-                   else r for r in reviews]
-        candidates = {r["user"]["login"] for r in reviews
-                      if r["state"] in ("APPROVED", "CHANGES_REQUESTED", "DISMISSED")}
-        permissions = {}
-        for login in sorted(candidates):
-            if not re.fullmatch(r"[A-Za-z0-9-]+", login):
-                continue
-            permissions[login] = reader.get(f"collaborators/{login}/permission")["role_name"]
-        # 提交身分可自報，因此只能排除審查者， / Commit identities are self-asserted, so they are used only to exclude reviewers;
-        # 真實推送者仍由規則集原生最後推送核准檢查判定。 / the ruleset's native last-push approval remains the authoritative pusher check.
         # 伺服器記錄的 head 推送者不能核准；改標題、重開或按重跑的人只是 run actor，不是推送者，核准仍有效。 / The
         # server-recorded pusher of the head cannot approve. Whoever edited the title, reopened or re-ran is only a run
         # actor, not a pusher, and their approval still counts.
-        excluded = self._commit_identities(number, head) | identities(*(a.get("actor") for a in head_pushes))
+        return HeadPush(max(parse_time(a["timestamp"]) for a in head_pushes),
+                        frozenset(identities(*(a.get("actor") for a in head_pushes))))
+
+    def publication_review(self, number, pr, run, base_branch):
+        """蒐集發布前的審查證據，先驗證唯一 PR、推送與來源，再讀提交身分。 / Collect publication review evidence:
+        verify the unique PR, the push and the source before reading commit identities."""
+        push = self.head_push(number, pr, base_branch)
+        reviews = self._reader.items(f'pulls/{number}/reviews')
+        permissions = self._permissions(reviews)
+        pulls = self._related_pulls(pr)
+        validate_run_base(run, pr, pulls, base_branch, run_base_history(self._reader, pr, pulls))
+        return ReviewEvidence(reviews, permissions, self._commit_identities(number, pr['head']['sha']), push)
+
+    def review_ids(self, number, pr, reviewers, excluded, base_branch):
+        """發布前重讀推送、審查與權限，沿用已核對的提交身分。 / Reread the push, reviews and permissions before
+        publication, retaining the previously verified commit identities."""
+        push = self.head_push(number, pr, base_branch)
+        reviews = self._reader.items(f"pulls/{number}/reviews")
+        return review_decision(pr, reviews, self._permissions(reviews), reviewers, excluded, push)
+
+    def baseline_approval(self, number, head, base, reviewers, run_id=None, refusals=None):
+        pr = self._reader.get(f"pulls/{number}")
+        push = self.head_push(number, pr, "main")
+        reviews = self._reader.items(f"pulls/{number}/reviews")
+        # 提交身分可自報，因此只能排除審查者， / Commit identities are self-asserted, so they are used only to exclude reviewers;
+        # 真實推送者仍由規則集原生最後推送核准檢查判定。 / the ruleset's native last-push approval remains the authoritative pusher check.
+        excluded = self._commit_identities(number, head)
         if run_id:
             if not re.fullmatch(r"[1-9][0-9]*", run_id):
                 raise ValueError("invalid run identity")
-            run = reader.get(f"actions/runs/{run_id}")
+            run = self._reader.get(f"actions/runs/{run_id}")
             self.run_base(pr, "main").validate(run)
-        return approved_review(pr, reviews, head, base, reviewers, permissions, excluded, refusals)
+        return approved_review(pr, reviews, head, base, reviewers, self._permissions(reviews), excluded, push, refusals)
