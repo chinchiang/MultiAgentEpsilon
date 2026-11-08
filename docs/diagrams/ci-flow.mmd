@@ -3,7 +3,7 @@ flowchart TB
     Checkout --> Guard{"全部路徑有精確 head 獨立核准？<br/>Trusted independent approval for all changes?"}
     Guard -->|"是 / Yes"| Evaluate["可信安裝／離線 runtime／文件與靜態檢查／完整回歸／缺陷反例與候選評估<br/>Install, runtime, docs and static checks, regressions, seeded counter-examples and candidate evaluation"]
     Guard -->|"否 / No"| Failed["評估失敗／保留證據<br/>Failed evaluation with evidence"]
-    Other["main push／手動 ref 使用不同檢查名稱<br/>Manual runs report under different check names"] --> Evaluate
+    Other["main push、每日排程與手動 ref；只有手動執行使用不同檢查名稱<br/>Push, daily schedule and manual runs; only manual runs use different check names"] --> Evaluate
     PR --> Mutation["獨立 job：可信基準突變測試（所有觸發皆執行）<br/>Separate job: trusted mutation tests on every trigger"]
     Other --> Mutation
     Evaluate --> Contract{"證據契約完整？<br/>Publishable evidence contract?"}

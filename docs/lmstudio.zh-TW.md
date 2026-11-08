@@ -52,8 +52,8 @@ HTTP 只允許字面 `127.0.0.1` 或 `[::1]`、明確的 1024–65535 連接埠�
 ## 2026-10-12／13 實測紀錄
 
 - **連線：** LM Studio 只監聽 Windows 的 `127.0.0.1:5422`，WSL2 的 NAT 網路看不到；Windows 防火牆也擋下 WSL 連進主機。harness 只接受字面 loopback 的明碼 HTTP，因此以臨時反向通道接通：Windows 端主動連進 WSL，WSL 端只監聽 `127.0.0.1:5422`，只接受來自 Windows 主機位址的回連線。WSL 可取得 `/v1/models`，回傳 `nvidia/nemotron-3-nano-omni` 與 `qwen/qwen3.8-27b`。測完即關閉兩端。
-- **盲審：** main `b86277c`，Nemotron，B13／B14，每次 2048 個 token（run `7617a770`）。B13 撞到單次呼叫 30 秒上限（`DEADLINE`），B14 在整輪 50 秒上限到時被取消（`CANCELLED`），沒有可評分的結果。
-- **原因：** 不經通道直接在 Windows 呼叫，37 個 token（其中 33 個為推理）花了 21.6 秒，約每秒 1.7 個 token。主機只有內建的 Intel Iris Xe 顯示卡、63.6 GB 記憶體，已載入的 Nemotron（26.1 GB）與 Qwen（17.7 GB）都在 CPU 上執行。盲審一題通常超過 1000 個 token，遠超過單次 30 秒（gateway 上限 60 秒）的期限，改用 mirrored 網路也無法解決。
+- **盲審：** main `b86277c`，Nemotron，B13／B14，每次 2048 個詞元（run `7617a770`）。B13 撞到單次呼叫 30 秒上限（`DEADLINE`），B14 在整輪 50 秒上限到時被取消（`CANCELLED`），沒有可評分的結果。
+- **原因：** 不經通道直接在 Windows 呼叫，37 個詞元（其中 33 個為推理）花了 21.6 秒，約每秒 1.7 個詞元。主機只有內建的 Intel Iris Xe 顯示卡、63.6 GB 記憶體，已載入的 Nemotron（26.1 GB）與 Qwen（17.7 GB）都在 CPU 上執行。盲審一題通常超過 1000 個詞元，遠超過單次 30 秒（gateway 上限 60 秒）的期限，改用 mirrored 網路也無法解決。
 - **後續：** 改在可以獨立執行 LM Studio、具備獨立 GPU 的機器上提供 HTTPS 服務，並把該主機經受保護的變更加入模型 RoE 的 `lmstudio` 允許清單後再驗收。在此之前，跨家族盲審使用 Gemini、GLM 與 Claude。
 
 <a id="en"></a>

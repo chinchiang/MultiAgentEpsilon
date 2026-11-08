@@ -12,7 +12,7 @@ flowchart TB
     Config -->|"錯誤 / Error"| Error["保留錯誤／BLOCK<br/>Fail closed with evidence"]
     Runtime -->|"隔離失敗 / Isolation failure"| Error
     Parent -->|"取消／逾時 / Cancel or timeout"| Error
-    Pending --> Cleanup["父程序清理群組／容器／目錄<br/>Parent verifies all owned resources removed"]
+    Pending --> Cleanup["supervisor 清理群組／容器／目錄<br/>Supervisor verifies all owned resources removed"]
     Error --> Cleanup
     Recovery["擁有者死亡後 janitor 回收<br/>Dead-owner recovery with PID / boot identity"] -.-> Cleanup
     Cleanup --> Eligible{"必要 gates／證據／清理皆完整？<br/>All required contracts satisfied?"}
