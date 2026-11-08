@@ -2,6 +2,7 @@
 
 Supervised, bounded collection of independent reviews of fixed synthetic cases."""
 import asyncio
+import hashlib
 import json
 import signal
 from dataclasses import asdict
@@ -10,34 +11,73 @@ from datetime import datetime, timezone
 from .benchmark import (CASES_PATH, ORACLE_PATH, OUTPUT_BUDGETS, OUTPUT_TOKENS, MockReviewer, load_cases,
                         make_plan, review_request, request_digest, parse_review)
 from .gateway import Gateway, Limits, ModelError, digest
-from .lifecycle import plan_digest as current_plan_digest, read_report
-from .transport import JsonHTTP
+from .lifecycle import REPORT_VERSION, archive_inputs, plan_digest as current_plan_digest, read_report
+from .transport import JsonHTTP, strict_json
+from ..scope import call_seconds, run_seconds, valid_deadline_policy
 from ..supervision import persist, run_directory
 
+# 封存的評分輸入：檔名對應目前路徑。 / Archived scoring inputs: each name and its current path.
+INPUT_FILES = {'catalog.json': CASES_PATH, 'oracle.json': ORACLE_PATH}
 
-def initial_report(providers, case_ids, run_id, output_tokens=OUTPUT_TOKENS, rounds=1):
+
+def snapshot_inputs():
+    """一次讀取案例目錄、標準答案與模型 RoE 的位元組；計畫的雜湊與封存副本都取自這份快照。
+
+Read the case catalog, reference and model RoE bytes once; both the plan's digests and the
+    archived copies come from this snapshot."""
+    from .config import ROOT
+    return {**{name: path.read_bytes() for name, path in INPUT_FILES.items()},
+            'model-roe.json': (ROOT / 'security/model-roe.json').read_bytes()}
+
+
+def record(path, report, inputs=None):
+    """寫入計畫報告並封存其評分輸入；supervisor 啟動 worker 前呼叫。inputs 須是 initial_report 用的同一份快照。
+
+Write the planned report and archive its scoring inputs before the supervisor starts the
+    worker. inputs must be the same snapshot initial_report used."""
+    persist(path, report)
+    archive_inputs(path.parent, snapshot_inputs() if inputs is None else inputs)
+
+
+def deadline_policy(roe_raw):
+    policy = strict_json(roe_raw).get('deadline_policy')
+    if not valid_deadline_policy(policy):
+        raise ValueError('invalid model deadline policy')
+    return policy
+
+
+def digest_bytes(raw):
+    return hashlib.sha256(raw).hexdigest()
+
+
+def initial_report(providers, case_ids, run_id, output_tokens=OUTPUT_TOKENS, rounds=1, inputs=None):
     from .benchmark_score import file_digest
     from .config import implementation_digest, ROOT
-    cases, plan = load_cases(), make_plan(providers, case_ids, rounds)
+    inputs = snapshot_inputs() if inputs is None else inputs
+    policy = deadline_policy(inputs['model-roe.json'])
+    cases = load_cases(inputs['catalog.json'])
+    plan = make_plan(providers, case_ids, rounds, cases)
     if type(output_tokens) is not int or output_tokens not in OUTPUT_BUDGETS:
         raise ValueError('invalid review output budget')
-    limits = Limits(max_calls=len(plan), reserved_output_tokens=output_tokens * len(plan), timeout_seconds=30)
+    planned = [p['provider'] for p in plan]
+    limits = Limits(max_calls=len(plan), reserved_output_tokens=output_tokens * len(plan),
+                    timeout_seconds=max(call_seconds(policy, p) for p in planned))
     implementation = [implementation_digest(), file_digest(ROOT / 'scripts/model_review.py'),
                       file_digest(ROOT / 'scripts/review_adjudicate.py')]
     checks = [{**p, 'status': 'NOT_RUN', 'code': None, 'review': None, 'call_id': None,
                'request_sha256': request_digest(review_request(cases[p['case_id']], p['review_id'], output_tokens))}
               for p in plan]
-    return {'schema_version': 2, 'operation': 'model-smoke', 'task': 'blind-review', 'run_id': run_id,
+    return {'schema_version': REPORT_VERSION, 'operation': 'model-smoke', 'task': 'blind-review', 'run_id': run_id,
             'advisory_only': True, 'data_class': 'synthetic', 'status': 'INCOMPLETE', 'code': None,
             'started_at': datetime.now(timezone.utc).isoformat(),
             'implementation_sha256': digest(json.dumps(implementation)),
-            'case_catalog_sha256': file_digest(CASES_PATH), 'oracle_sha256': file_digest(ORACLE_PATH),
-            'model_roe_sha256': file_digest(ROOT / 'security/model-roe.json'),
+            'case_catalog_sha256': digest_bytes(inputs['catalog.json']), 'oracle_sha256': digest_bytes(inputs['oracle.json']),
+            'model_roe_sha256': digest_bytes(inputs['model-roe.json']), 'deadline_policy': policy,
             'rounds': rounds, 'sampling_policy': {p: ('provider-default' if p == 'bedrock' else 'temperature=0' if not p.startswith('mock-') else 'deterministic-fixture') for p in providers},
             'selected_providers': providers, 'case_ids': case_ids, 'plan': plan,
             'providers': [p['provider'] for p in plan], 'checks': checks, 'calls': [],
             'reserved_calls': 0, 'reserved_output_tokens': 0,
-            'limits': asdict(limits), 'total_timeout_seconds': min(130, 20 * len(plan) + 10),
+            'limits': asdict(limits), 'total_timeout_seconds': run_seconds(policy, planned),
             'output_tokens_per_review': output_tokens,
             'cleanup': {'completed': False}, 'analysis': None}
 
@@ -88,14 +128,16 @@ async def run_worker(root, run_id, plan_digest):
             save()
             provider, case = check['provider'], cases[check['case_id']]
             try:
-                adapter = MockReviewer(provider) if provider.startswith('mock-') else config.configured_adapter(provider, report['model_roe_sha256'], run_directory(root, run_id), JsonHTTP(timeout_seconds=30))
+                seconds = call_seconds(report['deadline_policy'], provider)
+                adapter = MockReviewer(provider) if provider.startswith('mock-') else config.configured_adapter(provider, report['model_roe_sha256'], run_directory(root, run_id), JsonHTTP(timeout_seconds=seconds))
             except (KeyError, ModelError):
                 check.update(status='ERROR', code='CONFIGURATION')
                 save()
                 continue
             before = len(gateway.evidence)
             try:
-                reply = await gateway.generate(adapter, review_request(case, check['review_id'], report['output_tokens_per_review']))
+                reply = await gateway.generate(adapter, review_request(case, check['review_id'], report['output_tokens_per_review']),
+                                               seconds)
             finally:
                 if len(gateway.evidence) > before:
                     call = gateway.evidence[-1]

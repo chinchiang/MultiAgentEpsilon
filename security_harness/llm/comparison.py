@@ -5,7 +5,7 @@ import math
 import re
 import uuid
 
-from .benchmark_score import summarize, ratio, reference
+from .benchmark_score import load_cases, reference, report_inputs, summarize, ratio
 from .lifecycle import REPORT_LIMIT
 from .transport import strict_json
 from ..results import read_regular
@@ -38,7 +38,8 @@ def compare(paths):
                 or report.get('cleanup', {}).get('completed') is not True):
             raise ValueError('duplicate or unfinished report / 重複或未清理的報告')
         seen_runs.add(run)
-        analysis = summarize(report)
+        inputs = report_inputs(report, path.parent)
+        analysis = summarize(report, run_dir=path.parent)
         if report.get('analysis') != analysis:
             raise ValueError('analysis mismatch / 分析內容不一致')
         fields = ('implementation_sha256', 'case_catalog_sha256', 'oracle_sha256', 'model_roe_sha256')
@@ -70,7 +71,9 @@ def compare(paths):
                        'status': report['status'], 'cases': report['case_ids'], 'rounds': report.get('rounds', 1)})
     if len(set(case_rounds.values())) != 1:
         raise ValueError('unbalanced case repetitions / 各案例輪次不一致')
-    truth = reference()
+    # 所有報告綁定同一份標準答案（版本綁定已比對），取最後一份的封存或目前輸入。 / Every report binds the same
+    # reference (the version pins match), so the last report's archived or current inputs serve all.
+    truth = reference(inputs['oracle.json'], load_cases(inputs['catalog.json']))
     positives = sum(n for case, n in case_rounds.items() if truth[case]['verdict'] == 'VULNERABLE')
     metrics = {}
     for provider in pins[1]:

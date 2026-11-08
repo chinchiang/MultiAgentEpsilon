@@ -19,9 +19,11 @@ if __name__ == "__main__":
 
 from security_harness.llm import config
 from security_harness.llm.gateway import Gateway, Limits, ModelError, Request
-from security_harness.llm.lifecycle import read_report, smoke_plan_digest, supervise
+from security_harness.llm.transport import JsonHTTP
+from security_harness.llm.benchmark_runner import deadline_policy
+from security_harness.llm.lifecycle import REPORT_VERSION, archive_inputs, read_report, smoke_plan_digest, supervise
 from security_harness.supervision import persist, run_directory
-from security_harness.scope import load_model_roe
+from security_harness.scope import call_seconds, load_model_roe, run_seconds
 
 FIXTURE = Request(
     system="You are running a synthetic transport check. Follow the user's exact output instruction.",
@@ -39,17 +41,22 @@ def configured_adapter(provider, roe_sha256, work=None, http=None):
     return config.configured_adapter(provider, roe_sha256, work, http)
 
 
-def initial_report(providers, run_id):
-    limits = Limits(max_calls=len(providers), reserved_output_tokens=256 * len(providers))
-    return {"schema_version": 2, "operation": "model-smoke", "run_id": run_id, "advisory_only": True,
+def initial_report(providers, run_id, roe_raw=None):
+    """roe_raw 是計畫綁定並封存的模型 RoE 位元組。 / roe_raw is the model RoE bytes the plan binds and archives."""
+    roe_raw = (ROOT / 'security/model-roe.json').read_bytes() if roe_raw is None else roe_raw
+    policy = deadline_policy(roe_raw)
+    limits = Limits(max_calls=len(providers), reserved_output_tokens=256 * len(providers),
+                    timeout_seconds=max(call_seconds(policy, p) for p in providers))
+    return {"schema_version": REPORT_VERSION, "operation": "model-smoke", "run_id": run_id, "advisory_only": True,
             "data_class": "synthetic", "fixture": "fixed-ack-v1", "providers": providers,
             "started_at": datetime.now(timezone.utc).isoformat(),
             "implementation_sha256": implementation_digest(), "status": "INCOMPLETE", "code": None,
-            "limits": asdict(limits), "total_timeout_seconds": min(130, 30 * len(providers) + 10),
+            "limits": asdict(limits), "total_timeout_seconds": run_seconds(policy, providers),
+            "deadline_policy": policy,
             "max_output_tokens_per_call": FIXTURE.max_output_tokens,
             "checks": [{"provider": p, "live": p != "mock", "status": "NOT_RUN", "code": None} for p in providers],
             "calls": [], "reserved_calls": 0, "reserved_output_tokens": 0,
-            "model_roe_sha256": hashlib.sha256((ROOT / 'security/model-roe.json').read_bytes()).hexdigest(),
+            "model_roe_sha256": hashlib.sha256(roe_raw).hexdigest(),
             "cleanup": {"completed": False}}
 
 
@@ -77,12 +84,14 @@ async def run_worker(root, run_id, plan_digest):
             check['status'] = 'RUNNING'
             persist(output, report)
             try:
-                adapter = config.configured_adapter(provider, report['model_roe_sha256'], run_directory(root, run_id))
+                seconds = call_seconds(report['deadline_policy'], provider)
+                adapter = config.configured_adapter(provider, report['model_roe_sha256'], run_directory(root, run_id),
+                                                    None if provider == 'mock' else JsonHTTP(timeout_seconds=seconds))
             except (KeyError, ModelError):
                 check.update(status='ERROR', code='CONFIGURATION')
                 persist(output, report)
                 continue
-            reply = await gateway.generate(adapter, FIXTURE)
+            reply = await gateway.generate(adapter, FIXTURE, seconds)
             if reply is not None and reply.text.strip() == "EPSILON_SYNTHETIC_OK":
                 check["status"] = "SUCCESS"
             else:
@@ -131,9 +140,11 @@ def main():
     output = args.output or canonical
     if output.exists():
         parser.error("output already exists; choose a new evidence path")
-    report = initial_report(providers, run_id)
+    roe_raw = (ROOT / 'security/model-roe.json').read_bytes()
+    report = initial_report(providers, run_id, roe_raw)
     report['canonical_report'] = str(canonical)
     persist(canonical, report)
+    archive_inputs(canonical.parent, {'model-roe.json': roe_raw})
     if output != canonical:
         output.parent.mkdir(parents=True, exist_ok=True)
         with output.open('x') as handle:

@@ -10,9 +10,10 @@ import uuid
 from datetime import datetime, timezone
 from dataclasses import asdict
 
-from .benchmark import (CASES_PATH, ORACLE_PATH, CWES, OUTPUT_BUDGETS, PROVIDERS, load_cases, case_digest, review_request,
+from .benchmark import (ORACLE_PATH, CWES, OUTPUT_BUDGETS, PROVIDERS, load_cases, case_digest, review_request,
                         request_digest, validate_review, bounded_text, parse_review)
-from .lifecycle import REPORT_LIMIT
+from .lifecycle import REPORT_LIMIT, read_inputs
+from ..scope import call_seconds, run_seconds, valid_deadline_policy
 from ..results import read_regular
 from .gateway import digest, ModelError, Limits
 from .transport import strict_json
@@ -26,9 +27,34 @@ def signature(review):
     return review['verdict'], tuple(sorted((f['cwe'], f['line']) for f in review['findings']))
 
 
-def reference():
-    data = strict_json(ORACLE_PATH.read_bytes())
-    cases = load_cases()
+# v3 報告封存的評分輸入。 / The scoring inputs a v3 report archives.
+INPUT_NAMES = ('catalog.json', 'oracle.json', 'model-roe.json')
+
+
+def current_inputs():
+    from .benchmark_runner import snapshot_inputs
+    return snapshot_inputs()
+
+
+def report_inputs(report, run_dir=None):
+    """評分輸入：給了報告目錄的 v3 報告讀其旁封存的副本，不受日後修改影響；v2 報告與未給目錄時比對目前檔案。
+    正式流程（supervisor 收尾、批次比較、人工註記）一律傳入報告目錄。
+
+The scoring inputs: a v3 report given its directory is checked against the copies archived
+    beside it, so later edits do not invalidate it; a v2 report, or one given no directory, is
+    checked against the current files. The production paths (supervisor close, batch comparison,
+    notes) always pass the report directory."""
+    version = report.get('schema_version')
+    if version not in (2, 3):
+        raise ValueError('unsupported report version')
+    if version == 3 and run_dir is not None:
+        return read_inputs(run_dir, INPUT_NAMES)
+    return current_inputs()
+
+
+def reference(raw=None, cases=None):
+    data = strict_json(ORACLE_PATH.read_bytes() if raw is None else raw)
+    cases = load_cases() if cases is None else cases
     if data['version'] != 'synthetic-review-v3' or set(data['cases']) != set(cases):
         raise ValueError('reference does not match catalog')
     for key, value in data['cases'].items():
@@ -42,25 +68,35 @@ def reference():
     return data['cases']
 
 
-def validate_collection(report, expected_plan=None):
-    cases = load_cases()
+def validate_collection(report, expected_plan=None, inputs=None):
+    inputs = report_inputs(report) if inputs is None else inputs
+    cases = load_cases(inputs['catalog.json'])
     if (report.get('task') != 'blind-review' or report.get('advisory_only') is not True or
-            report.get('case_catalog_sha256') != file_digest(CASES_PATH) or
-            report.get('oracle_sha256') != file_digest(ORACLE_PATH)):
+            report.get('case_catalog_sha256') != hashlib.sha256(inputs['catalog.json']).hexdigest() or
+            report.get('oracle_sha256') != hashlib.sha256(inputs['oracle.json']).hexdigest()):
         raise ValueError('stale or invalid benchmark identity')
     plan, checks, calls = report['plan'], report['checks'], report['calls']
     output_tokens = report.get('output_tokens_per_review', 512)
     if type(output_tokens) is not int or output_tokens not in OUTPUT_BUDGETS or output_tokens * len(plan) > 8192:
         raise ValueError('invalid review budget')
-    expected_limits = asdict(Limits(max_calls=len(plan), reserved_output_tokens=output_tokens * len(plan), timeout_seconds=30))
+    if report.get('model_roe_sha256') != hashlib.sha256(inputs['model-roe.json']).hexdigest():
+        raise ValueError('model RoE binding mismatch')
+    if report['schema_version'] == 2:
+        call_timeout, total = 30, min(130, 20 * len(plan) + 10)
+    else:
+        # v3 的期限依報告綁定的 RoE 期限政策重算。 / v3 deadlines are recomputed from the bound RoE's deadline policy.
+        policy = report.get('deadline_policy')
+        if (not valid_deadline_policy(policy) or policy != strict_json(inputs['model-roe.json']).get('deadline_policy')
+                or not plan or any(type(p) is not dict or type(p.get('provider')) is not str for p in plan)):
+            raise ValueError('review limits mismatch')
+        planned = [p['provider'] for p in plan]
+        call_timeout, total = max(call_seconds(policy, p) for p in planned), run_seconds(policy, planned)
+    expected_limits = asdict(Limits(max_calls=len(plan), reserved_output_tokens=output_tokens * len(plan),
+                                    timeout_seconds=call_timeout))
     Limits(**report['limits'])
     if (report['limits'] != expected_limits or
-            type(report.get('total_timeout_seconds')) is not int or
-            report['total_timeout_seconds'] != min(130, 20 * len(plan) + 10)):
+            type(report.get('total_timeout_seconds')) is not int or report['total_timeout_seconds'] != total):
         raise ValueError('review limits mismatch')
-    from .benchmark import ROOT
-    if report.get('model_roe_sha256') != file_digest(ROOT / 'security/model-roe.json'):
-        raise ValueError('model RoE binding mismatch')
     for call in calls:
         if (type(call.get('reserved')) is not bool or type(call.get('reserved_output_tokens')) is not int or
                 call['reserved_output_tokens'] != (output_tokens if call['reserved'] else 0) or
@@ -151,15 +187,17 @@ def ratio(numerator, denominator):
     return numerator / denominator if denominator else None
 
 
-def summarize(report, expected_plan=None):
-    validate_collection(report, expected_plan)
-    return _summarize_validated(report)
+def summarize(report, expected_plan=None, run_dir=None):
+    """run_dir 是報告所在目錄；v3 報告從中讀封存的評分輸入。 / run_dir holds the report; a v3 report reads its
+    archived scoring inputs from there."""
+    inputs = report_inputs(report, run_dir)
+    cases = validate_collection(report, expected_plan, inputs)
+    return _summarize_validated(report, reference(inputs['oracle.json'], cases))
 
 
-def _summarize_validated(report):
+def _summarize_validated(report, truth):
     if report.get('rounds', 1) > 1:
-        return summarize_repeated(report)
-    truth = reference()
+        return summarize_repeated(report, truth)
     metrics, families = {}, set()
     lookup = {(c['case_id'], c['provider']): c for c in report['checks']}
     selected = report['case_ids']
@@ -258,7 +296,7 @@ def error_categories(checks):
     return dict(sorted(Counter(labels).items()))
 
 
-def summarize_repeated(report):
+def summarize_repeated(report, truth):
     rounds = []
     for number in range(1, report['rounds'] + 1):
         part = copy.deepcopy(report)
@@ -270,12 +308,11 @@ def summarize_repeated(report):
         part['providers'] = [p['provider'] for p in part['plan']]
         # 父程序已驗證共用執行預算；單輪切片只是 / Parent validation already bound the shared run budget. A round slice is
         # 分析投影，並非另外取得預算的執行。 / an analysis projection, never a separately funded execution.
-        rounds.append({'round_index': number, 'analysis': _summarize_validated(part)})
+        rounds.append({'round_index': number, 'analysis': _summarize_validated(part, truth)})
     metrics = {}
     additive = ('tp', 'tn', 'fp', 'fn', 'abstained', 'unavailable', 'matched_findings',
                 'reported_findings', 'planned', 'classified', 'calls_recorded', 'elapsed_ms_reported',
                 'output_budget_unverified_calls')
-    truth = reference()
     positives = sum(truth[c]['verdict'] == 'VULNERABLE' for c in report['case_ids']) * report['rounds']
     findings = sum(len(truth[c]['findings']) for c in report['case_ids']) * report['rounds']
     for provider in report['selected_providers']:
@@ -330,7 +367,7 @@ def adjudication_directory(report_path, create=False):
 def add_adjudication(report_path, case_id, decision, reviewer, reason):
     raw = read_regular(report_path, REPORT_LIMIT)
     report = strict_json(raw)
-    if report.get('analysis') != summarize(report):
+    if report.get('analysis') != summarize(report, run_dir=report_path.parent):
         raise ValueError('stored analysis does not match the recomputed reference analysis')
     if (report_path.name != 'report.json' or report_path.parent.name != report['run_id'] or
             case_id not in report['case_ids'] or decision not in
@@ -360,7 +397,7 @@ def read_adjudications(report_path):
 
 Consume only bounded, exact-report notes; asserted identity stays unverified."""
     report = strict_json(read_regular(report_path, REPORT_LIMIT))
-    summarize(report)
+    summarize(report, run_dir=report_path.parent)
     paths = sorted(adjudication_directory(report_path).glob('*.json'))
     if len(paths) > 100:
         raise ValueError('too many adjudication notes')

@@ -28,8 +28,10 @@ SYSTEM = '''Independently review only the supplied synthetic Python function wit
 Return one JSON object only, with exactly these keys: review_id (copy the supplied opaque ID), verdict (VULNERABLE, CLEAN or ABSTAIN), findings (array), reason (nonempty concise explanation, at most 400 characters). Every finding must contain exactly cwe (CWE-89, CWE-78, CWE-639, CWE-22 or CWE-918), line (1-based integer pointing to the root-cause source line), evidence (that exact source line with outer whitespace stripped), rationale (nonempty explanation, at most 400 characters). VULNERABLE requires 1-3 findings; CLEAN and ABSTAIN require an empty findings array. No Markdown fences or additional fields.'''
 
 
-def load_cases():
-    raw = CASES_PATH.read_bytes()
+def load_cases(raw=None):
+    """解析案例目錄；raw 為封存副本的位元組，省略時讀目前檔案。 / Parse the case catalog from raw bytes of an
+    archived copy, or from the current file when omitted."""
+    raw = CASES_PATH.read_bytes() if raw is None else raw
     if len(raw) > 65536:
         raise ValueError('case catalog too large')
     catalog = strict_json(raw)
@@ -51,8 +53,8 @@ def case_digest(case):
     return digest(json.dumps({k: case[k] for k in ('language', 'source', 'context')}, sort_keys=True))
 
 
-def make_plan(providers, case_ids, rounds=1):
-    cases = load_cases()
+def make_plan(providers, case_ids, rounds=1, cases=None):
+    cases = load_cases() if cases is None else cases
     if (type(rounds) is not int or not 1 <= rounds <= 4 or not providers or len(set(providers)) != len(providers) or
             any(p not in PROVIDERS for p in providers) or not case_ids or
             len(set(case_ids)) != len(case_ids) or any(c not in cases for c in case_ids) or

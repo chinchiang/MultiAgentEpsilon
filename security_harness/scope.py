@@ -20,6 +20,10 @@ def validate_roe(roe: dict) -> dict:
 
 
 MODEL_PROVIDERS = ("gemini", "bedrock", "glm", "deepseek", "lmstudio")
+# 模型呼叫期限的程式硬上限；RoE 的期限政策只能在其內設定。 / The code's hard ceilings on model deadlines; the RoE's
+# deadline policy can only set values within them.
+MODEL_CALL_CEILING = 60
+MODEL_RUN_CEILING = 130
 LABEL = r"[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?"
 
 
@@ -46,9 +50,39 @@ Separate rules of engagement for advisory model calls.
             or not set(allowed) <= set(MODEL_PROVIDERS) or not set(live) <= set(allowed)
             or type(roe.get("max_calls_per_run")) is not int or not 1 <= roe["max_calls_per_run"] <= 16
             or type(planned_calls) is not int or not 0 <= planned_calls <= roe["max_calls_per_run"]
-            or not valid_remote_hosts(roe.get("allowed_remote_hosts"))):
+            or not valid_remote_hosts(roe.get("allowed_remote_hosts"))
+            or not valid_deadline_policy(roe.get("deadline_policy"))):
         raise ValueError("live model calls are outside the approved model RoE")
     return roe
+
+
+def valid_deadline_policy(policy) -> bool:
+    """版本化的期限政策：每次呼叫的預設與各供應商期限、整輪上限，都必須是程式硬上限內的整數秒。
+
+A versioned deadline policy: the default and per-provider call deadlines and the run cap
+    must all be whole seconds within the code's hard ceilings."""
+    def seconds(value, low, high):
+        return type(value) is int and low <= value <= high
+    return (isinstance(policy, dict)
+            and set(policy) == {"version", "default_call_seconds", "max_call_seconds", "max_total_seconds"}
+            and type(policy["version"]) is int and policy["version"] == 1
+            and seconds(policy["default_call_seconds"], 1, MODEL_CALL_CEILING)
+            and isinstance(policy["max_call_seconds"], dict)
+            and set(policy["max_call_seconds"]) <= set(MODEL_PROVIDERS)
+            and all(seconds(v, 1, MODEL_CALL_CEILING) for v in policy["max_call_seconds"].values())
+            and seconds(policy["max_total_seconds"], 10, MODEL_RUN_CEILING))
+
+
+def call_seconds(policy, provider) -> int:
+    """供應商每次呼叫的期限；mock 與未列出的供應商用預設值。 / One provider's per-call deadline; mocks and unlisted
+    providers use the default."""
+    return policy["max_call_seconds"].get(provider, policy["default_call_seconds"])
+
+
+def run_seconds(policy, providers) -> int:
+    """整輪期限：逐次期限總和加 10 秒收尾，不超過政策上限。 / The run deadline: the sum of per-call deadlines plus
+    10 seconds to finish, capped by the policy."""
+    return min(policy["max_total_seconds"], sum(call_seconds(policy, p) for p in providers) + 10)
 
 
 def valid_remote_hosts(hosts) -> bool:

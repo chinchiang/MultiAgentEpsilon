@@ -32,8 +32,12 @@ TARGETS = {
     'security_harness/isolation.py': (
         ('verify_container',), ('tests/test_isolation.py', '-m', 'not integration')),
     'security_harness/scope.py': (
-        ('valid_remote_hosts', 'validate_model_roe'),
+        ('valid_remote_hosts', 'validate_model_roe', 'valid_deadline_policy', 'call_seconds', 'run_seconds'),
         ('tests/test_scope.py', 'tests/test_model_hardening.py::test_model_roe_rejects_malformed_destination_allowlists',
+         'tests/test_model_deadlines.py::test_checked_in_model_roe_carries_a_valid_deadline_policy',
+         'tests/test_model_deadlines.py::test_deadline_policy_outside_the_code_ceilings_is_refused',
+         'tests/test_model_deadlines.py::test_per_provider_deadlines_set_the_call_ceiling_and_the_run_cap',
+         'tests/test_model_deadlines.py::test_deadline_policy_boundaries_are_inclusive',
          'tests/test_model_hardening.py::test_model_roe_boundaries_are_inclusive',
          'tests/test_model_hardening.py::test_remote_host_allowlist_size_boundary')),
     'security_harness/supervision.py': (

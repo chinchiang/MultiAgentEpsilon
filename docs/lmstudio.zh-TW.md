@@ -32,8 +32,8 @@ HTTP 只允許字面 `127.0.0.1` 或 `[::1]`、明確的 1024–65535 連接埠�
 # 固定合成 ACK，不傳送專案原始碼。 / Fixed synthetic ACK, no project source.
 .venv/bin/python -I scripts/model_smoke.py --live --provider lmstudio
 
-# 先做兩案單模型；再做地端家族同批比較（推理模型用 2048，兩家各一案共 4096）。單次 30 秒期限下本機 GPU 常來不及，見盲審文件。
-# Two local cases, then an on-prem family batch (2048 for reasoning models; one case each, 4096 in total). A local GPU often misses the 30 s per-call deadline; see the blind-review doc.
+# 先做兩案單模型；再做地端家族同批比較（推理模型用 2048，兩家各一案共 4096）。LM Studio 每次 60 秒期限下本機 GPU 仍可能來不及，見盲審文件。
+# Two local cases, then an on-prem family batch (2048 for reasoning models; one case each, 4096 in total). A local GPU may still miss LM Studio's 60 s per-call deadline; see the blind-review doc.
 .venv/bin/python -I scripts/model_review.py --live --provider lmstudio --case B13 --case B14 --output-tokens 1024
 .venv/bin/python -I scripts/model_review.py --live --provider glm --provider lmstudio --case B13 --output-tokens 2048
 
@@ -41,7 +41,7 @@ HTTP 只允許字面 `127.0.0.1` 或 `[::1]`、明確的 1024–65535 連接埠�
 .venv/bin/python -I scripts/model_compare.py --report artifacts/<run-a>/report.json --report artifacts/<run-b>/report.json
 ```
 
-三模型、兩案、一輪共六次推論、預留 6,144 個輸出詞元；增加至兩輪會超過 8,192，必須拒絕。可另開相同設定且保存完整結果的批次，不能挑選成功回答拼湊。整批上限仍為 16 次／8,192 詞元／130 秒，每次 30 秒且不自動重試。模型清單 GET 與 chat POST 共用該次呼叫期限；每次推論都先查清單。GET 不另算推論次數，最壞情況每次推論有兩個 HTTP 請求。
+三模型、兩案、一輪共六次推論、預留 6,144 個輸出詞元；增加至兩輪會超過 8,192，必須拒絕。可另開相同設定且保存完整結果的批次，不能挑選成功回答拼湊。整批上限仍為 16 次／8,192 詞元／130 秒，不自動重試；RoE 期限政策給 LM Studio 每次 60 秒（程式硬上限）。模型清單 GET 與 chat POST 共用該次呼叫期限；每次推論都先查清單。GET 不另算推論次數，最壞情況每次推論有兩個 HTTP 請求。
 
 ## 輸出契約與驗收
 
@@ -82,7 +82,7 @@ HTTP permits only literal 127.0.0.1 or [::1], explicit port 1024–65535, exact 
 
 ## Commands and budget
 
-The shared commands above perform a fixed synthetic ACK, two local cases, a Gemini/Bedrock/LM Studio batch, and offline comparison. Three providers × two cases × one round reserves six calls/6,144 output tokens; two rounds exceeds 8,192 and rejects. Additional batches must preserve identical settings and complete results, never cherry-pick successful answers. Caps remain 16 calls/8,192 tokens/130 seconds per batch, 30 seconds per call, no retry. Each call's model-list GET and chat POST share that deadline; discovery repeats before every inference. GET is not a separate inference reservation; at most two HTTP requests accompany each inference.
+The shared commands above perform a fixed synthetic ACK, two local cases, a Gemini/Bedrock/LM Studio batch, and offline comparison. Three providers × two cases × one round reserves six calls/6,144 output tokens; two rounds exceeds 8,192 and rejects. Additional batches must preserve identical settings and complete results, never cherry-pick successful answers. Caps remain 16 calls/8,192 tokens/130 seconds per batch, no retry; the RoE deadline policy gives LM Studio 60 seconds per call (the code's ceiling). Each call's model-list GET and chat POST share that deadline; discovery repeats before every inference. GET is not a separate inference reservation; at most two HTTP requests accompany each inference.
 
 ## Contract and live acceptance
 
