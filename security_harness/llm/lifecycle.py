@@ -3,8 +3,11 @@
 Model supervisor and recovery using the shared run inventory, without Docker."""
 import copy
 import os
+import tempfile
 
 from .. import supervision
+from ..results import read_regular
+from ..scope import MODEL_RUN_CEILING
 from ..supervision import CANCELLED, CLEANUP_FAILED, EXITED, TIMEOUT, child_environment, persist
 from .gateway import ModelError
 from .transport import strict_json
@@ -12,17 +15,24 @@ from .transport import strict_json
 # 最多 16 筆審查乘以 16 KiB 原文，另加中繼資料。 / 16 reviews x 16 KiB bound raw responses, plus metadata.
 REPORT_LIMIT = 1024 * 1024
 # 模型 supervisor 的最長整體期限。 / The model supervisor's longest total deadline.
-MAX_TOTAL_SECONDS = 130
+MAX_TOTAL_SECONDS = MODEL_RUN_CEILING
+# 報告版本：3 起記錄期限政策並封存評分輸入。 / Report versions: from 3 the deadline policy is recorded and the scoring
+# inputs are archived.
+REPORT_VERSIONS = (2, 3)
+REPORT_VERSION = 3
+# 封存輸入的檔名與上限；與報告同目錄、同權限。 / Archived input names and their bound; beside the report, same mode.
+INPUTS = 'inputs'
+INPUT_LIMIT = 65536
 BLIND_REVIEW_IMMUTABLE = ('plan', 'providers', 'selected_providers', 'case_ids', 'rounds', 'limits',
                           'total_timeout_seconds', 'output_tokens_per_review', 'implementation_sha256',
-                          'case_catalog_sha256', 'oracle_sha256', 'model_roe_sha256')
+                          'case_catalog_sha256', 'oracle_sha256', 'model_roe_sha256', 'deadline_policy')
 
 
 # smoke 的計畫：supervisor 決定的供應商、fixture、實作與 RoE 雜湊、限額與時限。 / The smoke plan: the providers,
 # fixture, implementation and RoE digests, limits and deadline the supervisor decided.
 SMOKE_IMMUTABLE = ('schema_version', 'operation', 'run_id', 'started_at', 'providers', 'fixture',
                    'implementation_sha256', 'model_roe_sha256', 'limits', 'total_timeout_seconds',
-                   'max_output_tokens_per_call')
+                   'max_output_tokens_per_call', 'deadline_policy')
 
 
 def smoke_plan_digest(report):
@@ -51,7 +61,7 @@ def read_report(root, run_id):
             raise ValueError('invalid evidence size')
         data = strict_json(raw)
         if (data.get('run_id') != run_id or data.get('operation') != 'model-smoke' or
-                data.get('schema_version') != 2):
+                data.get('schema_version') not in REPORT_VERSIONS):
             raise ValueError('invalid evidence identity')
         for name in ('checks', 'calls'):
             if (not isinstance(data.get(name), list) or len(data[name]) > 16 or
@@ -63,6 +73,41 @@ def read_report(root, run_id):
                 'advisory_only': True, 'status': 'INCOMPLETE', 'code': 'EVIDENCE_INVALID',
                 'evidence_error': 'EVIDENCE_INVALID',
                 'providers': [], 'checks': [], 'calls': []}
+
+
+def archive_inputs(run_dir, inputs):
+    """把評分輸入的原始位元組封存在報告旁，供日後以報告內雜湊重驗；同名檔案不得覆寫。
+
+Archive the scoring inputs' raw bytes beside the report, so later validation checks
+    the report's digests against these copies; an existing copy is never replaced."""
+    folder = run_dir / INPUTS
+    folder.mkdir(mode=0o700)
+    for name, raw in inputs.items():
+        if len(raw) > INPUT_LIMIT:
+            raise ValueError('archived input too large')
+        fd, temporary = tempfile.mkstemp(prefix='.input-', dir=folder)
+        try:
+            with os.fdopen(fd, 'wb') as stream:
+                stream.write(raw)
+                stream.flush()
+                os.fsync(stream.fileno())
+            os.link(temporary, folder / name)
+        finally:
+            os.unlink(temporary)
+    descriptor = os.open(folder, os.O_RDONLY | os.O_DIRECTORY)
+    try:
+        os.fsync(descriptor)
+    finally:
+        os.close(descriptor)
+
+
+def read_inputs(run_dir, names):
+    """讀回封存輸入：不跟隨符號連結、限大小、只收一般檔案。 / Read archived inputs back without following
+    symlinks, within the bound and only as regular files."""
+    folder = run_dir / INPUTS
+    if folder.is_symlink() or not folder.is_dir():
+        raise ValueError('archived inputs missing')
+    return {name: read_regular(folder / name, INPUT_LIMIT) for name in names}
 
 
 def complete_worker_report(data, providers, returncode):
@@ -113,7 +158,8 @@ What the model role declares to a supervised run: no external resources, and clo
         if data.get('task') == 'blind-review' or (expected_report or {}).get('task') == 'blind-review':
             try:
                 from .benchmark_score import summarize
-                data['analysis'] = summarize(data, (expected_report or {}).get('plan'))
+                data['analysis'] = summarize(data, (expected_report or {}).get('plan'),
+                                             self.root / 'artifacts' / self.run_id)
                 # 盲審 worker 也綁定 supervisor 交付的不可變計畫、預算與請求摘要。 / Blind-review workers are bound to
                 # the supervisor's immutable plan, budget and request digests too.
                 if expected_report is not None and plan_digest(data) != plan_digest(expected_report):

@@ -13,6 +13,7 @@ import uuid
 from dataclasses import dataclass, field
 from typing import Protocol
 
+from ..scope import MODEL_CALL_CEILING
 from .output_schema import REVIEW_FORMAT
 
 
@@ -86,7 +87,7 @@ class Limits:
             if type(value) is not int or not 0 < value <= ceiling:
                 raise ValueError("invalid gateway limit")
         if (type(self.timeout_seconds) not in (int, float) or
-                not math.isfinite(self.timeout_seconds) or not 0 < self.timeout_seconds <= 60):
+                not math.isfinite(self.timeout_seconds) or not 0 < self.timeout_seconds <= MODEL_CALL_CEILING):
             raise ValueError("invalid gateway deadline")
 
 
@@ -124,7 +125,9 @@ Readable model name for reports; ARNs and account-like digits never appear."""
     def identity(self, value):
         return "hmac-sha256:" + hmac.new(self._identity_key, value.encode("utf-8"), hashlib.sha256).hexdigest()
 
-    async def generate(self, adapter: Adapter, request: Request) -> Reply | None:
+    async def generate(self, adapter: Adapter, request: Request, timeout_seconds=None) -> Reply | None:
+        """timeout_seconds 是此呼叫的期限，只能收緊 limits 的上限。 / timeout_seconds is this call's deadline; it may
+        only tighten the limits' ceiling."""
         evidence = {"schema_version": 1, "call_id": str(uuid.uuid4()),
                     "provider": adapter.provider, "family": adapter.family,
                     "model_sha256": self.identity(adapter.model), "model_label": self.label(adapter.model),
@@ -141,7 +144,9 @@ Readable model name for reports; ARNs and account-like digits never appear."""
                     not request.system or not request.user or
                     type(request.max_output_tokens) is not int or
                     type(request.response_format) is not str or request.response_format not in ('text', REVIEW_FORMAT) or
-                    not 0 < request.max_output_tokens <= 4096):
+                    not 0 < request.max_output_tokens <= 4096 or
+                    (timeout_seconds is not None and (type(timeout_seconds) is not int or
+                                                      not 0 < timeout_seconds <= self.limits.timeout_seconds))):
                 evidence["code"] = "ROUTING_DENIED"
                 return None
             size = len(request.system.encode()) + len(request.user.encode())
@@ -158,7 +163,7 @@ Readable model name for reports; ARNs and account-like digits never appear."""
             evidence.update(status="IN_FLIGHT", reserved=True, reserved_output_tokens=request.max_output_tokens)
             if self.checkpoint is not None:
                 self.checkpoint()  # 任何 adapter I/O 前先持久化預留。 / Durable reservation precedes any adapter I/O.
-            async with asyncio.timeout(self.limits.timeout_seconds):
+            async with asyncio.timeout(self.limits.timeout_seconds if timeout_seconds is None else timeout_seconds):
                 reply = await adapter.generate(request)
             if not isinstance(reply, Reply) or type(reply.text) is not str or not reply.text.strip():
                 raise ModelError("INVALID_RESPONSE", "EMPTY_TEXT")

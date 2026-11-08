@@ -11,6 +11,7 @@ from urllib.parse import urlsplit
 
 import httpx
 
+from ..scope import MODEL_CALL_CEILING
 from ..supervision import child_environment
 from .gateway import ModelError
 
@@ -78,7 +79,7 @@ The destination comes only from trusted adapter config, never a prompt.
     """
 
     def __init__(self, transport=None, timeout_seconds=10):
-        if type(timeout_seconds) not in (int, float) or not 0 < timeout_seconds <= 30:
+        if type(timeout_seconds) not in (int, float) or not 0 < timeout_seconds <= MODEL_CALL_CEILING:
             raise ValueError('invalid HTTP timeout')
         self.transport = transport
         self.timeout_seconds = timeout_seconds

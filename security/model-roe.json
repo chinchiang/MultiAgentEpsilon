@@ -17,5 +17,13 @@
     ],
     "deepseek": [],
     "lmstudio": []
+  },
+  "deadline_policy": {
+    "version": 1,
+    "default_call_seconds": 30,
+    "max_call_seconds": {
+      "lmstudio": 60
+    },
+    "max_total_seconds": 130
   }
 }

@@ -67,7 +67,7 @@ def test_provider_diagnostics_are_fixed_categories_and_keep_rejections(mutation,
 def collect(tmp_path, monkeypatch=None):
     report = runner.initial_report(['mock-review-a','mock-review-b'], ['B01','B02'], str(uuid.uuid4()), 512, 2)
     path = tmp_path/'artifacts'/report['run_id']/'report.json'
-    life.persist(path,report);prepare_run(tmp_path,report['run_id'],operation='model-smoke')
+    runner.record(path,report);prepare_run(tmp_path,report['run_id'],operation='model-smoke')
     result = asyncio.run(runner.run_worker(tmp_path,report['run_id'],life.plan_digest(report)))
     return model_support.finish(tmp_path,report['run_id'],providers=report['providers'],returncode=result,expected_report=report)
 
@@ -180,7 +180,7 @@ def test_changed_case_catalog_spends_no_calls(tmp_path, monkeypatch):
     report = runner.initial_report(['mock-review-a'], ['B01'], str(uuid.uuid4()), 512, 1)
     report['case_catalog_sha256'] = '0' * 64  # 計畫綁定後目錄被修改。 / catalog edited after the plan was bound
     path = tmp_path/'artifacts'/report['run_id']/'report.json'
-    life.persist(path, report); prepare_run(tmp_path, report['run_id'], operation='model-smoke')
+    runner.record(path, report); prepare_run(tmp_path, report['run_id'], operation='model-smoke')
     async def forbidden(self, request): raise AssertionError('call spent against an unbound catalog')
     monkeypatch.setattr(bench.MockReviewer, 'generate', forbidden)
     assert asyncio.run(runner.run_worker(tmp_path, report['run_id'], life.plan_digest(report))) == 1
@@ -195,7 +195,7 @@ def test_changed_model_roe_spends_no_calls(tmp_path, monkeypatch):
     report = runner.initial_report(['mock-review-a'], ['B01'], str(uuid.uuid4()), 512, 1)
     report['model_roe_sha256'] = '0' * 64  # 計畫綁定後 RoE 被修改。 / RoE edited after the plan was bound
     path = tmp_path/'artifacts'/report['run_id']/'report.json'
-    life.persist(path, report); prepare_run(tmp_path, report['run_id'], operation='model-smoke')
+    runner.record(path, report); prepare_run(tmp_path, report['run_id'], operation='model-smoke')
     async def forbidden(self, request): raise AssertionError('call spent against an unbound RoE')
     monkeypatch.setattr(bench.MockReviewer, 'generate', forbidden)
     assert asyncio.run(runner.run_worker(tmp_path, report['run_id'], life.plan_digest(report))) == 1
@@ -210,7 +210,13 @@ def test_supervisor_stop_reasons_are_known_categories(code):
 
 
 def test_live_plan_warns_when_worst_case_exceeds_the_run_cap():
+    # 最壞情況依 RoE 期限政策逐供應商計算：LM Studio 每次 60 秒，其他 30 秒。 / The worst case follows the RoE deadline
+    # policy per provider: 60 seconds per LM Studio call, 30 for the others.
     from scripts.model_review import deadline_warning
-    assert deadline_warning(3, 90) is None
-    message = deadline_warning(8, 130)
+    assert deadline_warning(runner.initial_report(['gemini'], ['B01', 'B02', 'B03'], str(uuid.uuid4()))) is None
+    assert deadline_warning(runner.initial_report(['lmstudio'], ['B13', 'B14'], str(uuid.uuid4()))) is None
+    message = deadline_warning(runner.initial_report(['gemini', 'glm'], ['B01', 'B02', 'B03', 'B04'], str(uuid.uuid4())))
     assert '240' in message and '130' in message and 'INCOMPLETE' in message
+    message = deadline_warning(runner.initial_report(['lmstudio', 'mock-review-a'], ['B13', 'B14', 'B15'],
+                                                     str(uuid.uuid4())))
+    assert '180' in message and '130' in message

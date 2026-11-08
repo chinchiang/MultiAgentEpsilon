@@ -249,6 +249,7 @@ MultiAgentEpsilon/
 │   ├── test_merge_protection.py
 │   ├── test_model_benchmark.py
 │   ├── test_model_comparison.py
+│   ├── test_model_deadlines.py
 │   ├── test_model_gateway.py
 │   ├── test_model_hardening.py
 │   ├── test_model_lifecycle.py
@@ -299,7 +300,8 @@ MultiAgentEpsilon/
 │   ├── hypothesis/            Hypothesis 性質測試的範例資料庫
 │   └── runs/<run-id>/          擁有者與程序群組回收清冊
 ├── artifacts/                 各次執行證據與索引
-│   ├── <run-id>/report.json    安全測試 schema 3 或模型 schema 2
+│   ├── <run-id>/report.json    安全測試 schema 3 或模型 schema 3（舊模型報告為 2）
+│   ├── <run-id>/inputs/        模型報告封存的案例目錄、標準答案與模型 RoE
 │   ├── <run-id>/adjudications/<note-id>.json  選擇性未簽章人工註記
 │   ├── pytest.xml             由 pytest 明確指定輸出
 │   └── latest.txt             security run 索引
@@ -391,7 +393,7 @@ The shared [GitHub trust module](../security_harness/github_trust.py) collects c
 
 Directory purposes: .github CI/review ownership; deploy production templates; docs architecture/coverage/acceptance; fixture_app synthetic target; scripts operational entries; security protected policy/tools/cases; security_harness trusted core (llm model path); tests contracts/mutations/isolation/recovery. __init__.py marks packages. The tracked tree excludes generated files, caches, Git internals, and private attachments.
 
-Generated local paths (not tracked): .venv Python 3.12 environment; .tools pinned tools/AWS CLI; .state runtime/DB settings, verified wheels and runs/<run-id> ownership inventory; artifacts/<run-id>/report.json schema 3 security/schema2 model evidence; optional adjudications/<note-id>.json; explicit pytest.xml; latest.txt security index; .pytest_cache. Paths are created as needed, not claims of running services. /tmp/epsilon-run-<uid>-<run-id> must be reclaimed. CI trusted/ and candidate/ are separate runner checkouts; ZIP contains trusted/artifacts/ and audit/.
+Generated local paths (not tracked): .venv Python 3.12 environment; .tools pinned tools/AWS CLI; .state runtime/DB settings, verified wheels and runs/<run-id> ownership inventory; artifacts/<run-id>/report.json schema 3 security/schema 3 model evidence (older model reports are schema 2), with inputs/ holding a model report's archived catalog, reference and model RoE; optional adjudications/<note-id>.json; explicit pytest.xml; latest.txt security index; .pytest_cache. Paths are created as needed, not claims of running services. /tmp/epsilon-run-<uid>-<run-id> must be reclaimed. CI trusted/ and candidate/ are separate runner checkouts; ZIP contains trusted/artifacts/ and audit/.
 
 After editing any diagrams/*.mmd, regenerate matching SVG with Mermaid CLI 11.12.0 and mermaid-config.json, using an available browser. Rendering dependencies stay outside application Python locks:
 

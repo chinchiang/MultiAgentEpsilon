@@ -66,7 +66,7 @@ def collected(tmp_path, providers=None, case_ids=None):
     report = runner.initial_report(providers or ['mock-review-a', 'mock-review-b'],
                                    case_ids or list(bench.SUITES['injection']), str(uuid.uuid4()))
     path = tmp_path / 'artifacts' / report['run_id'] / 'report.json'
-    life.persist(path, report)
+    runner.record(path, report)
     prepare_run(tmp_path, report['run_id'], operation='model-smoke')
     code = asyncio.run(runner.run_worker(tmp_path, report['run_id'], plan_digest=life.plan_digest(report)))
     data = model_support.finish(tmp_path, report['run_id'], providers=report['providers'], returncode=code, expected_report=report)
@@ -215,7 +215,7 @@ def test_cancelled_collection_keeps_all_planned_cases_in_analysis(tmp_path, monk
             await asyncio.Event().wait()
     monkeypatch.setattr(model_config, 'configured_adapter', lambda *args: Hang())
     report = runner.initial_report(['gemini'], ['B01', 'B02'], str(uuid.uuid4()))
-    life.persist(tmp_path / 'artifacts' / report['run_id'] / 'report.json', report)
+    runner.record(tmp_path / 'artifacts' / report['run_id'] / 'report.json', report)
     prepare_run(tmp_path, report['run_id'], operation='model-smoke')
     async def cancel():
         task = asyncio.create_task(runner.run_worker(tmp_path, report['run_id'], plan_digest=life.plan_digest(report)))
@@ -328,7 +328,7 @@ def test_coordinated_budget_tampering_before_the_worker_starts_is_refused(tmp_pa
     # yet differs from the immutable plan the supervisor handed over.
     report = runner.initial_report(['mock-review-a', 'mock-review-b'], ['B01'], str(uuid.uuid4()))
     path = tmp_path / 'artifacts' / report['run_id'] / 'report.json'
-    life.persist(path, report)
+    runner.record(path, report)
     tampered = runner.initial_report(['mock-review-a', 'mock-review-b'], ['B01'], report['run_id'], 1024)
     for key in ('started_at', 'plan', 'checks'):
         tampered[key] = report[key] if key != 'checks' else [
@@ -361,7 +361,7 @@ def test_worker_spends_nothing_when_the_report_differs_from_the_supervisor_plan(
 
 def test_worker_runs_normally_with_the_matching_plan_digest(tmp_path):
     report = runner.initial_report(['mock-review-a', 'mock-review-b'], ['B01'], str(uuid.uuid4()))
-    life.persist(tmp_path / 'artifacts' / report['run_id'] / 'report.json', report)
+    runner.record(tmp_path / 'artifacts' / report['run_id'] / 'report.json', report)
     prepare_run(tmp_path, report['run_id'], operation='model-smoke')
     assert asyncio.run(runner.run_worker(tmp_path, report['run_id'], plan_digest=life.plan_digest(report))) == 0
     data = model_support.finish(tmp_path, report['run_id'], providers=report['providers'], returncode=0, expected_report=report)
@@ -389,7 +389,7 @@ def test_single_immutable_field_tampering_is_refused(tmp_path, tamper):
 def test_parent_refuses_worker_success_when_benchmark_evaluation_is_invalid(tmp_path):
     report = runner.initial_report(['mock-review-a'], ['B01'], str(uuid.uuid4()))
     path = tmp_path / 'artifacts' / report['run_id'] / 'report.json'
-    life.persist(path, report)
+    runner.record(path, report)
     prepare_run(tmp_path, report['run_id'], operation='model-smoke')
     assert asyncio.run(runner.run_worker(tmp_path, report['run_id'], plan_digest=life.plan_digest(report))) == 0
     corrupt = json.loads(path.read_text())
