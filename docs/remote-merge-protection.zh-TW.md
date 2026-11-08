@@ -110,7 +110,7 @@ App 身分與執行位置尚未提供；已準備受控主機的發布程式與�
    - 每個 PR 都要 update-branch。之後 guard 會依推送時間排除舊核准，所以需要重新核准。
    - 重跑 CI，再用 `python3 -I scripts/verify_required_check.py --pr <編號>` 確認。
 
-**預防：** CI 目前只在 push、`pull_request_target` 與 `workflow_dispatch` 時執行，main 的 lock 出現新公告時，要等到下一次執行才會發現。以 certifi 為例，從公告發布到發現晚了 5 天。開 PR 之前，先用第 1 步的 OSV 查詢檢查 main 的 lock。
+**預防：** 自 PR #63 起，CI 除了 push、`pull_request_target` 與 `workflow_dispatch`，也每天 00:23 UTC 重評 main，新公告最晚約一天內就會讓 main 的排程執行變紅（certifi 當時是在公告發布 5 天後才發現）。排程失敗只通知最後修改 cron 那一行的人；公開儲存庫 60 天沒有活動時 GitHub 會停用排程。開 PR 之前，仍先用第 1 步的 OSV 查詢檢查 main 的 lock。
 
 <a id="en"></a>
 
@@ -207,4 +207,4 @@ So no PR can merge until the fixed version has cleared the cooling period. Lifti
    - Each PR needs an update-branch. The guard then excludes approvals given before the latest push, so each needs a fresh approval.
    - Rerun CI, then confirm with `python3 -I scripts/verify_required_check.py --pr <number>`.
 
-**Prevention:** CI runs only on push, `pull_request_target` and `workflow_dispatch`, so a new advisory against main's lock surfaces only at the next run; certifi's was found five days after OSV published it. Before opening a PR, run the step 1 OSV query against main's lock.
+**Prevention:** since PR #63, CI also re-evaluates main daily at 00:23 UTC besides push, `pull_request_target` and `workflow_dispatch`, so a new advisory turns main's scheduled run red within about a day (certifi's was found five days after OSV published it). A scheduled failure notifies only whoever last changed the cron line, and GitHub disables the schedule after 60 days without activity in a public repository. Before opening a PR, still run the step 1 OSV query against main's lock.
