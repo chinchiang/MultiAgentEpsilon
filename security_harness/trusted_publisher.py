@@ -24,7 +24,7 @@ from xml.etree import ElementTree
 
 from .github_http import Denied, GitHub, need, strict_json
 from .github_readonly import GitHubReader
-from .github_trust import (GITHUB_ACTIONS_APP_ID, GitHubTrust, head_scope, identities, run_scope, validate_review,
+from .github_trust import (GITHUB_ACTIONS_APP_ID, GitHubTrust, head_scope, review_decision, run_scope,
                            validate_run_base as validate_run_base)
 from .inputs import excluded
 from .limits import LIMITS
@@ -203,7 +203,7 @@ Artifact-only contract, shared by the publisher and the CI self-check.
 
 
 def validate_bundle(settings, gate_policy, pr, run, newer_runs, jobs, files, reviews, permissions, subject, now,
-                    commit_identities=()):
+                    push, commit_identities=()):
     validate_settings(settings, gate_policy)
     validate_pr(pr, settings)
     need(run["repository"]["id"] == settings["repository_id"]
@@ -234,9 +234,7 @@ def validate_bundle(settings, gate_policy, pr, run, newer_runs, jobs, files, rev
     completion = named['trusted-security-pilot']['steps']
     need(any(s['name'] == COMPLETION_STEP and s['conclusion'] == 'success'
              for s in completion), 'COMPLETION_STEP_INCOMPLETE')
-    excluded = {person["login"] for person in (run.get("actor"), run.get("triggering_actor"))
-                if isinstance(person, dict) and person.get("login")} | set(commit_identities)
-    approvals = validate_review(pr, reviews, permissions, settings, excluded)
+    approvals = review_decision(pr, reviews, permissions, settings["reviewers"], commit_identities, push)
     guard = strict_json(evidence_file(files, "audit/trusted-guard.json"))
     need(guard.get("schema_version") == GUARD_SCHEMA_VERSION and guard.get("decision") == "ALLOW"
          and guard.get("base_sha") == pr["base"]["sha"] and guard.get("candidate_sha") == pr["head"]["sha"]
@@ -426,7 +424,8 @@ def collect(client, settings, number, run_id, gate_policy, blob_cache=None):
     evidence = GitHubTrust(reader).publication_review(number, pr, run, settings["base_branch"])
     subject = remote_subject(reader, head, blob_cache)
     proof = validate_bundle(settings, gate_policy, pr, run, runs, jobs, unpack_evidence(raw), evidence.reviews,
-                            evidence.permissions, subject, datetime.now(timezone.utc), evidence.commit_identities)
+                            evidence.permissions, subject, datetime.now(timezone.utc), evidence.push,
+                            evidence.commit_identities)
     proof["excluded_identities"] = sorted(evidence.commit_identities)
     return proof
 
@@ -480,8 +479,8 @@ Publish one completed check only when the verified outcome changes.
         trust = GitHubTrust(reader)
         trust.run_base(fresh, settings["base_branch"]).validate(run)
         reject_newer_runs(run, head_runs(reader, settings, head), head)
-        excluded = identities(run.get("actor"), run.get("triggering_actor")) | set(proof["excluded_identities"])
-        need(trust.review_ids(number, fresh, settings["reviewers"], excluded) == proof["review_ids"], "REVIEW_CHANGED")
+        need(trust.review_ids(number, fresh, settings["reviewers"], set(proof["excluded_identities"]),
+                              settings["base_branch"]) == proof["review_ids"], "REVIEW_CHANGED")
         conclusion, code = "success", "VERIFIED"
     except Denied as exc:
         if str(exc) in THROTTLED:

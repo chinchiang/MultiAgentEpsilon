@@ -222,6 +222,15 @@ def main(argv=None):
         _, after = tail.split(END, 1)
         path.write_text(before + START + '\n' + repository_tree(paths) + '\n' + END + after, encoding='utf-8')
     errors = validate(paths, root)
+    if root != ROOT:
+        # 候選的回歸測試不得少於可信基準，除非逐一明列理由。 / The candidate keeps every trusted regression test
+        # unless it declares each removal with a reason.
+        from security_harness import regression_inventory
+        declared, declaration_errors = regression_inventory.declared_removals(root)
+        errors.extend(declaration_errors)
+        errors.extend(regression_inventory.floor_errors(
+            regression_inventory.inventory(ROOT, inventory(ROOT, untracked=False)),
+            regression_inventory.inventory(root, paths), declared))
     for error in errors:
         print(error)
     if not errors:

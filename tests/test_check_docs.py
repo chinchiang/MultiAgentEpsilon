@@ -30,7 +30,9 @@ def repo(tmp_path, files):
 def trusted_root_without_glossary(tmp_path_factory, monkeypatch):
     # 合成 repo 的測試只看自己的名詞表；可信名詞表另有測試。 / Synthetic repositories see only their own glossary; the
     # trusted glossary has its own tests.
-    monkeypatch.setattr(check_docs, "ROOT", tmp_path_factory.mktemp("trusted"))
+    trusted = tmp_path_factory.mktemp("trusted")
+    subprocess.run(["git", "init", "-q", str(trusted)], check=True)
+    monkeypatch.setattr(check_docs, "ROOT", trusted)
 
 
 def errors(root):
@@ -100,9 +102,14 @@ def test_cli_reads_every_document_as_utf8_regardless_of_the_locale(tmp_path):
         "README.md": BILINGUAL + "[指南](docs/guide.md#en)\n", "docs/guide.md": BILINGUAL,
         "docs/d.mmd": 'flowchart TB\n    A["新標籤<br/>New label"]\n', "docs/d.svg": svg,
         "module.py": '"""中文說明。\n\nEnglish description."""\n'}))
-    script = Path(__file__).resolve().parents[1] / "scripts/check_docs.py"
+    # 可信根目錄換成沒有測試的空 repo，候選測試數下限才不會拿本專案的測試比對。 / The trusted root is an empty
+    # repository without tests, so the candidate test floor does not compare against this project's tests.
+    source = Path(__file__).resolve().parents[1]
+    run = ("import sys; from pathlib import Path; sys.path.insert(0, sys.argv[1]); from scripts import check_docs; "
+           "check_docs.ROOT = Path(sys.argv[2]); sys.argv = ['check_docs.py', '--root', sys.argv[3]]; "
+           "raise SystemExit(check_docs.main())")
     process = subprocess.run([sys.executable, "-I", "-X", "utf8=0", "-X", "warn_default_encoding",
-                              "-W", "error::EncodingWarning", str(script), "--root", str(root)],
+                              "-W", "error::EncodingWarning", "-c", run, str(source), str(check_docs.ROOT), str(root)],
                              capture_output=True, text=True, encoding="utf-8", timeout=60)
     assert process.returncode == 0, process.stderr[-500:]
     assert "Documentation checks passed" in process.stdout
@@ -173,3 +180,76 @@ def test_unparsable_candidate_python_is_an_error_not_a_traceback(tmp_path, conte
     (root / "bad.py").write_bytes(content)
     subprocess.run(["git", "-C", str(root), "add", "bad.py"], check=True)
     assert any(e.startswith("bad.py: unparsable Python") for e in errors(root))
+
+
+TRUSTED_TESTS = ('"""說明。 / Text."""\nimport pytest\n\n\n'
+                 'def test_kept():\n    pass\n\n\n'
+                 '@pytest.mark.parametrize("x", [1, 2, 3])\ndef test_cases(x):\n    pass\n\n\n'
+                 'def test_doomed():\n    pass\n')
+
+
+def candidate_floor(tmp_path, monkeypatch, candidate_tests, removed=None):
+    trusted = repo(tmp_path / "trusted", base_files(**{"tests/test_x.py": TRUSTED_TESTS}))
+    monkeypatch.setattr(check_docs, "ROOT", trusted)
+    files = {"tests/test_x.py": candidate_tests}
+    if removed is not None:
+        files["security/removed-tests.json"] = removed
+    candidate = repo(tmp_path / "candidate", base_files(**files))
+    return candidate
+
+
+def floor_errors(candidate, capsys):
+    code = check_docs.main(["--root", str(candidate)])
+    return code, [line for line in capsys.readouterr().out.splitlines() if "regression test" in line or "removed-tests" in line]
+
+
+def test_candidate_that_deletes_a_regression_test_is_refused(tmp_path, monkeypatch, capsys):
+    candidate = candidate_floor(tmp_path, monkeypatch, TRUSTED_TESTS.replace('\n\n\ndef test_doomed():\n    pass\n', '\n'))
+    code, errors = floor_errors(candidate, capsys)
+    assert code == 1 and len(errors) == 1 and errors[0].startswith("tests/test_x.py::test_doomed: regression test removed")
+
+
+def test_candidate_that_shrinks_a_parametrized_test_is_refused(tmp_path, monkeypatch, capsys):
+    candidate = candidate_floor(tmp_path, monkeypatch, TRUSTED_TESTS.replace("[1, 2, 3]", "[1, 2]"))
+    code, errors = floor_errors(candidate, capsys)
+    assert code == 1 and errors and "test_cases" in errors[0] and "(3 → 2)" in errors[0]
+
+
+def test_renaming_a_test_counts_as_removing_the_old_name(tmp_path, monkeypatch, capsys):
+    candidate = candidate_floor(tmp_path, monkeypatch, TRUSTED_TESTS.replace("def test_doomed", "def test_renamed"))
+    code, errors = floor_errors(candidate, capsys)
+    assert code == 1 and "test_doomed" in errors[0]
+
+
+def test_declared_removal_with_a_reason_is_accepted(tmp_path, monkeypatch, capsys):
+    removed = '[{"test": "tests/test_x.py::test_doomed", "reason": "covered by test_kept"}]'
+    candidate = candidate_floor(tmp_path, monkeypatch,
+                                TRUSTED_TESTS.replace('\n\n\ndef test_doomed():\n    pass\n', '\n'), removed)
+    code, errors = floor_errors(candidate, capsys)
+    assert (code, errors) == (0, [])
+
+
+@pytest.mark.parametrize("removed", ['[{"test": "tests/test_x.py::test_doomed", "reason": " "}]',
+                                     '[{"test": "tests/test_x.py::test_doomed"}]', 'not json'])
+def test_removal_without_a_reason_is_refused(tmp_path, monkeypatch, capsys, removed):
+    candidate = candidate_floor(tmp_path, monkeypatch,
+                                TRUSTED_TESTS.replace('\n\n\ndef test_doomed():\n    pass\n', '\n'), removed)
+    code, errors = floor_errors(candidate, capsys)
+    assert code == 1 and any("removed-tests" in e for e in errors)
+
+
+def test_adding_tests_and_cases_is_never_refused(tmp_path, monkeypatch, capsys):
+    grown = TRUSTED_TESTS.replace("[1, 2, 3]", "[1, 2, 3, 4]") + '\n\ndef test_new():\n    pass\n'
+    candidate = candidate_floor(tmp_path, monkeypatch, grown)
+    code, errors = floor_errors(candidate, capsys)
+    assert (code, errors) == (0, [])
+
+
+def test_static_count_never_runs_candidate_code(tmp_path, monkeypatch, capsys):
+    # 非 literal 參數只計 1，候選無法以程式碼灌大數量，也不會被執行。 / A non-literal parameter counts one: candidate code
+    # can neither inflate the count nor run.
+    hostile = TRUSTED_TESTS + '\n\n@pytest.mark.parametrize("x", __import__("os").system("touch PWNED") or range(999))\ndef test_hostile(x):\n    pass\n'
+    candidate = candidate_floor(tmp_path, monkeypatch, hostile)
+    from security_harness import regression_inventory
+    counts = regression_inventory.inventory(candidate, ["tests/test_x.py"])
+    assert counts["tests/test_x.py::test_hostile"] == 1 and not (candidate / "PWNED").exists()

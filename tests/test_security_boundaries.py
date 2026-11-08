@@ -52,14 +52,14 @@ def test_another_reviewer_requesting_changes_is_not_ignored(bundle, role, blocke
     permissions = {**bundle['permissions'], 'other': role}
     from scripts.check_trusted_changes import approved_review
     approval = approved_review(bundle['pr'], reviews, bundle['pr']['head']['sha'],
-        bundle['pr']['base']['sha'], ['reviewer'], permissions)
+        bundle['pr']['base']['sha'], ['reviewer'], permissions, (), bundle['push'])
     assert (approval is None) is blocked
 
 
 def test_rerun_actor_cannot_approve_their_own_evaluation(bundle):
     from scripts.check_trusted_changes import approved_review
     assert approved_review(bundle['pr'], bundle['reviews'], bundle['pr']['head']['sha'],
-        bundle['pr']['base']['sha'], ['reviewer'], bundle['permissions'], {'reviewer'}) is None
+        bundle['pr']['base']['sha'], ['reviewer'], bundle['permissions'], {'reviewer'}, bundle['push']) is None
 
 
 @pytest.mark.parametrize('field', ['reserved_calls', 'reserved_output_tokens', 'model_roe_sha256',

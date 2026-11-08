@@ -13,6 +13,7 @@ from pathlib import Path
 import pytest
 
 from security_harness import trusted_publisher as publisher
+from security_harness.github_trust import HeadPush, parse_time as publisher_time
 from security_harness.results import result, subject_digest
 from security_harness.github_readonly import GitHubReader
 from tests.dependency_evidence import clean_evidence
@@ -62,7 +63,10 @@ def bundle():
                  "steps": [{"name": "Sign evaluator-owned evidence", "conclusion": "success"}]})
     jobs.append({'name': 'trusted-security-pilot', 'conclusion': 'success',
                  'steps': [{'name': publisher.COMPLETION_STEP, 'conclusion': 'success'}]})
-    review = {"id": 11, "state": "APPROVED", "commit_id": "b"*40, "user": {"login": "reviewer"}}
+    review = {"id": 11, "state": "APPROVED", "commit_id": "b"*40, "user": {"login": "reviewer"},
+              "submitted_at": now.strftime("%Y-%m-%dT%H:%M:%SZ")}
+    # 伺服器記錄的 head 推送早於核准，推送者是作者。 / The server-recorded head push precedes the approval; the author pushed.
+    push = HeadPush((now - timedelta(hours=1)).replace(microsecond=0), frozenset({"author"}))
     subject = "worktree-manifest-v1:sha256:" + "c"*64
     run_id = "11111111-1111-4111-8111-111111111111"
     records = [result("G1", "COMPLETED", "scan", 23, 0, subject, "f"*64, "synthetic", run_id=run_id),
@@ -110,7 +114,16 @@ def bundle():
     files[f"trusted/artifacts/{negative_id}/report.json"] = json.dumps(negative).encode()
     return {"settings": settings, "gate_policy": policy, "pr": pr, "run": run, "newer_runs": [run],
             "jobs": jobs, "files": files, "reviews": [review], "permissions": {"reviewer": "write"},
-            "subject": subject, "now": now}
+            "subject": subject, "now": now, "push": push}
+
+
+def add_head_push(github, bundle, pushers=("author",)):
+    """規則集要求最後推送核准，activity 記錄 head 推送早於核准。 / The ruleset requires last-push approval and the
+    activity records the head push before the approval."""
+    github.add("rules/branches/main", [{"type": "pull_request", "parameters": {"require_last_push_approval": True}}])
+    github.cursor_listing("activity?ref=refs/heads/feature", [
+        {"after": bundle["pr"]["head"]["sha"], "actor": {"login": login},
+         "timestamp": bundle["push"].pushed.strftime("%Y-%m-%dT%H:%M:%SZ")} for login in pushers])
 
 
 def mutate_json(bundle, filename, change):
@@ -122,6 +135,13 @@ def mutate_json(bundle, filename, change):
 def test_verified_bundle_requires_remote_source_current_review_and_complete_evidence(bundle):
     proof = publisher.validate_bundle(**bundle)
     assert proof["head_sha"] == "b"*40 and proof["review_ids"] == [11] and proof["tests"] == 360
+
+
+def test_reviewer_who_only_reran_or_edited_the_pr_keeps_their_approval(bundle):
+    # run actor 只是觸發 run 的人（改標題、重開、重跑），不是推送者；與 guard 同一規則，不因此作廢核准。 / The run actor
+    # only triggered the run (edit, reopen, re-run) and is not a pusher; as in the guard, the approval still counts.
+    bundle["run"]["actor"]["login"] = bundle["run"]["triggering_actor"]["login"] = "reviewer"
+    assert publisher.validate_bundle(**bundle)["review_ids"] == [11]
 
 
 @pytest.mark.parametrize('attack', ['duplicate', 'missing-class', 'missing-name', 'negative-count', 'missing-count'])
@@ -154,8 +174,8 @@ EXPECTED_DENIAL = {
     "step_skipped": "REQUIRED_STEP_INCOMPLETE",
     "foreign_job": "JOB_SOURCE",
     "author": "INDEPENDENT_APPROVAL_MISSING",
-    "push_actor": "INDEPENDENT_APPROVAL_MISSING",
-    "triggering_actor": "INDEPENDENT_APPROVAL_MISSING",
+    "head_pusher": "INDEPENDENT_APPROVAL_MISSING",
+    "approved_before_push": "INDEPENDENT_APPROVAL_MISSING",
     "commit_author": "INDEPENDENT_APPROVAL_MISSING",
     "read_role": "INDEPENDENT_APPROVAL_MISSING",
     "triage_role": "INDEPENDENT_APPROVAL_MISSING",
@@ -184,7 +204,7 @@ EXPECTED_DENIAL = {
 
 @pytest.mark.parametrize("attack", ["app", "repo", "workflow", "event", "failed_run", "draft", "base",
                                     "head", "evaluator_run_source", "attempt", "new_run", "step_skipped", "foreign_job",
-                                    "author", "push_actor", "triggering_actor", "commit_author",
+                                    "author", "head_pusher", "approved_before_push", "commit_author",
                                     "read_role", "triage_role", "unknown_role", "stale_review",
                                     "dismissed", "changes_requested", "guard", "guard_review", "policy", "subject",
                                     "evaluator", "history", "missing_case", "duplicate_case", "gate_error", "stale_gate",
@@ -205,8 +225,9 @@ def test_spoofed_or_stale_evidence_never_passes(bundle, attack):
     elif attack == "step_skipped": bundle["jobs"][0]["steps"][1]["conclusion"] = "skipped"
     elif attack == "foreign_job": bundle["jobs"][0]["name"] = "fake"
     elif attack == "author": bundle["pr"]["user"]["login"] = "reviewer"
-    elif attack == "push_actor": bundle["run"]["actor"]["login"] = "reviewer"
-    elif attack == "triggering_actor": bundle["run"]["triggering_actor"]["login"] = "reviewer"
+    elif attack == "head_pusher": bundle["push"] = HeadPush(bundle["push"].pushed, frozenset({"reviewer"}))
+    elif attack == "approved_before_push":
+        bundle["push"] = HeadPush(publisher_time(bundle["reviews"][0]["submitted_at"]), bundle["push"].pushers)
     elif attack == "commit_author": bundle["commit_identities"] = {"reviewer"}
     elif attack in ("read_role", "triage_role", "unknown_role"):
         bundle["permissions"]["reviewer"] = {"read_role": "read", "triage_role": "triage", "unknown_role": "custom"}[attack]
@@ -523,6 +544,7 @@ def test_publication_rechecks_mutable_state_before_green(bundle, monkeypatch, ch
                    newer if change == "new_run" else [run])
     github.add("collaborators/reviewer/permission", {"role_name": "read" if change == "review_permission" else "write"})
     github.add("pulls/5/reviews", reviews)
+    add_head_push(github, bundle)
     twin = copy.deepcopy(fresh)
     twin.update(number=6, state="closed")
     twin["base"]["ref"] = "untrusted"
@@ -668,6 +690,7 @@ def publishable_repository(bundle, tmp_path, monkeypatch):
     github.add("actions/artifacts/1/zip", raw)
     github.add(f"attestations/sha256:{digest}", {"attestations": [{"bundle": {"synthetic": "signed elsewhere"}}]})
     github.add("pulls/5/reviews", bundle["reviews"])
+    add_head_push(github, bundle)
     github.add("collaborators/reviewer/permission", {"role_name": "write"})
     github.add("pulls?state=all&head=owner:feature", [bundle["pr"]])
     github.add("issues/5/timeline", [])

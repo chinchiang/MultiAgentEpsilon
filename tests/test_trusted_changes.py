@@ -6,15 +6,22 @@ import sys
 import pytest
 from pathlib import Path
 
+from security_harness.github_trust import HeadPush, parse_time
 from tests.fake_github import FakeGitHub
 
+POLICY = json.loads((Path(__file__).resolve().parents[1] / "security/trust-policy.json").read_text())
+POLICY_REPOSITORY = POLICY["repository"]
 # 目前 main 規則集套用的最後推送核准規則。 / The last-push approval rule the main ruleset currently applies.
 PULL_REQUEST_RULE = {"type": "pull_request", "ruleset_id": 1, "parameters": {"require_last_push_approval": True}}
-PULL = {"state": "open", "head": {"sha": "h" * 40, "ref": "feature"}, "base": {"sha": "b" * 40},
-        "user": {"login": "someone-else"}}
+REPOSITORY = {"id": 1, "full_name": POLICY_REPOSITORY}
+PULL = {"number": 7, "state": "open", "draft": False, "head": {"sha": "h" * 40, "ref": "feature", "repo": REPOSITORY},
+        "base": {"sha": "b" * 40, "ref": "main", "repo": REPOSITORY}, "user": {"login": "someone-else"}}
 # GitHub 伺服器記錄的推送；commit 日期可自報，不能代表推送時間。 / A server-recorded push; commit dates are self-asserted.
 HEAD_PUSH = {"activity_type": "push", "before": "e" * 40, "after": "h" * 40, "timestamp": "2026-10-13T07:00:09Z"}
-POLICY = json.loads((Path(__file__).resolve().parents[1] / "security/trust-policy.json").read_text())
+# 純函式測試用的已確認推送：審查者都不是推送者，核准都在推送之後。 / An established push for the pure-function
+# tests: no reviewer pushed, and every approval comes after it.
+PUSH = HeadPush(parse_time(HEAD_PUSH["timestamp"]), frozenset({"someone-else"}))
+AFTER_PUSH = "2026-10-13T07:02:12Z"
 REVIEWER = POLICY["baseline_reviewers"][-1]
 
 
@@ -64,31 +71,31 @@ def test_new_execution_entrypoints_are_protected_by_default():
 
 
 def test_baseline_approval_binds_independent_reviewer_and_current_head():
-    pr = {"state": "open", "head": {"sha": "head"}, "base": {"sha": "base"}, "user": {"login": "author"}}
-    review = {"id": 1, "state": "APPROVED", "commit_id": "head", "user": {"login": "owner"}}
+    pr = {"state": "open", "draft": False, "head": {"sha": "head"}, "base": {"sha": "base"}, "user": {"login": "author"}}
+    review = {"id": 1, "state": "APPROVED", "commit_id": "head", "user": {"login": "owner"}, "submitted_at": AFTER_PUSH}
     write = {"owner": "write", "author": "admin"}
-    assert approved_review(pr, [review], "head", "base", ["owner"], write)["review_id"] == 1
-    assert approved_review(pr, [review], "changed", "base", ["owner"], write) is None
-    assert approved_review(pr, [review], "head", "new-base", ["owner"], write) is None
-    assert approved_review(pr, [review], "head", "base", ["stranger"], write) is None
-    assert approved_review(pr, [{**review, "user": {"login": "author"}}], "head", "base", ["author"], write) is None
-    assert approved_review(pr, [review, {**review, "id": 2, "state": "DISMISSED"}], "head", "base", ["owner"], write) is None
+    assert approved_review(pr, [review], "head", "base", ["owner"], write, (), PUSH)["review_id"] == 1
+    assert approved_review(pr, [review], "changed", "base", ["owner"], write, (), PUSH) is None
+    assert approved_review(pr, [review], "head", "new-base", ["owner"], write, (), PUSH) is None
+    assert approved_review(pr, [review], "head", "base", ["stranger"], write, (), PUSH) is None
+    assert approved_review(pr, [{**review, "user": {"login": "author"}}], "head", "base", ["author"], write, (), PUSH) is None
+    assert approved_review(pr, [review, {**review, "id": 2, "state": "DISMISSED"}], "head", "base", ["owner"], write, (), PUSH) is None
 
 
 @pytest.mark.parametrize("role", ["read", "triage", None, "custom"])
 def test_listed_reviewer_without_write_access_cannot_approve_baseline(role):
     # GitHub 也記錄唯讀者核准；這些不能解除 guard。 / GitHub records approvals from read-only users; they must not lift the guard.
-    pr = {"state": "open", "head": {"sha": "head"}, "base": {"sha": "base"}, "user": {"login": "author"}}
-    review = {"id": 1, "state": "APPROVED", "commit_id": "head", "user": {"login": "owner"}}
-    assert approved_review(pr, [review], "head", "base", ["owner"], {"owner": role}) is None
-    assert approved_review(pr, [review], "head", "base", ["owner"], {"owner": "maintain"})["reviewer"] == "owner"
+    pr = {"state": "open", "draft": False, "head": {"sha": "head"}, "base": {"sha": "base"}, "user": {"login": "author"}}
+    review = {"id": 1, "state": "APPROVED", "commit_id": "head", "user": {"login": "owner"}, "submitted_at": AFTER_PUSH}
+    assert approved_review(pr, [review], "head", "base", ["owner"], {"owner": role}, (), PUSH) is None
+    assert approved_review(pr, [review], "head", "base", ["owner"], {"owner": "maintain"}, (), PUSH)["reviewer"] == "owner"
 
 
 def test_head_commit_identities_only_remove_approvals():
-    pr = {"state": "open", "head": {"sha": "head"}, "base": {"sha": "base"}, "user": {"login": "author"}}
-    review = {"id": 1, "state": "APPROVED", "commit_id": "head", "user": {"login": "owner"}}
-    assert approved_review(pr, [review], "head", "base", ["owner"], {"owner": "write"}, {"owner"}) is None
-    assert approved_review(pr, [review], "head", "base", ["owner"], {"owner": "write"}, {"web-flow"}) is not None
+    pr = {"state": "open", "draft": False, "head": {"sha": "head"}, "base": {"sha": "base"}, "user": {"login": "author"}}
+    review = {"id": 1, "state": "APPROVED", "commit_id": "head", "user": {"login": "owner"}, "submitted_at": AFTER_PUSH}
+    assert approved_review(pr, [review], "head", "base", ["owner"], {"owner": "write"}, {"owner"}, PUSH) is None
+    assert approved_review(pr, [review], "head", "base", ["owner"], {"owner": "write"}, {"web-flow"}, PUSH) is not None
 
 
 def head_commit_only(_reviewer):
@@ -111,6 +118,7 @@ def guarded_repository(monkeypatch, commits=head_commit_only, role="write", rule
     github.add("pulls/7/commits", commits(REVIEWER))
     github.add("rules/branches/main", rules if rules is not None else [PULL_REQUEST_RULE])
     github.cursor_listing("activity?ref=refs/heads/feature", activity if activity is not None else [HEAD_PUSH])
+    github.add(f"pulls?state=all&head={POLICY_REPOSITORY.split('/')[0]}:feature", [PULL])
     monkeypatch.setattr(guard, "ReadOnlyGitHub", lambda: github)
     return github, lambda: guard.live_approval(7, "h" * 40, "b" * 40)
 
@@ -321,7 +329,9 @@ def test_guard_evidence_names_why_no_approval_counted(monkeypatch, tmp_path, can
     head = candidate.commit({"README.md": "baseline\n"}, "baseline")
     candidate.commit({"README.md": "changed\n"}, "change")
     new_head = candidate.git("rev-parse", "HEAD")
-    github.add("pulls/7", {**PULL, "head": {**PULL["head"], "sha": new_head}, "base": {"sha": head}})
+    pull = {**PULL, "head": {**PULL["head"], "sha": new_head}, "base": {**PULL["base"], "sha": head}}
+    github.add("pulls/7", pull)
+    github.add(f"pulls?state=all&head={POLICY_REPOSITORY.split('/')[0]}:feature", [pull])
     github.add("commits/" + new_head, {"author": {"login": "someone-else"}, "committer": None})
     github.add("pulls/7/commits", [{"sha": new_head, "author": {"login": "someone-else"}, "committer": None}])
     github.cursor_listing("activity?ref=refs/heads/feature", [{**HEAD_PUSH, "after": new_head}])
@@ -332,3 +342,54 @@ def test_guard_evidence_names_why_no_approval_counted(monkeypatch, tmp_path, can
     evidence = json.loads(output.read_text())
     assert (evidence["decision"], evidence["approval_error"]) == ("BLOCK", None)
     assert evidence["approval_refusal"] == "INDEPENDENT_APPROVAL_MISSING"
+
+
+def test_approval_submitted_in_the_same_second_as_the_head_push_does_not_count(monkeypatch):
+    # 推送時間只精確到秒；同一秒送出的核准無法證明在推送之後。 / Push times have one-second resolution; an approval in
+    # the same second cannot be shown to come after the push.
+    _, approve = guarded_repository(monkeypatch, submitted=HEAD_PUSH["timestamp"])
+    assert approve() is None
+
+
+def test_head_ref_outside_the_branch_name_pattern_is_refused(monkeypatch):
+    from security_harness.trusted_publisher import Denied
+    github, approve = guarded_repository(monkeypatch)
+    github.add("pulls/7", {**PULL, "head": {**PULL["head"], "ref": "feature&direction=asc"}})
+    with pytest.raises(Denied, match="^HEAD_REF$"):
+        approve()
+    assert not any("activity" in path for _, path, _ in github.requests)
+
+
+def test_run_identity_must_be_a_positive_decimal_before_the_run_is_read(monkeypatch):
+    # guard 以 GITHUB_RUN_ID 讀 run 來源；格式錯誤不得組進 API 路徑，正確時要綁定此 PR 的 base。 / The guard reads the
+    # run source by GITHUB_RUN_ID; a malformed value never reaches an API path, and a valid one binds this PR's base.
+    pull = {**PULL, "number": 7, "head": {**PULL["head"], "repo": {"id": 1, "full_name": POLICY["repository"]}},
+            "base": {**PULL["base"], "ref": "main", "repo": {"id": 1}}}
+    owner = POLICY["repository"].split("/")[0]
+    github, approve = guarded_repository(monkeypatch)
+    github.add("pulls/7", pull)
+    github.add(f"pulls?state=all&head={owner}:feature", [pull])
+    github.add("issues/7/timeline", [])
+    github.add("actions/runs/42", {"head_sha": "h" * 40, "head_branch": "feature", "head_repository": {"id": 1}})
+    monkeypatch.setenv("GITHUB_RUN_ID", "42")
+    assert approve()["reviewer"] == REVIEWER
+    for invalid in ("042", "4 2", "-1"):
+        monkeypatch.setenv("GITHUB_RUN_ID", invalid)
+        with pytest.raises(ValueError, match="^invalid run identity$"):
+            approve()
+
+
+def test_guard_applies_the_publisher_rules_to_drafts_and_shared_heads(monkeypatch):
+    # 先前 guard 不看 draft 與共用 head，publisher 才擋；兩邊改走同一套規則。 / The guard used to ignore drafts and
+    # shared heads that only the publisher refused; both now apply one rule set.
+    from security_harness.trusted_publisher import Denied
+    github, approve = guarded_repository(monkeypatch)
+    github.add("pulls/7", {**PULL, "draft": True})
+    refusals = []
+    import scripts.check_trusted_changes as guard
+    assert guard.live_approval(7, "h" * 40, "b" * 40, refusals) is None
+    assert refusals == ["PR_NOT_REVIEWABLE"]
+    github.add("pulls/7", PULL)
+    github.add(f"pulls?state=all&head={POLICY_REPOSITORY.split('/')[0]}:feature", [PULL, {**PULL, "number": 8}])
+    with pytest.raises(Denied, match="^SHARED_PR_HEAD$"):
+        approve()
