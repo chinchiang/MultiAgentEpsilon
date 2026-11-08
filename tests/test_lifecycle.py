@@ -135,6 +135,9 @@ def test_worker_decision_without_cleanup_handoff_is_not_published(tmp_path, monk
 def test_worker_report_that_changes_the_plan_is_blocked_and_restored(tmp_path, monkeypatch, tampered):
     # worker 照常完成清理交接並回報 ALLOW；只要它改了計畫，supervisor 就不得採用。 / The worker completes the cleanup
     # handoff and reports ALLOW as usual; if it changed the plan, the supervisor must not adopt it.
+    from security_harness import lifecycle
+    # 這裡只驗證計畫綁定；判定重算另有測試。 / Only plan binding is tested here; recomputing the decision has its own test.
+    monkeypatch.setattr(lifecycle.SecurityRun, 'reproduces_allow', lambda self, data: True)
     audit = AuditRun(tmp_path, 'security')
     planned = {'total_seconds': 600, 'cpu_seconds': 300}
     audit.data['resource_limits'] = dict(planned)
@@ -154,6 +157,39 @@ def test_worker_report_that_changes_the_plan_is_blocked_and_restored(tmp_path, m
         assert audit.data['errors'][-1]['error_type'] == 'PlanMismatch'
     else:
         assert code == 0 and audit.data['decision'] == 'ALLOW' and audit.data['execution'] == 'COMPLETED'
+
+
+def test_worker_allow_that_the_planned_policy_does_not_reproduce_is_blocked(tmp_path):
+    # worker 完成清理交接並寫下 ALLOW，但紀錄只是空殼：supervisor 依計畫政策重算後不得發布 ALLOW。 / The worker
+    # completes the handoff and writes ALLOW over hollow records; recomputed under the planned policy it must not publish.
+    (tmp_path / 'security').mkdir()
+    (tmp_path / 'security/policy.json').write_bytes((ROOT / 'security/policy.json').read_bytes())
+    audit = AuditRun(tmp_path, 'security')
+    audit.data['policy_digest'] = __import__('hashlib').sha256((ROOT / 'security/policy.json').read_bytes()).hexdigest()
+    audit.save()
+    report = audit.output / 'report.json'
+    command = [sys.executable, '-c',
+        'import json,sys; p=sys.argv[1]; d=json.load(open(p)); '
+        'd["records"]=[{"gate": g, "execution": "COMPLETED", "findings": 0} for g in ("G1", "G2", "AUTH")]; '
+        'd.update(execution="AWAITING_CLEANUP", decision="BLOCK", reasons=[], '
+        'pending_decision="ALLOW", pending_execution="RUNNING"); '
+        'json.dump(d, open(p, "w"))', str(report)]
+    assert supervise(tmp_path, audit, command, 10, no_containers) == 1
+    assert audit.data['decision'] == 'BLOCK' and audit.data['execution'] == 'ERROR'
+    assert audit.data['errors'][-1]['error_type'] == 'RuntimeError'
+
+
+def test_symlinked_worker_report_is_closed_as_blocking(tmp_path):
+    audit = AuditRun(tmp_path, 'security')
+    report = audit.output / 'report.json'
+    elsewhere = tmp_path / 'forged.json'
+    command = [sys.executable, '-c',
+        'import json,os,sys; p,o=sys.argv[1:3]; d=json.load(open(p)); '
+        'd.update(execution="AWAITING_CLEANUP", decision="BLOCK", pending_decision="ALLOW", pending_execution="RUNNING"); '
+        'json.dump(d, open(o, "w")); os.remove(p); os.symlink(o, p)', str(report), str(elsewhere)]
+    assert supervise(tmp_path, audit, command, 10, no_containers) == 1
+    assert audit.data['decision'] == 'BLOCK'
+    assert {'stage': 'supervisor', 'error_type': 'OSError'} in audit.data['errors']
 
 
 def test_signal_while_closing_the_evidence_still_closes_it_as_blocking(tmp_path):
@@ -328,20 +364,27 @@ def test_janitor_keeps_latest_pointer_on_the_newer_run(tmp_path, monkeypatch):
 class FakeDocker:
     """Docker CLI 邊界的假實作，只認得 janitor 需要的 ps／inspect／rm。 / Fake Docker CLI boundary for the janitor's ps/inspect/rm."""
 
-    def __init__(self, *containers, rm_fails=False):
+    def __init__(self, *containers, rm_fails=False, vanished=()):
         self.containers = {c['Id']: c for c in containers}
         self.removed = []
         self.rm_fails = rm_fails
+        # 出現在 ps 但 inspect 前已被移除的容器。 / Containers listed by ps but removed before inspect.
+        self.vanished = list(vanished)
 
     def __call__(self, *args, check=True, timeout=45):
+        code = 0
         if args[:2] == ('ps', '-aq') and 'label=epsilon.isolated=true' in args:
             # 與 docker 相同，指定 epsilon.run 標籤時只列出該次執行的容器。 / Like docker, an epsilon.run label filter
             # lists only that run's containers.
             runs = [a.removeprefix('label=epsilon.run=') for a in args if a.startswith('label=epsilon.run=')]
             out = ''.join(i + '\n' for i, c in self.containers.items()
                           if not runs or (c['Config']['Labels'] or {}).get('epsilon.run') in runs)
+            out += ''.join(i + '\n' for i in self.vanished if not runs)
         elif args[0] == 'inspect':
-            out = json.dumps([self.containers[i] for i in args[1:]])
+            # 與 docker 相同：找不到的物件讓結束碼為 1，找得到的仍輸出。 / Like docker: a missing object makes the exit
+            # code 1 while the found ones are still printed.
+            out = json.dumps([self.containers[i] for i in args[1:] if i in self.containers])
+            code = 1 if any(i not in self.containers for i in args[1:]) else 0
         elif args[:2] == ('rm', '--force'):
             if self.rm_fails:
                 raise subprocess.CalledProcessError(1, args)
@@ -349,7 +392,9 @@ class FakeDocker:
             out = ''
         else:
             pytest.fail('unexpected docker call: ' + ' '.join(args))
-        return subprocess.CompletedProcess(args, 0, out, '')
+        if code and check:
+            raise subprocess.CalledProcessError(code, args)
+        return subprocess.CompletedProcess(args, code, out, '')
 
 
 def container(identifier, run_id, minutes_old):
@@ -382,6 +427,29 @@ def test_janitor_keeps_an_old_container_of_a_live_run(tmp_path, monkeypatch):
     assert sweep_stale(tmp_path) == []
     assert fake.removed == []
     remove_run(tmp_path, audit.data['run_id'])
+
+
+def test_container_removed_between_listing_and_inspection_does_not_fail_the_sweep(tmp_path, monkeypatch):
+    # 另一個執行在 ps 與 inspect 之間移除了自己的容器；其餘孤兒仍要清掉。 / Another run removes its own container
+    # between ps and inspect; the remaining orphan must still be removed.
+    fake = FakeDocker(container('orphan', 'e' * 32, minutes_old=11), vanished=['gone'])
+    monkeypatch.setattr(isolation, 'docker', fake)
+    assert sweep_stale(tmp_path) == []
+    assert fake.removed == ['orphan']
+
+
+def test_unparsable_inspect_output_still_fails_the_sweep(tmp_path, monkeypatch):
+    def broken(*args, check=True, timeout=45):
+        if args[:2] == ('ps', '-aq'):
+            return subprocess.CompletedProcess(args, 0, 'x\n', '')
+        if args[0] == 'inspect':
+            return subprocess.CompletedProcess(args, 1, '', 'Cannot connect to the Docker daemon')
+        pytest.fail('unexpected docker call: ' + ' '.join(args))
+    from security_harness.janitor import SweepIncomplete
+    monkeypatch.setattr(isolation, 'docker', broken)
+    with pytest.raises(SweepIncomplete) as raised:
+        sweep_stale(tmp_path)
+    assert raised.value.failures == [{'containers': 'epsilon.isolated', 'error_type': 'ValueError'}]
 
 
 def test_janitor_reports_a_failed_container_sweep_without_losing_reaped_runs(tmp_path, monkeypatch):

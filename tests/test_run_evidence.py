@@ -160,3 +160,42 @@ def test_ci_provenance_is_built_once_for_writer_and_self_check():
     assert value["base_sha"] == value["candidate_sha"] and len(value["base_sha"]) == 40
     assert value["pr_number"] == 7 and value["run_id"] == 20
     assert check_publishable_evidence.ci_provenance is write_ci_provenance.provenance
+
+
+@pytest.mark.parametrize("stdout, expected", [
+    ('{"error_type": "IsolationMismatch", "failed_checks": ["network", "tmpfs"]}',
+     {"error_type": "IsolationMismatch", "failed_checks": ["network", "tmpfs"]}),
+    ('{"error_type": "CalledProcessError", "failed_checks": []}', {"error_type": "CalledProcessError", "failed_checks": []}),
+    # 夾帶例外文字或 DSN 的欄位一律丟棄。 / Anything carrying exception text or a DSN is dropped.
+    ('{"error_type": "postgresql://user:pw@host", "failed_checks": []}', {"error_type": "Unknown", "failed_checks": []}),
+    ('{"error_type": "OSError", "failed_checks": ["Permission denied: /secret"]}', {"error_type": "OSError", "failed_checks": []}),
+    ('Traceback (most recent call last)', {"error_type": "Unknown", "failed_checks": []}),
+    ('["IsolationMismatch"]', {"error_type": "Unknown", "failed_checks": []}),
+    ('{"error_type": "A", "failed_checks": []}' + " " * 5000, {"error_type": "Unknown", "failed_checks": []}),
+])
+def test_worker_failure_keeps_only_identifier_shaped_fields(stdout, expected):
+    assert run_security.worker_failure(stdout) == expected
+
+
+def test_failed_authorization_worker_records_its_error_type_and_failed_checks(tmp_path, monkeypatch):
+    monkeypatch.setattr(run_security, "ROOT", fixture_root(tmp_path))
+    audit = AuditRun(tmp_path, "security")
+    run_security.plan(audit, tmp_path, "fixed")
+    monkeypatch.setattr(run_security, "verify", lambda *a: ["synthetic"])
+    monkeypatch.setattr(run_security, "dependency_scan", lambda *a: {"findings": [], "sbom": {}})
+    monkeypatch.setattr(run_security, "scan", lambda *a, **k: {"targets": 1, "findings": []})
+    monkeypatch.setattr(isolation, "cleanup_run", lambda *a: None)
+    failure = json.dumps({"error_type": "IsolationMismatch", "failed_checks": ["mounts"]})
+    with patch.object(run_security.subprocess, "run", return_value=subprocess.CompletedProcess([], 1, failure, "")):
+        assert run_security.main(audit) == 1
+    record = report(tmp_path)["records"][-1]
+    assert record["gate"] == "AUTH" and record["execution"] == "ERROR"
+    assert record["detail"] == "AuthorizationWorkerFailed"
+    assert record["worker_failure"] == {"error_type": "IsolationMismatch", "failed_checks": ["mounts"]}
+
+
+def test_isolation_worker_reports_failed_checks_as_json(tmp_path):
+    process = subprocess.run([sys.executable, "-I", str(ROOT / "scripts/isolation_worker.py"), str(tmp_path), "bogus", "x"],
+                             capture_output=True, text=True, timeout=30)
+    assert process.returncode == 1
+    assert json.loads(process.stdout) == {"error_type": "ValueError", "failed_checks": []}

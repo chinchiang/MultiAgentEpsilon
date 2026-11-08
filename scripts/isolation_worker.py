@@ -13,5 +13,6 @@ if __name__ == "__main__":
     try:
         print(json.dumps(run_isolated(Path(sys.argv[1]), sys.argv[2], sys.argv[3])))
     except Exception as exc:
-        print(type(exc).__name__, file=sys.stderr)
+        # 只輸出例外型別與不符的檢查名稱，不輸出例外文字。 / Only the exception type and failed check names, never its text.
+        print(json.dumps({"error_type": type(exc).__name__, "failed_checks": getattr(exc, "failed", [])}))
         raise SystemExit(1)

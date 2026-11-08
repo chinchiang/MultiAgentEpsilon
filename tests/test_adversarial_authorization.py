@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 from security_harness.isolation import run_isolated
-from security_harness.results import decide, result, validate_cases
+from security_harness.results import decide, result, seeded_defects, validate_cases
 
 ROOT = Path(__file__).resolve().parents[1]
 POLICY = json.loads((ROOT / "security/policy.json").read_text())
@@ -110,12 +110,16 @@ MUTATIONS.update({
         'permitted(row, user)):\n'
         '            raise HTTPException(404, "item not found", headers={"X-Item": row["value"]} if row else None)\n'
         '        return row'),
+    # 只在收到 variant="fixed" 時表現正確；正式呼叫（不帶 variant）走的是有漏洞的預設路徑。 /
+    # Behaves only when told variant="fixed"; the production call (no variant) takes the vulnerable default.
+    'variant_gated_backdoor': ('variant: str = "fixed"', 'variant: str = "vulnerable"'),
     'admin_cross_tenant_delete': (
         "DELETE FROM items WHERE id=%s AND tenant=%s AND (owner=%s OR %s='admin') RETURNING *",
         "DELETE FROM items WHERE id=%s AND ((tenant=%s AND owner=%s) OR %s='admin') RETURNING *"),
 })
 
 EXPECTED = {
+    'variant_gated_backdoor': seeded_defects(POLICY['gate_contracts']['AUTH']),
     'expired_session_accepted': {'expired session read denied', 'expired session logout denied',
                                  'expired session delete denied', 'expired session write denied',
                                  'expired session export denied'},

@@ -56,6 +56,16 @@ def run_flags(name, run_id, verb="run"):
     return flags
 
 
+class IsolationMismatch(RuntimeError):
+    """Docker 實際套用的隔離設定與要求不符；保留不符的檢查名稱供證據記錄。
+
+Docker applied isolation that differs from what was requested; keeps the failed check names for the evidence."""
+
+    def __init__(self, failed):
+        super().__init__("isolation configuration mismatch: " + ",".join(failed))
+        self.failed = list(failed)
+
+
 def verify_container(data, *, user, image_id=None, image_ref=None, mounts=None, tmpfs=None):
     """容器啟動前核對 Docker 實際套用的隔離設定，任一不符即拒絕。
 
@@ -85,7 +95,7 @@ mounts lists (type, source, destination, writable); tmpfs maps destination to op
     }
     failed = sorted(k for k, ok in checks.items() if not ok)
     if failed:
-        raise RuntimeError("isolation configuration mismatch: " + ",".join(failed))
+        raise IsolationMismatch(failed)
     return {"network": host["NetworkMode"], "readonly_root": host["ReadonlyRootfs"], "user": config["User"],
             "image_id": data["Image"], "mount_destinations": sorted(m["Destination"] for m in data["Mounts"]),
             "verified": sorted(checks)}
@@ -185,8 +195,14 @@ def run_isolated(candidate: Path, variant="fixed", run_id=None) -> dict:
                 conn.execute("GRANT SELECT, UPDATE, DELETE ON items TO epsilon_app")
                 conn.execute("GRANT SELECT, INSERT, DELETE ON sessions TO epsilon_app")
             settings = work / "fixture.json"
-            settings.write_text(json.dumps({"dsn": f"postgresql://epsilon_app:{app_password}@/epsilon_fixture?host=/run/epsilon-db",
-                                            "schema": schema, "variant": variant}))
+            fixture = {"dsn": f"postgresql://epsilon_app:{app_password}@/epsilon_fixture?host=/run/epsilon-db",
+                       "schema": schema}
+            # 只有內建缺陷自我測試才注入 variant；真實候選以正式呼叫方式啟動，不能依 variant 藏後門。 /
+            # Only the seeded-defect self-test injects a variant; a real candidate starts exactly as it would in production,
+            # so it cannot keep a backdoor behind the variant argument.
+            if variant == "vulnerable":
+                fixture["variant"] = variant
+            settings.write_text(json.dumps(fixture))
             settings.chmod(0o444)
             app_tmpfs = {"/tmp": "rw,uid=10001,gid=10001,size=16m"}
             docker(*run_flags(names[1], run_id, "create"), "--user", "10001:10001", "--tmpfs", "/tmp:" + app_tmpfs["/tmp"],
