@@ -5,6 +5,7 @@ Fresh run-bound evidence, mandatory case IDs and fail-closed early errors."""
 import argparse
 import hashlib
 import json
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -36,6 +37,36 @@ def argument_parser():
 
 def sha256(data):
     return hashlib.sha256(data).hexdigest()
+
+
+class AuthorizationWorkerFailed(RuntimeError):
+    def __init__(self, failure):
+        super().__init__("authorization worker failed")
+        self.evidence = {"worker_failure": failure}
+
+
+def worker_failure(stdout: str) -> dict:
+    """把 isolation worker 的失敗摘要限定為識別字與檢查名稱；其他內容一律丟棄。
+
+Keep only an identifier-shaped error type and check names from the isolation worker's
+    failure summary; anything else is dropped rather than copied into evidence."""
+    unknown = {"error_type": "Unknown", "failed_checks": []}
+    if len(stdout) > 4096:
+        return unknown
+    try:
+        data = json.loads(stdout)
+    except ValueError:
+        return unknown
+    if not isinstance(data, dict):
+        return unknown
+    error_type = data.get("error_type")
+    checks = data.get("failed_checks")
+    if not isinstance(error_type, str) or not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]{0,63}", error_type):
+        return unknown
+    if (not isinstance(checks, list) or len(checks) > 32
+            or not all(isinstance(c, str) and re.fullmatch(r"[a-z_]{1,32}", c) for c in checks)):
+        checks = []
+    return {"error_type": error_type, "failed_checks": checks}
 
 
 def plan(audit, candidate, variant):
@@ -123,7 +154,7 @@ def main(audit, defer_final=False):
                 finally:
                     cleanup_run(audit.data["run_id"])
                 if process.returncode != 0:
-                    raise RuntimeError("authorization worker failed")
+                    raise AuthorizationWorkerFailed(worker_failure(process.stdout))
                 worker = json.loads(process.stdout)
                 cases = worker["cases"]
                 validate_cases(cases, policy["gate_contracts"]["AUTH"])
@@ -135,7 +166,7 @@ def main(audit, defer_final=False):
                           isolation=worker["isolation"])
             except Exception as exc:
                 audit.add("AUTH", "TIMEOUT" if isinstance(exc, subprocess.TimeoutExpired) else "ERROR",
-                          "test", 0, 0, type(exc).__name__)
+                          "test", 0, 0, type(exc).__name__, **getattr(exc, "evidence", {}))
         audit.stage("decision")
         audit.data.update(decide(audit.data["records"], policy, audit.data["subject_digest"],
                                 audit.data["policy_digest"], run_id=audit.data["run_id"]))

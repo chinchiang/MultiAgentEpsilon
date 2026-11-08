@@ -95,7 +95,7 @@ python3 -I scripts/dev_db.py stop
 
 目前管理 API 的實際阻礙、獨立檢查來源需求及遠端負向驗收步驟，見[遠端合併保護設定與驗收缺口](remote-merge-protection.zh-TW.md)。
 
-G2 現在也掃描 HEAD 可達提交的訊息、作者與提交者中繼資料，以及所有標籤名稱與附註標籤內容；標籤指向但 HEAD 不可達的檔案歷史仍不在範圍。原始中繼資料不寫入證據，超過清冊或位元組限制時保持 BLOCK。Git manifest 只使用 Git 儲存的擁有者執行權限分類，避免 checkout umask 不同造成摘要誤差。
+G2 現在也掃描 HEAD 可達提交的訊息、作者與提交者中繼資料，以及所有標籤名稱與附註標籤內容；標籤指向但 HEAD 不可達的檔案歷史仍不在範圍。只掃 HEAD 歷史是刻意的設計：會被合併的只有 HEAD；CI 取回的候選帶有其他分支，若一併掃描，別的 PR 分支中的秘密會擋下這個 PR，而那些分支在自己的 PR 中會被掃描。原始中繼資料不寫入證據，超過清冊或位元組限制時保持 BLOCK。Git manifest 只使用 Git 儲存的擁有者執行權限分類，避免 checkout umask 不同造成摘要誤差。
 
 Gitfile（linked worktree 或部分 submodule 使用的 `.git` 文字檔）會在檢查候選儲存庫 時提前拒絕；這是目前輸入格式限制，不是掃描完成或容器執行失敗。請使用一般 clone 的實體 `.git` 目錄，不接受可指向任意 host 路徑的 gitfile。跨開機清理先比較 boot ID，程序登記持久化前的子程序只能等待握手，不能執行候選工作。
 
@@ -187,4 +187,4 @@ Isolation regressions attempt writes to read-only source/entrypoint, reads of ev
 
 Candidate lock must match verified runtime lock; arbitrary candidate dependency images are unsupported. Protected diffs disable rename collapsing and check both old/new paths. Schema 3 uses versioned per-file manifests. See [remote gaps](remote-merge-protection.zh-TW.md#en).
 
-G2 also scans HEAD-reachable commit messages/authors/committers and all tag names/annotations, but not file history reachable only from tags. Raw metadata is not retained; limits block. Manifest executable classification follows Git owner-executable bits, not checkout umask. Linked-worktree/submodule gitfiles are an explicit unsupported input, not completed scanning or runtime failure; use a normal clone with real .git. Cross-boot cleanup checks boot ID first, and registered children wait for persistent-registration handshake.
+G2 also scans HEAD-reachable commit messages/authors/committers and all tag names/annotations, but not file history reachable only from tags. Scanning HEAD history only is deliberate: HEAD is what merges; the CI candidate clone carries other branches, and scanning them would block this PR on another PR's secrets, which that PR's own run scans. Raw metadata is not retained; limits block. Manifest executable classification follows Git owner-executable bits, not checkout umask. Linked-worktree/submodule gitfiles are an explicit unsupported input, not completed scanning or runtime failure; use a normal clone with real .git. Cross-boot cleanup checks boot ID first, and registered children wait for persistent-registration handshake.

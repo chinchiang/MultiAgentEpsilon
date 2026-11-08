@@ -4,6 +4,7 @@
 An arbitrary error is not proof that the seeded defect was detected."""
 import argparse
 import json
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -33,16 +34,29 @@ Exactly the seeded AUTH failures from a run that itself completed cleanly."""
             and failed == expected)
 
 
+def reported_run(stdout: str):
+    """取 run_security 自己最後回報的報告路徑，不經可被其他執行移動的 latest.txt。
+
+The run ID from the report path run_security itself printed last, instead of
+    latest.txt, which a concurrent run or a janitor checkpoint can move."""
+    for line in reversed(stdout.splitlines()):
+        match = re.fullmatch(r"(?:ALLOW|BLOCK): (.+)/([0-9a-f-]{36})/report\.json", line)
+        if match:
+            return match.group(2) if Path(match.group(1)) == ROOT / "artifacts" else None
+    return None
+
+
 def main(argv=None):
     argparse.ArgumentParser(description=__doc__).parse_args(argv)
     contract = json.loads((ROOT / "security/policy.json").read_text())["gate_contracts"]["AUTH"]
     expected = seeded_defects(contract)
-    latest = ROOT / "artifacts/latest.txt"
-    previous = latest.read_text().strip() if latest.exists() else None
-    run = subprocess.run([sys.executable, "-I", str(ROOT / "scripts/run_security.py"), "--variant", "vulnerable"], cwd=ROOT)
-    current = latest.read_text().strip()
-    report = json.loads((ROOT / "artifacts" / current / "report.json").read_text())
-    if current == previous or not seeded_block_verified(report, contract, run.returncode):
+    run = subprocess.run([sys.executable, "-I", str(ROOT / "scripts/run_security.py"), "--variant", "vulnerable"],
+                         cwd=ROOT, capture_output=True, text=True)
+    sys.stdout.write(run.stdout)
+    sys.stderr.write(run.stderr)
+    run_id = reported_run(run.stdout)
+    report = json.loads((ROOT / "artifacts" / run_id / "report.json").read_text()) if run_id else {}
+    if report.get("run_id") != run_id or not seeded_block_verified(report, contract, run.returncode):
         raise SystemExit(f"Seeded defect acceptance FAILED: need exactly the {len(expected)} seeded authorization "
                          "failures from a cleanly completed run")
     print(f"Expected BLOCK verified: exactly the {len(expected)} seeded authorization failures, no adapter errors")
