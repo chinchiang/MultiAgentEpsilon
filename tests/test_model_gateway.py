@@ -659,3 +659,15 @@ def test_output_budget_verification_is_explicit(usage, verified):
     gateway = Gateway(Limits(max_calls=1, reserved_output_tokens=32))
     assert asyncio.run(gateway.generate(Reporting(), REQUEST)) is not None
     assert gateway.evidence[-1]["output_budget_verified"] is verified
+
+
+@pytest.mark.parametrize("region,allowed", [("us-east-1", True), ("ap-southeast-1", True), ("cn-north-1", False),
+                                            ("cn-northwest-1", False), ("us-gov-west-1", False), ("us-isob-east-1", False),
+                                            ("us-iso-east-1", False)])
+def test_bedrock_refuses_china_and_government_partitions(region, allowed):
+    if allowed:
+        assert BedrockAdapter("anthropic.claude-synthetic-v1", region, object()).region == region
+    else:
+        with pytest.raises(ModelError) as raised:
+            BedrockAdapter("anthropic.claude-synthetic-v1", region, object())
+        assert raised.value.code == "CONFIGURATION"

@@ -43,3 +43,26 @@ def test_configuration_failure_without_model_identity_cannot_be_pooled(tmp_path,
     assert report['analysis']['provider_metrics']['lmstudio']['positive_miss_rate_all'] == 1
     with pytest.raises(ValueError, match='missing model identity'):
         compare([path])
+
+
+@pytest.mark.parametrize("successes,total,low,high", [(0, 10, 0.0, 0.2775), (5, 10, 0.2366, 0.7634),
+                                                      (10, 10, 0.7225, 1.0), (1, 1, 0.2065, 1.0)])
+def test_wilson_interval_matches_reference_values(successes, total, low, high):
+    from security_harness.llm.comparison import wilson
+    assert wilson(successes, total) == {'low': low, 'high': high, 'n': total}
+
+
+def test_empty_denominator_has_no_interval():
+    from security_harness.llm.comparison import wilson
+    assert wilson(0, 0) is None
+
+
+def test_every_pooled_rate_carries_its_interval(tmp_path):
+    _, a = collected(tmp_path / 'a', case_ids=['B01', 'B02'])
+    _, b = collected(tmp_path / 'b', case_ids=['B03', 'B04'])
+    result = compare([a, b])
+    for metrics in result['provider_metrics'].values():
+        assert set(metrics['intervals_95']) == {'coverage', 'false_positive_rate_valid',
+                                                'false_negative_rate_valid', 'positive_miss_rate_all'}
+        coverage = metrics['intervals_95']['coverage']
+        assert coverage['n'] == metrics['planned'] and coverage['low'] <= metrics['coverage'] <= coverage['high']
