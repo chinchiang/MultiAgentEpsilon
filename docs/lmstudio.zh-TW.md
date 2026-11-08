@@ -32,8 +32,8 @@ HTTP 只允許字面 `127.0.0.1` 或 `[::1]`、明確的 1024–65535 連接埠�
 # 固定合成 ACK，不傳送專案原始碼。 / Fixed synthetic ACK, no project source.
 .venv/bin/python -I scripts/model_smoke.py --live --provider lmstudio
 
-# 先做兩案單模型；再做地端家族同批比較（推理模型用 2048，兩家各一案共 4096）。
-# Two local cases, then an on-prem family batch (2048 for reasoning models; one case each, 4096 in total).
+# 先做兩案單模型；再做地端家族同批比較（推理模型用 2048，兩家各一案共 4096）。單次 30 秒期限下本機 GPU 常來不及，見盲審文件。
+# Two local cases, then an on-prem family batch (2048 for reasoning models; one case each, 4096 in total). A local GPU often misses the 30 s per-call deadline; see the blind-review doc.
 .venv/bin/python -I scripts/model_review.py --live --provider lmstudio --case B13 --case B14 --output-tokens 1024
 .venv/bin/python -I scripts/model_review.py --live --provider glm --provider lmstudio --case B13 --output-tokens 2048
 

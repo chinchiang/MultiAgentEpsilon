@@ -235,7 +235,10 @@ class BedrockAdapter:
     def __init__(self, model, region, cli=None):
         # 可為模型 ID、推論設定檔 ID 或 ARN；不可由 SSO 角色猜測。 / May be a model ID, inference profile ID or ARN; never infer it from SSO role.
         if (not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:/-]{0,2047}", model) or
-                not re.fullmatch(r"[a-z]{2}(?:-[a-z]+)+-[0-9]", region)):
+                not re.fullmatch(r"[a-z]{2}(?:-[a-z]+)+-[0-9]", region) or
+                # 中國與政府隔離分區另有帳號與合規邊界，不在本試點授權範圍。 / China and government-isolated partitions
+                # have separate accounts and compliance boundaries outside this pilot's authorization.
+                region.startswith(("cn-", "us-gov-", "us-iso"))):
             raise ModelError("CONFIGURATION")
         self.model, self.region, self.cli = model, region, cli or AwsCLI()
         self.family = "claude" if "anthropic.claude" in model else "unverified"

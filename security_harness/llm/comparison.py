@@ -1,6 +1,7 @@
 """跨批次參考統計；Cross-batch advisory statistics with explicit comparability checks."""
 from collections import Counter
 import hashlib
+import math
 import re
 import uuid
 
@@ -8,6 +9,16 @@ from .benchmark_score import summarize, ratio, reference
 from .lifecycle import REPORT_LIMIT
 from .transport import strict_json
 from ..results import read_regular
+
+
+def wilson(successes, total, z=1.959963984540054):
+    """95% Wilson 分數區間；分母為 0 時為 None。 / The 95% Wilson score interval; None for an empty denominator."""
+    if not total:
+        return None
+    p = successes / total
+    centre = (p + z * z / (2 * total)) / (1 + z * z / total)
+    half = z * math.sqrt(p * (1 - p) / total + z * z / (4 * total * total)) / (1 + z * z / total)
+    return {'low': round(max(0.0, centre - half), 4), 'high': round(min(1.0, centre + half), 4), 'n': total}
 
 
 def compare(paths):
@@ -70,6 +81,13 @@ def compare(paths):
                  false_positive_rate_valid=ratio(m['fp'], m['fp'] + m['tn']),
                  false_negative_rate_valid=ratio(m['fn'], m['fn'] + m['tp']),
                  positive_miss_rate_all=ratio(positives - m['tp'], positives))
+        # 每個比率附 95% Wilson 區間與分母；小樣本的點估計不能單獨解讀。 / Each rate carries a 95% Wilson interval and
+        # its denominator; a point estimate from a small sample cannot be read alone.
+        m['intervals_95'] = {
+            'coverage': wilson(m['classified'], m['planned']),
+            'false_positive_rate_valid': wilson(m['fp'], m['fp'] + m['tn']),
+            'false_negative_rate_valid': wilson(m['fn'], m['fn'] + m['tp']),
+            'positive_miss_rate_all': wilson(positives - m['tp'], positives)}
         metrics[provider] = m
     return {'schema_version': 1, 'advisory_only': True, 'security_gate_effect': 'NONE',
             'bias_reduction': 'NOT_ESTABLISHED', 'identity_verified': False,
