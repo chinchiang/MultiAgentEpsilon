@@ -26,6 +26,10 @@ excluded: identities that touched the head (run actors, commit author/committer)
         if review["state"] in ("APPROVED", "DISMISSED", "CHANGES_REQUESTED"):
             latest[review["user"]["login"]] = review
     allowed = []
+    for login in [login for login in latest if is_bot(login)]:
+        # bot 不是可查權限的協作者，也不會出現在審查者名單；它要求修改時仍阻擋。 / A bot is no collaborator whose
+        # permission can be read and never a listed reviewer; its change request still blocks.
+        need(latest.pop(login)["state"] != "CHANGES_REQUESTED", "CHANGES_REQUESTED")
     for login, review in latest.items():
         role = permissions.get(login)
         need(role in ("read", "triage", "write", "maintain", "admin"), "REVIEW_PERMISSION_UNKNOWN")
@@ -36,6 +40,10 @@ excluded: identities that touched the head (run actors, commit author/committer)
             allowed.append(review["id"])
     need(bool(allowed), "INDEPENDENT_APPROVAL_MISSING")
     return allowed
+
+
+def is_bot(login):
+    return isinstance(login, str) and login.endswith("[bot]")
 
 
 def identities(*people):
@@ -107,7 +115,7 @@ Accounts GitHub attributes any PR commit to. Self-asserted, so only ever used to
     return set().union(*(identities(c.get("author"), c.get("committer")) for c in commits))
 
 
-def approved_review(pr, reviews, head, base, reviewers, permissions, excluded=()):
+def approved_review(pr, reviews, head, base, reviewers, permissions, excluded=(), refusals=None):
     """只採計清單內具寫入權限、非作者或已知推送者的核准；排除名單只能移除核准，不能新增授權。
 
 An approval counts only from a listed, write-capable reviewer who is not the
@@ -116,7 +124,11 @@ An approval counts only from a listed, write-capable reviewer who is not the
         return None
     try:
         ids = validate_review(pr, reviews, permissions, {"reviewers": reviewers}, set(excluded))
-    except Denied:
+    except Denied as exc:
+        # 沒有核准仍回傳 None，但留下固定診斷碼，讓證據說明為何擋下。 / No approval still returns None, but the fixed
+        # diagnostic code is kept so the evidence says why it blocked.
+        if refusals is not None:
+            refusals.append(str(exc))
         return None
     review = next(r for r in reviews if r["id"] == ids[0])
     return {"review_id": review["id"], "reviewer": review["user"]["login"], "commit_id": head}
@@ -153,7 +165,7 @@ class GitHubTrust:
 
     def _permissions(self, reviews):
         logins = {r['user']['login'] for r in reviews
-                  if r['state'] in ('APPROVED', 'DISMISSED', 'CHANGES_REQUESTED')}
+                  if r['state'] in ('APPROVED', 'DISMISSED', 'CHANGES_REQUESTED') and not is_bot(r['user']['login'])}
         return {login: self._reader.get(f"collaborators/{urllib.parse.quote(login, safe='')}/permission")['role_name']
                 for login in logins}
 
@@ -186,9 +198,13 @@ class GitHubTrust:
         reviews = self._reader.items(f"pulls/{number}/reviews")
         return validate_review(pr, reviews, self._permissions(reviews), {'reviewers': reviewers}, excluded)
 
-    def baseline_approval(self, number, head, base, reviewers, run_id=None):
+    def baseline_approval(self, number, head, base, reviewers, run_id=None, refusals=None):
         reader = self._reader
         pr = reader.get(f"pulls/{number}")
+        # fork 的分支不在 base repo 的 activity 裡，無法確認推送時間與推送者；明確拒絕。 / A fork's branch is not in the
+        # base repository's activity, so its push time and pusher cannot be established; refuse explicitly.
+        if (pr["head"].get("repo") or {}).get("id") != (pr["base"].get("repo") or {}).get("id"):
+            raise Denied("FORK_PR_UNSUPPORTED")
         # 提交身分可自報，真正擋下審查者自我核准的是規則集的最後推送核准；規則被關掉時不得放行。 / Commit identities
         # are self-asserted, so the ruleset's last-push approval is what stops self-approval; refuse when it is off.
         rules = reader.items("rules/branches/main")
@@ -205,11 +221,10 @@ class GitHubTrust:
         # head 的推送；不在第一頁即視為不明。 / Activity is cursor-paged and ignores page, so read only the newest-first
         # first page. Every activity moves the branch, so while the head is unchanged the newest one is the head push;
         # a head push beyond the first page counts as unknown.
-        pushes = [parse_time(a["timestamp"]) for a in reader.get(f"activity?ref=refs/heads/{ref}&direction=desc")
-                  if a.get("after") == head]
-        if not pushes:
+        head_pushes = [a for a in reader.get(f"activity?ref=refs/heads/{ref}&direction=desc") if a.get("after") == head]
+        if not head_pushes:
             raise Denied("LAST_PUSH_UNKNOWN")
-        pushed = max(pushes)
+        pushed = max(parse_time(a["timestamp"]) for a in head_pushes)
         reviews = [{**r, "state": "DISMISSED"} if r["state"] == "APPROVED" and parse_time(r["submitted_at"]) <= pushed
                    else r for r in reviews]
         candidates = {r["user"]["login"] for r in reviews
@@ -221,11 +236,13 @@ class GitHubTrust:
             permissions[login] = reader.get(f"collaborators/{login}/permission")["role_name"]
         # 提交身分可自報，因此只能排除審查者， / Commit identities are self-asserted, so they are used only to exclude reviewers;
         # 真實推送者仍由規則集原生最後推送核准檢查判定。 / the ruleset's native last-push approval remains the authoritative pusher check.
-        excluded = self._commit_identities(number, head)
+        # 伺服器記錄的 head 推送者不能核准；改標題、重開或按重跑的人只是 run actor，不是推送者，核准仍有效。 / The
+        # server-recorded pusher of the head cannot approve. Whoever edited the title, reopened or re-ran is only a run
+        # actor, not a pusher, and their approval still counts.
+        excluded = self._commit_identities(number, head) | identities(*(a.get("actor") for a in head_pushes))
         if run_id:
             if not re.fullmatch(r"[1-9][0-9]*", run_id):
                 raise ValueError("invalid run identity")
             run = reader.get(f"actions/runs/{run_id}")
-            excluded |= identities(run.get("actor"), run.get("triggering_actor"))
             self.run_base(pr, "main").validate(run)
-        return approved_review(pr, reviews, head, base, reviewers, permissions, excluded)
+        return approved_review(pr, reviews, head, base, reviewers, permissions, excluded, refusals)

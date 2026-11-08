@@ -273,3 +273,62 @@ def test_other_failures_are_recorded_by_type_without_their_text(monkeypatch, tmp
     monkeypatch.setattr(guard, "ROOT", tmp_path)
     evidence = run_guard_command(monkeypatch, tmp_path, candidate, FakeGitHub(POLICY["repository"]))
     assert (evidence["decision"], evidence["approval_error"]) == ("BLOCK", "ValueError")
+
+
+def test_fork_pull_request_is_refused_with_its_own_code(monkeypatch):
+    # fork 的分支不在 base repo 的 activity；先前只會以不明的 LAST_PUSH_UNKNOWN 擋下。 / A fork's branch is not in the
+    # base repository's activity; it used to block only with an unclear LAST_PUSH_UNKNOWN.
+    from security_harness.trusted_publisher import Denied
+    github, approve = guarded_repository(monkeypatch)
+    github.add("pulls/7", {**PULL, "head": {**PULL["head"], "repo": {"id": 2}}, "base": {**PULL["base"], "repo": {"id": 1}}})
+    with pytest.raises(Denied, match="^FORK_PR_UNSUPPORTED$"):
+        approve()
+
+
+@pytest.mark.parametrize("state,counts", [("APPROVED", True), ("COMMENTED", True), ("DISMISSED", True),
+                                          ("CHANGES_REQUESTED", False)])
+def test_bot_review_neither_blocks_silently_nor_counts(monkeypatch, state, counts):
+    # bot 沒有可查的協作者權限；先前任何 bot 審查都讓核准變成 REVIEW_PERMISSION_UNKNOWN。 / A bot has no collaborator
+    # permission to read; any bot review used to turn the approval into REVIEW_PERMISSION_UNKNOWN.
+    github, approve = guarded_repository(monkeypatch)
+    github.add("pulls/7/reviews", [
+        {"id": 3, "state": "APPROVED", "commit_id": "h" * 40, "user": {"login": REVIEWER},
+         "submitted_at": "2026-10-13T07:02:12Z"},
+        {"id": 4, "state": state, "commit_id": "h" * 40, "user": {"login": "review-helper[bot]"},
+         "submitted_at": "2026-10-13T07:03:00Z"}])
+    if counts:
+        assert approve() is not None
+    else:
+        refusals = []
+        import scripts.check_trusted_changes as guard
+        assert guard.live_approval(7, "h" * 40, "b" * 40, refusals) is None
+        assert refusals == ["CHANGES_REQUESTED"]
+
+
+def test_head_pusher_cannot_approve_even_when_commits_name_someone_else(monkeypatch):
+    # commit 作者可自報；伺服器記錄的推送者才是實際推送的人。 / Commit authors are self-asserted; the server-recorded
+    # pusher is who actually pushed.
+    _, approve = guarded_repository(monkeypatch, activity=[{**HEAD_PUSH, "actor": {"login": REVIEWER}}])
+    refusals = []
+    import scripts.check_trusted_changes as guard
+    assert guard.live_approval(7, "h" * 40, "b" * 40, refusals) is None
+    assert refusals == ["INDEPENDENT_APPROVAL_MISSING"]
+
+
+def test_guard_evidence_names_why_no_approval_counted(monkeypatch, tmp_path, candidate):
+    github, _ = guarded_repository(monkeypatch, submitted="2026-10-13T06:44:15Z")
+    import scripts.check_trusted_changes as guard
+    head = candidate.commit({"README.md": "baseline\n"}, "baseline")
+    candidate.commit({"README.md": "changed\n"}, "change")
+    new_head = candidate.git("rev-parse", "HEAD")
+    github.add("pulls/7", {**PULL, "head": {**PULL["head"], "sha": new_head}, "base": {"sha": head}})
+    github.add("commits/" + new_head, {"author": {"login": "someone-else"}, "committer": None})
+    github.add("pulls/7/commits", [{"sha": new_head, "author": {"login": "someone-else"}, "committer": None}])
+    github.cursor_listing("activity?ref=refs/heads/feature", [{**HEAD_PUSH, "after": new_head}])
+    output = tmp_path / "audit/trusted-guard.json"
+    monkeypatch.setattr("sys.argv", ["check_trusted_changes.py", "--base", head, "--candidate", str(candidate.path),
+                                     "--pr", "7", "--output", str(output)])
+    assert guard.main() == 1
+    evidence = json.loads(output.read_text())
+    assert (evidence["decision"], evidence["approval_error"]) == ("BLOCK", None)
+    assert evidence["approval_refusal"] == "INDEPENDENT_APPROVAL_MISSING"

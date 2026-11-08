@@ -4,6 +4,7 @@ Documentation checker regressions: anchors, links, stale tree, monolingual docst
 and candidate mode."""
 import re
 import subprocess
+from pathlib import Path
 
 import pytest
 
@@ -23,6 +24,13 @@ def repo(tmp_path, files):
     paths = check_docs.inventory(tmp_path, untracked=False)
     architecture.write_text(BILINGUAL + check_docs.START + "\n" + check_docs.repository_tree(paths) + "\n" + check_docs.END + "\n")
     return tmp_path
+
+
+@pytest.fixture(autouse=True)
+def trusted_root_without_glossary(tmp_path_factory, monkeypatch):
+    # 合成 repo 的測試只看自己的名詞表；可信名詞表另有測試。 / Synthetic repositories see only their own glossary; the
+    # trusted glossary has its own tests.
+    monkeypatch.setattr(check_docs, "ROOT", tmp_path_factory.mktemp("trusted"))
 
 
 def errors(root):
@@ -141,7 +149,27 @@ def test_without_avoid_lists_nothing_is_reported(tmp_path):
 def test_every_term_in_the_real_glossary_keeps_a_parsable_avoid_list():
     # 名詞表格式改變時避用詞會靜默變空、檢查照樣通過，所以每個條目都要有讀得到的「避免」行。 / A changed glossary
     # format would silently empty the avoided terms and let the check pass, so every entry keeps a readable avoid line.
-    lines = (check_docs.ROOT / "GLOSSARY.md").read_text(encoding="utf-8").splitlines()
+    real = Path(check_docs.__file__).resolve().parents[1]
+    lines = (real / "GLOSSARY.md").read_text(encoding="utf-8").splitlines()
     entries = [line for line in lines if re.fullmatch(r"\*\*[^*]+\*\*[：:]", line)]
     assert entries and len(entries) == sum(bool(check_docs.AVOID_LINE.match(line)) for line in lines)
-    assert check_docs.avoided_terms(check_docs.ROOT)
+    assert check_docs.avoided_terms(real)
+
+
+def test_candidate_cannot_drop_an_avoided_term_and_use_it(tmp_path, monkeypatch):
+    # 候選刪掉名詞表的避用詞並同時使用它；可信名詞表仍適用。 / The candidate removes an avoided term from its glossary
+    # and uses it; the trusted glossary still applies.
+    trusted = tmp_path / "trusted"
+    trusted.mkdir()
+    (trusted / "GLOSSARY.md").write_text(GLOSSARY, encoding="utf-8")
+    monkeypatch.setattr(check_docs, "ROOT", trusted)
+    root = repo(tmp_path / "candidate", base_files(**{"GLOSSARY.md": BILINGUAL, "tool.py": MODULE}))
+    assert "tool.py:8: avoided glossary term / 名詞表避用詞 recovery inventory" in errors(root)
+
+
+@pytest.mark.parametrize("content", [b"def broken(:\n", b"\xff\xfe not utf-8\n"], ids=["syntax", "encoding"])
+def test_unparsable_candidate_python_is_an_error_not_a_traceback(tmp_path, content):
+    root = repo(tmp_path, base_files())
+    (root / "bad.py").write_bytes(content)
+    subprocess.run(["git", "-C", str(root), "add", "bad.py"], check=True)
+    assert any(e.startswith("bad.py: unparsable Python") for e in errors(root))
