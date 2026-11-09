@@ -258,6 +258,7 @@ MultiAgentEpsilon/
 │   ├── test_policy.py
 │   ├── test_preflight.py
 │   ├── test_publisher_deployment.py
+│   ├── test_regression_inventory.py
 │   ├── test_response_comparison.py
 │   ├── test_review_boundaries.py
 │   ├── test_review_variants.py

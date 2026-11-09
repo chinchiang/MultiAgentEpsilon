@@ -268,3 +268,64 @@ def test_only_the_root_claude_pointer_may_skip_language_anchors(tmp_path, name, 
     root = repo(tmp_path, base_files(**{"AGENTS.md": BILINGUAL, name: text}))
     found = [e for e in errors(root) if "language anchor" in e]
     assert bool(found) is blocked
+
+
+CHECKED_TESTS = ('"""說明。 / Text."""\nimport pytest\n\n\n'
+                 'def test_strict():\n    assert 1 == 1\n    assert 2 == 2\n    with pytest.raises(ValueError):\n'
+                 '        int("x")\n\n\n'
+                 'def test_other():\n    assert True\n')
+
+
+def checked_floor(tmp_path, monkeypatch, candidate_tests, removed=None):
+    trusted = repo(tmp_path / "trusted", base_files(**{"tests/test_x.py": CHECKED_TESTS}))
+    monkeypatch.setattr(check_docs, "ROOT", trusted)
+    files = {"tests/test_x.py": candidate_tests}
+    if removed is not None:
+        files["security/removed-tests.json"] = removed
+    return repo(tmp_path / "candidate", base_files(**files))
+
+
+@pytest.mark.parametrize("weakened", [
+    CHECKED_TESTS.replace("    assert 2 == 2\n", ""),
+    CHECKED_TESTS.replace('    with pytest.raises(ValueError):\n        int("x")\n', '    int("1")\n'),
+], ids=["assert-dropped", "raises-dropped"])
+def test_candidate_that_drops_checks_from_a_test_is_refused(tmp_path, monkeypatch, capsys, weakened):
+    # 先前只比對測試名稱與案例數，保留名稱但刪掉斷言的弱化不會被發現。 / Only names and case counts used to be compared, so
+    # a test kept by name with its assertions removed went unnoticed.
+    code = check_docs.main(["--root", str(checked_floor(tmp_path, monkeypatch, weakened))])
+    found = [line for line in capsys.readouterr().out.splitlines() if "checks" in line]
+    assert code == 1 and len(found) == 1 and found[0].startswith("tests/test_x.py::test_strict:")
+
+
+def test_declared_weakening_with_a_reason_is_accepted(tmp_path, monkeypatch, capsys):
+    removed = '[{"test": "tests/test_x.py::test_strict", "reason": "duplicate assertion"}]'
+    candidate = checked_floor(tmp_path, monkeypatch, CHECKED_TESTS.replace("    assert 2 == 2\n", ""), removed)
+    assert check_docs.main(["--root", str(candidate)]) == 0
+
+
+def test_stale_declaration_for_an_intact_test_is_refused(tmp_path, monkeypatch, capsys):
+    # 列給未被削減的測試，等於預先放行它日後被弱化。 / Listing an intact test would pre-authorize weakening it later.
+    removed = '[{"test": "tests/test_x.py::test_other", "reason": "not needed"}]'
+    candidate = checked_floor(tmp_path, monkeypatch, CHECKED_TESTS, removed)
+    code = check_docs.main(["--root", str(candidate)])
+    found = [line for line in capsys.readouterr().out.splitlines() if "stale" in line]
+    assert code == 1 and len(found) == 1 and "test_other" in found[0]
+
+
+def test_declaration_for_a_test_the_base_no_longer_has_is_tolerated(tmp_path, monkeypatch, capsys):
+    # 已合併的移除留在檔案中無害：base 已沒有該測試，無從放行。 / A merged removal left in the file is harmless: the base
+    # no longer has the test, so it authorizes nothing.
+    removed = '[{"test": "tests/test_x.py::test_gone_long_ago", "reason": "merged earlier"}]'
+    candidate = checked_floor(tmp_path, monkeypatch, CHECKED_TESTS, removed)
+    assert check_docs.main(["--root", str(candidate)]) == 0
+
+
+def test_moving_checks_into_more_assertions_is_never_refused(tmp_path, monkeypatch, capsys):
+    stronger = CHECKED_TESTS.replace("    assert True\n", "    assert True\n    assert 3 == 3\n")
+    assert check_docs.main(["--root", str(checked_floor(tmp_path, monkeypatch, stronger))]) == 0
+
+
+def test_claude_pointer_requires_agents_md(tmp_path):
+    # 指標指向不存在的 AGENTS.md 時，協作規則實際上不存在。 / A pointer to a missing AGENTS.md leaves no collaboration rules.
+    root = repo(tmp_path, base_files(**{"CLAUDE.md": "@AGENTS.md\n"}))
+    assert any("AGENTS.md" in e for e in errors(root))
