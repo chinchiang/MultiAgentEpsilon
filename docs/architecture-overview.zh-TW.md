@@ -263,6 +263,7 @@ MultiAgentEpsilon/
 │   ├── test_review_variants.py
 │   ├── test_run_evidence.py
 │   ├── test_scan_coverage.py
+│   ├── test_scanner_download.py
 │   ├── test_scope.py
 │   ├── test_security_boundaries.py
 │   ├── test_security_properties.py

@@ -6,7 +6,6 @@ import copy
 import hashlib
 import json
 import os
-import time
 from datetime import datetime, timedelta, timezone
 from . import supervision
 from .results import EVIDENCE_VERSION, SUBJECT_FORMAT, decide, required_gate_kinds
@@ -92,10 +91,9 @@ The security role's external resources at the seam: the run's containers, remove
         self.root, self.run_id, self.remove_containers = root, run_id, remove_containers
 
     def release(self, run_id):
-        # CLI 終止後，daemon 仍可能正在完成請求。 / The daemon may still be finishing a request when its CLI is terminated.
-        for _ in range(3):
-            self.remove_containers(run_id)
-            time.sleep(0.1)
+        # cleanup_run 會等到清單穩定為空；CLI 終止後 daemon 仍可能正在完成請求。 / cleanup_run waits for a settled
+        # empty listing: the daemon may still be finishing a request when its CLI is terminated.
+        self.remove_containers(run_id)
 
     def report_path(self):
         return self.root / 'artifacts' / self.run_id / 'report.json'
