@@ -477,3 +477,20 @@ def test_forged_completion_is_not_accepted(mutation):
     else:
         data['status'] = 'COMPLETE'
     assert not life.complete_worker_report(data, providers, code)
+
+
+def test_smoke_worker_refuses_to_call_when_the_model_implementation_changed_after_planning(tmp_path, monkeypatch):
+    # 先前 smoke worker 不核對實作雜湊，計畫後被改的模型程式仍會照樣發出呼叫。 / The smoke worker used not to check the
+    # implementation digest, so model code changed after planning would still make calls.
+    import asyncio
+    import scripts.model_smoke as smoke
+    from security_harness.llm import config
+    run_id = str(uuid.uuid4())
+    report = initial_report(['mock'], run_id)
+    path = tmp_path / 'artifacts' / run_id / 'report.json'
+    life.persist(path, report)
+    prepare_run(tmp_path, run_id, operation='model-smoke')
+    monkeypatch.setattr(config, 'implementation_digest', lambda: '0' * 64)
+    asyncio.run(smoke.run_worker(tmp_path, run_id, life.smoke_plan_digest(report)))
+    data = json.loads(path.read_text())
+    assert data['calls'] == [] and [(c['status'], c['code']) for c in data['checks']] == [('ERROR', 'CONFIGURATION')]

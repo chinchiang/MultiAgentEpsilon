@@ -50,7 +50,7 @@ def initial_report(providers, run_id, roe_raw=None):
     return {"schema_version": REPORT_VERSION, "operation": "model-smoke", "run_id": run_id, "advisory_only": True,
             "data_class": "synthetic", "fixture": "fixed-ack-v1", "providers": providers,
             "started_at": datetime.now(timezone.utc).isoformat(),
-            "implementation_sha256": implementation_digest(), "status": "INCOMPLETE", "code": None,
+            "implementation_sha256": config.implementation_digest(), "status": "INCOMPLETE", "code": None,
             "limits": asdict(limits), "total_timeout_seconds": run_seconds(policy, providers),
             "deadline_policy": policy,
             "max_output_tokens_per_call": FIXTURE.max_output_tokens,
@@ -67,6 +67,11 @@ async def run_worker(root, run_id, plan_digest):
     # report on disk differs from the supervisor's plan.
     if smoke_plan_digest(report) != plan_digest:
         return 2
+    # 計畫後被改的模型程式不可發出任何呼叫。 / Model code changed after planning makes no call.
+    try:
+        changed = config.implementation_digest() != report['implementation_sha256']
+    except OSError:
+        changed = True  # 無法讀取實作即視為已變更。 / An unreadable implementation counts as changed.
     # 限額只取自計畫，不另行重算。 / The limits come from the plan only and are never recomputed.
     gateway = Gateway(Limits(**report['limits']))
     report['calls'] = gateway.evidence
@@ -81,6 +86,10 @@ async def run_worker(root, run_id, plan_digest):
     try:
         for check in report['checks']:
             provider = check['provider']
+            if changed:
+                check.update(status='ERROR', code='CONFIGURATION')
+                persist(output, report)
+                continue
             check['status'] = 'RUNNING'
             persist(output, report)
             try:

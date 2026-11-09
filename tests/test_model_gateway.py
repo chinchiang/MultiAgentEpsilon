@@ -671,3 +671,32 @@ def test_bedrock_refuses_china_and_government_partitions(region, allowed):
         with pytest.raises(ModelError) as raised:
             BedrockAdapter("anthropic.claude-synthetic-v1", region, object())
         assert raised.value.code == "CONFIGURATION"
+
+
+@pytest.mark.parametrize("seconds,connect", [(60, "10"), (30, "10"), (5, "5")])
+def test_aws_cli_deadlines_follow_the_providers_call_deadline(tmp_path, seconds, connect):
+    # 先前固定為連線 10 秒、讀取 20 秒，不隨 RoE 期限政策調整。 / These used to be fixed at 10 s connect and 20 s read,
+    # whatever the RoE deadline policy said.
+    cli = cli_fixture(tmp_path, "import sys\n"
+        f"assert sys.argv[sys.argv.index('--cli-connect-timeout')+1] == {connect!r}\n"
+        f"assert sys.argv[sys.argv.index('--cli-read-timeout')+1] == {str(seconds)!r}\n"
+        f"print({json.dumps(json.dumps(BEDROCK))})\n")
+    cli.timeout_seconds = seconds
+    result, evidence = invoke(BedrockAdapter("anthropic.claude-synthetic-v1", "ap-southeast-1", cli))
+    assert evidence["status"] == "SUCCESS", evidence
+
+
+@pytest.mark.parametrize("seconds", [0, 61, 1.5, True, "30"])
+def test_aws_cli_refuses_deadlines_outside_the_call_ceiling(seconds):
+    with pytest.raises(ValueError, match="^invalid AWS CLI timeout$"):
+        AwsCLI(timeout_seconds=seconds)
+
+
+def test_configured_bedrock_adapter_uses_the_planned_call_deadline(monkeypatch):
+    from security_harness.llm import config
+    monkeypatch.setenv("BEDROCK_MODEL_ID", "anthropic.claude-synthetic-v1")
+    monkeypatch.setenv("BEDROCK_REGION", "ap-southeast-1")
+    monkeypatch.setenv("AWS_CLI_PATH", sys.executable)
+    roe = hashlib.sha256((config.ROOT / "security/model-roe.json").read_bytes()).hexdigest()
+    adapter = config.configured_adapter("bedrock", roe, None, JsonHTTP(timeout_seconds=45))
+    assert adapter.cli.timeout_seconds == 45

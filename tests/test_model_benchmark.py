@@ -398,3 +398,18 @@ def test_parent_refuses_worker_success_when_benchmark_evaluation_is_invalid(tmp_
     data = model_support.finish(tmp_path, report['run_id'], providers=report['providers'], returncode=0, expected_report=report)
     assert data['status'] == 'INCOMPLETE' and data['code'] == 'EVALUATION_INVALID'
     assert data['analysis'] is None and data['cleanup']['completed']
+
+
+def test_worker_refuses_to_call_when_the_model_implementation_changed_after_planning(tmp_path, monkeypatch):
+    # 先前 worker 只核對案例目錄與 RoE，計畫後被改的模型程式仍會照樣發出呼叫。 / The worker used to check only the catalog
+    # and the RoE, so model code changed after planning would still make calls.
+    from security_harness.llm import config
+    report = runner.initial_report(['mock-review-a', 'mock-review-b'], ['B01'], str(uuid.uuid4()))
+    path = tmp_path / 'artifacts' / report['run_id'] / 'report.json'
+    runner.record(path, report)
+    prepare_run(tmp_path, report['run_id'], operation='model-smoke')
+    monkeypatch.setattr(config, 'implementation_digest', lambda: '0' * 64)
+    asyncio.run(runner.run_worker(tmp_path, report['run_id'], plan_digest=life.plan_digest(report)))
+    data = json.loads(path.read_text())
+    assert data['code'] == 'CONFIGURATION' and data['calls'] == []
+    assert {(c['status'], c['code']) for c in data['checks']} == {('ERROR', 'CONFIGURATION')}

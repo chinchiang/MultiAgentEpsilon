@@ -15,7 +15,7 @@
 | PR 改 base 後沿用舊 run | 比對完整 timeline；同一 SHA／head repository／分支曾改 base 即拒絕；`edited` 會觸發檢查 | 缺失、畸形、改走再改回的歷程皆拒絕；發布前再次讀回 |
 | 報告或檢查名稱冒充來源 | 獨立工作簽署 ZIP 摘要；固定 CLI 驗證簽章、workflow SHA／main ref／GitHub runner／run／attempt／digest | 官方樣本六種驗收符合預期；遠端 run 37731214649 的實際簽章／digest 通過分支驗證，main 來源政策拒絕該手動分支證據 |
 | fixture／文件排除可信審查 | 所有變更路徑均須可信、具寫入權限的精確 head 核准 | fixture 改名、README 與文件均納入保護 |
-| 混合核准／要求修改、重跑者核准 | guard 與 publisher 共用審查契約；寫入者要求修改會阻擋；排除 run actor／triggering actor 及所有 PR commit 身分 | 寫入／維護／管理／唯讀角色與完整 API 查詢回歸 |
+| 混合核准／要求修改、重跑者核准 | guard 與 publisher 共用審查契約；寫入者要求修改會阻擋；排除 activity 第一頁上的推送者及所有 PR commit 身分（2026-11 起 run actor／triggering actor 不再排除） | 寫入／維護／管理／唯讀角色與完整 API 查詢回歸 |
 | 相同 SHA 的其他 fork 或分支造成誤擋 | 相關 PR、最新 run 依 repository ID 與分支分開判定 | 不同 fork／分支不取代此 run，同範圍仍嚴格拒絕 |
 | 核心 janitor 跨開機訊號與登記空窗 | 先查 boot ID；子程序收到持久化登記後的握手才執行 | 跨開機 PID、登記失敗、真實取消與 SIGKILL 回收 |
 | 清理證據不足 | 檢查非殭屍程序群組已消失，目錄是否實際移除，失敗保留回收清冊 | 真實 Docker／程序／取消與孤兒回收測試 |
@@ -69,7 +69,7 @@ This historical round started from main ba05e1c and inherited only public histor
 | Retargeted PR reuses old run | Complete timelines reject missing/malformed/base-changed history, including change-away-and-back; edited triggers checks; re-read before publish |
 | Report/check-name source spoofing | Separate job signs ZIP digest; pinned CLI verifies signer workflow SHA/main ref/hosted runner/run/attempt/digest. Six official-sample cases passed; run 37731214649's real branch signature verified but main-source policy correctly rejected branch evidence |
 | Fixture/docs escape trusted review | Every changed path needs trusted write-capable exact-head approval, including renamed fixtures and README |
-| Mixed approvals/change requests/rerun actor | Shared review contract; writer change requests block; run/triggering actors and all PR commit identities excluded; permission/API regressions |
+| Mixed approvals/change requests/rerun actor | Shared review contract; writer change requests block; first-page activity pushers and all PR commit identities excluded (since November 2026 run and triggering actors are no longer excluded); permission/API regressions |
 | Same SHA across forks/branches | Related PR/latest run selection binds repository ID and branch; unrelated scope does not supersede a valid run |
 | Janitor across boots/registration gap | Check boot ID first; children await handshake after persistent registration; registration failure and real kill/cancel tests |
 | Inadequate cleanup proof | Verify non-zombie groups gone and directories removed; preserve recovery inventory on failure; real Docker/process tests |

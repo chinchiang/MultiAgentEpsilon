@@ -13,11 +13,11 @@ PR_COMMIT_LIMIT = 250
 
 
 def validate_review(pr, reviews, permissions, settings, excluded):
-    """excluded 包含接觸 head 的 run actor 與提交作者／提交者；這些自報或事件範圍身分只能移除核准，真實推送者仍以規則集原生最後推送核准為準。
+    """excluded 包含 PR 提交身分（作者／提交者）與伺服器 activity 記錄的分支推送者；這些身分只能移除核准，真實推送者仍以規則集原生最後推送核准為準。
 
-excluded: identities that touched the head (run actors, commit author/committer).
-    They are self-asserted or event-scoped, so they may only remove approvals; the
-    ruleset's native last-push approval stays authoritative for the actual pusher."""
+excluded: the PR's commit identities (author/committer) and the branch pushers the
+    server's activity records. They may only remove approvals; the ruleset's native
+    last-push approval stays authoritative for the actual pusher."""
     latest = {}
     ids = set()
     for review in sorted(reviews, key=lambda r: r["id"]):
