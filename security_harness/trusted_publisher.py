@@ -241,8 +241,17 @@ def validate_bundle(settings, gate_policy, pr, run, newer_runs, jobs, files, rev
          and guard.get("approval_error") is None, "TRUSTED_GUARD")
     if guard.get("protected_changes"):
         approval = guard.get("baseline_approval") or {}
-        need(approval.get("review_id") in approvals and approval.get("reviewer") in settings["reviewers"]
-             and approval.get("commit_id") == pr["head"]["sha"], "BASELINE_APPROVAL")
+        # guard 記錄的必須是該審查者對現行 head 的一筆真實核准，且同一審查者現在仍被採計；審查者對同一 head 再按一次
+        # Approve 只換掉最新一筆的 ID，不必整輪重跑。 / The guard's record must be a real approval of the current head by
+        # that reviewer, and the same reviewer must still count now; approving the same head again only changes the
+        # latest review ID and needs no rerun.
+        recorded = [r for r in reviews if r.get("id") == approval.get("review_id")]
+        counted = {r["user"]["login"] for r in reviews if r.get("id") in approvals}
+        need(len(recorded) == 1 and recorded[0]["state"] == "APPROVED"
+             and recorded[0]["user"]["login"] == approval.get("reviewer")
+             and recorded[0]["commit_id"] == pr["head"]["sha"] == approval.get("commit_id")
+             and approval.get("reviewer") in counted and approval.get("reviewer") in settings["reviewers"],
+             "BASELINE_APPROVAL")
     provenance = expected_provenance(settings, run["id"], run["run_attempt"], pr["number"],
                                      pr["base"]["sha"], pr["head"]["sha"])
     tests = validate_evidence(settings, gate_policy, files, provenance=provenance,

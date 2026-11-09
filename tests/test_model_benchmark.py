@@ -413,3 +413,39 @@ def test_worker_refuses_to_call_when_the_model_implementation_changed_after_plan
     data = json.loads(path.read_text())
     assert data['code'] == 'CONFIGURATION' and data['calls'] == []
     assert {(c['status'], c['code']) for c in data['checks']} == {('ERROR', 'CONFIGURATION')}
+
+
+def _planned_blind_run(tmp_path):
+    report = runner.initial_report(['mock-review-a', 'mock-review-b'], ['B01'], str(uuid.uuid4()))
+    path = tmp_path / 'artifacts' / report['run_id'] / 'report.json'
+    runner.record(path, report)
+    prepare_run(tmp_path, report['run_id'], operation='model-smoke')
+    return report, path
+
+
+def test_worker_reviews_the_archived_catalog_after_the_live_catalog_changes(tmp_path, monkeypatch):
+    # 先前 worker 讀現行案例目錄，計畫後只要目錄被改就整輪拒絕；封存副本才是計畫綁定的輸入。 / The worker used to
+    # read the live catalog and refused the whole run once it changed after planning; the archived copy is the input
+    # the plan bound.
+    report, path = _planned_blind_run(tmp_path)
+    changed = tmp_path / 'catalog.json'
+    changed.write_bytes(runner.CASES_PATH.read_bytes().replace(b'"synthetic-review-v3"', b'"synthetic-review-v3" '))
+    monkeypatch.setattr(runner, 'CASES_PATH', changed)
+    monkeypatch.setattr(bench, 'CASES_PATH', changed)
+    asyncio.run(runner.run_worker(tmp_path, report['run_id'], plan_digest=life.plan_digest(report)))
+    data = json.loads(path.read_text())
+    assert data['code'] is None and {c['status'] for c in data['checks']} == {'SUCCESS'}
+
+
+@pytest.mark.parametrize('attack', ['tampered', 'missing'])
+def test_worker_makes_no_call_when_the_archived_catalog_is_unusable(tmp_path, attack):
+    report, path = _planned_blind_run(tmp_path)
+    catalog = path.parent / 'inputs' / 'catalog.json'
+    if attack == 'tampered':
+        catalog.write_bytes(catalog.read_bytes() + b'\n')
+    else:
+        catalog.unlink()
+    asyncio.run(runner.run_worker(tmp_path, report['run_id'], plan_digest=life.plan_digest(report)))
+    data = json.loads(path.read_text())
+    assert data['code'] == 'CONFIGURATION' and data['calls'] == []
+    assert {(c['status'], c['code']) for c in data['checks']} == {('ERROR', 'CONFIGURATION')}
