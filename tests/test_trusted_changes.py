@@ -393,3 +393,40 @@ def test_guard_applies_the_publisher_rules_to_drafts_and_shared_heads(monkeypatc
     github.add(f"pulls?state=all&head={POLICY_REPOSITORY.split('/')[0]}:feature", [PULL, {**PULL, "number": 8}])
     with pytest.raises(Denied, match="^SHARED_PR_HEAD$"):
         approve()
+
+
+def test_head_push_that_is_not_the_newest_activity_fails_closed(monkeypatch):
+    # 第一頁最新一筆 activity 不是 head 的推送，表示分支已移走；先前仍採用較舊的 head 推送。 / The newest activity on the
+    # first page is not the head push, so the branch has moved on; an older head push used to be accepted anyway.
+    from security_harness.trusted_publisher import Denied
+    later = {**HEAD_PUSH, "before": "h" * 40, "after": "f" * 40, "timestamp": "2026-10-13T07:05:00Z"}
+    _, approve = guarded_repository(monkeypatch, activity=[later, HEAD_PUSH])
+    with pytest.raises(Denied, match="^LAST_PUSH_UNKNOWN$"):
+        approve()
+
+
+def test_reviewer_who_pushed_an_earlier_commit_cannot_approve(monkeypatch):
+    # 較早的推送由審查者完成，但 commit 名義寫成別人；先前只靠可自報的 commit 身分排除。 / The reviewer pushed an earlier
+    # commit under someone else's name; exclusion used to rely only on the self-asserted commit identities.
+    earlier = {**HEAD_PUSH, "before": "d" * 40, "after": "e" * 40, "timestamp": "2026-10-13T06:50:00Z",
+               "actor": {"login": REVIEWER}}
+    _, approve = guarded_repository(monkeypatch, activity=[{**HEAD_PUSH, "actor": {"login": "someone-else"}}, earlier])
+    refusals = []
+    import scripts.check_trusted_changes as guard
+    assert guard.live_approval(7, "h" * 40, "b" * 40, refusals) is None
+    assert refusals == ["INDEPENDENT_APPROVAL_MISSING"]
+
+
+@pytest.mark.parametrize("change,code", [({"state": "closed"}, "PR_NOT_OPEN"),
+                                         ({"head": {**PULL["head"], "sha": "x" * 40}}, "PR_HEAD_MOVED"),
+                                         ({"base": {**PULL["base"], "sha": "x" * 40}}, "PR_BASE_MOVED")],
+                         ids=["closed", "head-moved", "base-moved"])
+def test_stale_pull_request_names_why_it_blocked(change, code):
+    # 先前回傳 None 卻沒留下診斷碼。 / This used to return None without leaving a diagnostic code.
+    refusals = []
+    pr = {**PULL, **change}
+    reviews = [{"id": 3, "state": "APPROVED", "commit_id": "h" * 40, "user": {"login": REVIEWER},
+                "submitted_at": AFTER_PUSH}]
+    assert approved_review(pr, reviews, "h" * 40, "b" * 40, [REVIEWER], {REVIEWER: "write"}, set(), PUSH,
+                           refusals) is None
+    assert refusals == [code]

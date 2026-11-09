@@ -120,7 +120,13 @@ def approved_review(pr, reviews, head, base, reviewers, permissions, excluded, p
 
 An approval counts only from a listed, write-capable reviewer who is not the
     author or a known pusher. Exclusions may only remove approvals, never add them."""
-    if pr["state"] != "open" or pr["head"]["sha"] != head or pr["base"]["sha"] != base:
+    # PR 已關閉或在讀取期間移動時沒有核准可用；留下固定診斷碼。 / A closed PR, or one that moved while it was read, has no
+    # usable approval; leave a fixed diagnostic code.
+    stale = ("PR_NOT_OPEN" if pr["state"] != "open" else "PR_HEAD_MOVED" if pr["head"]["sha"] != head
+             else "PR_BASE_MOVED" if pr["base"]["sha"] != base else None)
+    if stale:
+        if refusals is not None:
+            refusals.append(stale)
         return None
     try:
         ids = review_decision(pr, reviews, permissions, reviewers, excluded, push)
@@ -225,20 +231,22 @@ Read the head's push time and pushers; refuse a fork, a shared head, a ruleset t
         if not any(rule.get("type") == "pull_request" and isinstance(rule.get("parameters"), dict)
                    and rule["parameters"].get("require_last_push_approval") is True for rule in rules):
             raise Denied("LAST_PUSH_APPROVAL")
-        # activity 以 cursor 分頁、忽略 page，只讀由新到舊的第一頁。每筆 activity 都會移動分支，head 未變時最新一筆就是
-        # head 的推送；不在第一頁即視為不明。 / Activity is cursor-paged and ignores page, so read only the newest-first
-        # first page. Every activity moves the branch, so while the head is unchanged the newest one is the head push;
-        # a head push beyond the first page counts as unknown.
+        # activity 以 cursor 分頁、忽略 page，只讀由新到舊的第一頁。每筆 activity 都會移動分支，head 未變時最新一筆必須
+        # 就是 head 的推送；不是就表示分支已移走，推送時間視為不明。 / Activity is cursor-paged and ignores page, so read
+        # only the newest-first first page. Every activity moves the branch, so while the head is unchanged the newest
+        # one must be the head push; otherwise the branch has moved on and the push time counts as unknown.
         head = pr["head"]["sha"]
-        head_pushes = [a for a in self._reader.get(f"activity?ref=refs/heads/{ref}&direction=desc")
-                       if a.get("after") == head]
-        if not head_pushes:
+        page = self._reader.get(f"activity?ref=refs/heads/{ref}&direction=desc")
+        if not page or page[0].get("after") != head:
             raise Denied("LAST_PUSH_UNKNOWN")
-        # 伺服器記錄的 head 推送者不能核准；改標題、重開或按重跑的人只是 run actor，不是推送者，核准仍有效。 / The
-        # server-recorded pusher of the head cannot approve. Whoever edited the title, reopened or re-ran is only a run
-        # actor, not a pusher, and their approval still counts.
+        head_pushes = [a for a in page if a.get("after") == head]
+        # 第一頁上所有推送這個分支的伺服器記錄身分都不能核准，包含較早 commit 的推送者；commit 名義可自報，不能單獨
+        # 依賴。改標題、重開或按重跑的人只是 run actor，不是推送者，核准仍有效。 / Every server-recorded identity that
+        # pushed this branch on the first page is excluded, including whoever pushed an earlier commit, because commit
+        # names are self-asserted. Whoever edited the title, reopened or re-ran is only a run actor, not a pusher, and
+        # their approval still counts.
         return HeadPush(max(parse_time(a["timestamp"]) for a in head_pushes),
-                        frozenset(identities(*(a.get("actor") for a in head_pushes))))
+                        frozenset(identities(*(a.get("actor") for a in page))))
 
     def publication_review(self, number, pr, run, base_branch):
         """蒐集發布前的審查證據，先驗證唯一 PR、推送與來源，再讀提交身分。 / Collect publication review evidence:

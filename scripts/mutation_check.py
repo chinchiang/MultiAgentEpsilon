@@ -74,7 +74,15 @@ TARGETS = {
          'tests/test_trusted_changes.py::test_head_ref_outside_the_branch_name_pattern_is_refused',
          'tests/test_trusted_changes.py::test_run_identity_must_be_a_positive_decimal_before_the_run_is_read',
          'tests/test_trusted_changes.py::test_guard_applies_the_publisher_rules_to_drafts_and_shared_heads',
+         'tests/test_trusted_changes.py::test_head_push_that_is_not_the_newest_activity_fails_closed',
+         'tests/test_trusted_changes.py::test_reviewer_who_pushed_an_earlier_commit_cannot_approve',
+         'tests/test_trusted_changes.py::test_stale_pull_request_names_why_it_blocked',
         )),
+    # 候選測試數與檢查數下限；純函式測試不呼叫 git。 / The candidate test and check floor; its pure-function tests never
+    # call git.
+    'security_harness/regression_inventory.py': (
+        ('parametrize_cases', 'case_count', 'check_count', 'declared_removals', 'floor_errors'),
+        ('tests/test_regression_inventory.py',)),
     'security_harness/llm/benchmark.py': (
         ('bounded_text', 'validate_review', 'parse_review'), ('tests/test_model_benchmark.py', '--deselect=tests/test_model_benchmark.py::test_review_cli_supervision_and_explicit_live_opt_in',
                                                               '--deselect=tests/test_model_benchmark.py::test_review_cli_accepts_large_budgets_only_within_the_total_cap', 'tests/test_security_properties.py')),

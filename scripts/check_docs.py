@@ -150,6 +150,9 @@ def validate(paths, root=ROOT):
         # 根目錄 CLAUDE.md 只能是指向 AGENTS.md 的單行指標；協作規則只寫在 AGENTS.md。 / The root CLAUDE.md may be
         # only a one-line pointer to AGENTS.md, which holds the collaboration rules.
         if path == root / 'CLAUDE.md' and text.rstrip('\n') == POINTER:
+            # 指標必須指向實際存在的 AGENTS.md。 / The pointer must point at an AGENTS.md that exists.
+            if not (root / 'AGENTS.md').is_file():
+                errors.append('CLAUDE.md: points to a missing AGENTS.md / 指向不存在的 AGENTS.md')
             continue
         for anchor in ('zh-tw', 'en'):
             if text.count(f'<a id="{anchor}"></a>') != 1:
@@ -234,9 +237,11 @@ def main(argv=None):
         from security_harness import regression_inventory
         declared, declaration_errors = regression_inventory.declared_removals(root)
         errors.extend(declaration_errors)
+        trusted = inventory(ROOT, untracked=False)
         errors.extend(regression_inventory.floor_errors(
-            regression_inventory.inventory(ROOT, inventory(ROOT, untracked=False)),
-            regression_inventory.inventory(root, paths), declared))
+            regression_inventory.inventory(ROOT, trusted), regression_inventory.inventory(root, paths), declared,
+            regression_inventory.inventory(ROOT, trusted, regression_inventory.check_count),
+            regression_inventory.inventory(root, paths, regression_inventory.check_count)))
     for error in errors:
         print(error)
     if not errors:
