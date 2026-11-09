@@ -75,9 +75,24 @@ jobs:
           PR_NUMBER: ${{ github.event.pull_request.number }}
           GH_TOKEN: ${{ github.token }}
         run: python -I trusted/scripts/check_trusted_changes.py --base "$BASE_SHA" --candidate candidate --pr "$PR_NUMBER" --output audit/trusted-guard.json
+      # 快取只存 bootstrap 驗證過雜湊的 gitleaks；取回後 bootstrap 仍重算雜湊，不符即重新下載。 / The cache holds only
+      # the gitleaks binary bootstrap verified; after a restore bootstrap re-checks its digest and re-downloads on mismatch.
+      - name: Restore verified scanner cache / 取回已驗證掃描器快取
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: trusted/.tools/gitleaks
+          key: gitleaks-${{ runner.os }}-${{ hashFiles('trusted/security/tools.lock.json') }}
       - name: Install only evaluator dependencies
         working-directory: trusted
         run: python -I scripts/bootstrap.py
+      # PR run 只讀快取、不寫入，避免快取下毒。 / PR runs only read the cache and never write it, so they cannot poison it.
+      - name: Save verified scanner cache / 保存已驗證掃描器快取
+        if: github.event_name != 'pull_request_target'
+        continue-on-error: true
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: trusted/.tools/gitleaks
+          key: gitleaks-${{ runner.os }}-${{ hashFiles('trusted/security/tools.lock.json') }}
       - name: Install verified property-test tools / 安裝已驗證性質測試工具
         working-directory: trusted
         run: python -I scripts/install_test_tools.py
@@ -160,9 +175,24 @@ jobs:
         uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: '3.12'
+      # 快取只存 bootstrap 驗證過雜湊的 gitleaks；取回後 bootstrap 仍重算雜湊，不符即重新下載。 / The cache holds only
+      # the gitleaks binary bootstrap verified; after a restore bootstrap re-checks its digest and re-downloads on mismatch.
+      - name: Restore verified scanner cache / 取回已驗證掃描器快取
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: trusted/.tools/gitleaks
+          key: gitleaks-${{ runner.os }}-${{ hashFiles('trusted/security/tools.lock.json') }}
       - name: Install only evaluator dependencies
         working-directory: trusted
         run: python -I scripts/bootstrap.py
+      # PR run 只讀快取、不寫入，避免快取下毒。 / PR runs only read the cache and never write it, so they cannot poison it.
+      - name: Save verified scanner cache / 保存已驗證掃描器快取
+        if: github.event_name != 'pull_request_target'
+        continue-on-error: true
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: trusted/.tools/gitleaks
+          key: gitleaks-${{ runner.os }}-${{ hashFiles('trusted/security/tools.lock.json') }}
       - name: Install verified property-test tools / 安裝已驗證性質測試工具
         working-directory: trusted
         run: python -I scripts/install_test_tools.py
