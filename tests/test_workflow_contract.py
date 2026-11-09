@@ -101,7 +101,7 @@ def test_every_action_is_pinned_to_a_full_sha_with_a_version_comment():
     uses = re.findall(r'uses: (\S+)(.*)$', WORKFLOW, re.MULTILINE)
     assert uses
     for target, comment in uses:
-        assert re.fullmatch(r'[\w.-]+/[\w.-]+@[0-9a-f]{40}', target), target
+        assert re.fullmatch(r'[\w.-]+/[\w.-]+(?:/[\w.-]+)*@[0-9a-f]{40}', target), target
         assert re.fullmatch(r' # v\d+\.\d+\.\d+', comment), target
 
 
@@ -140,3 +140,31 @@ def test_static_checks_pin_rules_for_trusted_and_candidate_trees():
     assert evaluator.count('ruff check --no-cache --isolated --select F,E9') == 2
     assert 'ruff check --no-cache --isolated --select F,E9 --target-version py312 ../candidate' in evaluator
     assert evaluator.index('Static checks') < evaluator.index('Evaluate candidate through external oracle')
+
+
+CACHE_KEY = "key: gitleaks-${{ runner.os }}-${{ hashFiles('trusted/security/tools.lock.json') }}"
+
+
+@pytest.mark.parametrize("name", ["trusted-security-pilot", "mutation-tests"])
+def test_scanner_cache_is_restored_before_bootstrap_and_saved_only_outside_pull_requests(name):
+    # 快取只放已由 bootstrap 驗證雜湊的 gitleaks；PR run 只讀，避免候選相關工作寫入快取。取回後 bootstrap 仍重算雜湊。 /
+    # The cache holds only the gitleaks binary bootstrap has verified; PR runs only read it, so no run that handles a
+    # candidate can write it, and bootstrap re-verifies the digest after a restore.
+    steps = job(name)
+    restore, save = "uses: actions/cache/restore@", "uses: actions/cache/save@"
+    assert steps.count(restore) == steps.count(save) == 1
+    bootstrap = steps.index("run: python -I scripts/bootstrap.py")
+    assert steps.index(restore) < bootstrap < steps.index(save)
+    save_step = steps[steps.rindex("- name:", 0, steps.index(save)):].split("\n      - name:", 1)[0]
+    assert "if: github.event_name != 'pull_request_target'" in save_step
+    for marker in (restore, save):
+        step = steps[steps.rindex("- name:", 0, steps.index(marker)):].split("\n      - name:", 1)[0]
+        assert "path: trusted/.tools/gitleaks\n" in step and CACHE_KEY in step, marker
+
+
+def test_only_the_split_cache_actions_are_used():
+    # 合併的 actions/cache 會在 PR run 結束時寫入；只允許拆開的 restore／save。 / The combined actions/cache would save at
+    # the end of a PR run; only the split restore and save actions are allowed.
+    assert not re.search(r"uses: actions/cache@", WORKFLOW)
+    assert "restore-keys" not in WORKFLOW
+    assert WORKFLOW.count("path: trusted/.tools/gitleaks\n") == WORKFLOW.count("uses: actions/cache/") == 4
