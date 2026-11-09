@@ -11,7 +11,7 @@ from datetime import datetime, timezone
 from .benchmark import (CASES_PATH, ORACLE_PATH, OUTPUT_BUDGETS, OUTPUT_TOKENS, MockReviewer, load_cases,
                         make_plan, review_request, request_digest, parse_review)
 from .gateway import Gateway, Limits, ModelError, digest
-from .lifecycle import REPORT_VERSION, archive_inputs, plan_digest as current_plan_digest, read_report
+from .lifecycle import REPORT_VERSION, archive_inputs, plan_digest as current_plan_digest, read_inputs, read_report
 from .transport import JsonHTTP, strict_json
 from ..scope import call_seconds, run_seconds, valid_deadline_policy
 from ..supervision import persist, run_directory
@@ -59,6 +59,20 @@ def implementation_sha256():
                               file_digest(config.ROOT / 'scripts/review_adjudicate.py')]))
 
 
+def archived_cases(run_dir, report):
+    """計畫封存的案例目錄；封存缺失、被竄改或無法解析時回傳 None。 / The case catalog the plan archived, or None when the
+    archive is missing, tampered with or unparsable."""
+    try:
+        inputs = read_inputs(run_dir, ('catalog.json', 'oracle.json', 'model-roe.json'))
+        if any(digest_bytes(inputs[name]) != report[key] for name, key in (
+                ('catalog.json', 'case_catalog_sha256'), ('oracle.json', 'oracle_sha256'),
+                ('model-roe.json', 'model_roe_sha256'))):
+            return None
+        return load_cases(inputs['catalog.json'])
+    except (OSError, ValueError):
+        return None
+
+
 def implementation_unchanged(report):
     """worker 讀到的實作是否仍是計畫綁定的那一份；無法讀取即視為已變更。 / Whether the implementation the worker reads is
     still the one the plan bound; an unreadable implementation counts as changed."""
@@ -99,7 +113,6 @@ def initial_report(providers, case_ids, run_id, output_tokens=OUTPUT_TOKENS, rou
 async def run_worker(root, run_id, plan_digest):
     from . import config
     report = read_report(root, run_id)
-    cases = load_cases()
     path = root / 'artifacts' / run_id / 'report.json'
     # 磁碟上的報告與 supervisor 的計畫不同時，一次呼叫都不發。 / Make no call at all when the report on disk
     # differs from the supervisor's plan.
@@ -128,7 +141,8 @@ async def run_worker(root, run_id, plan_digest):
 
     try:
         from .benchmark_score import file_digest
-        if (file_digest(CASES_PATH) != report['case_catalog_sha256']
+        cases = archived_cases(path.parent, report)
+        if (cases is None
                 or file_digest(config.ROOT / 'security/model-roe.json') != report['model_roe_sha256']
                 or implementation_unchanged(report) is False):
             # 呼叫前須核對計畫綁定的目錄、RoE 與實作；不可先花費再偵測。 / Calls must use the catalog, RoE and

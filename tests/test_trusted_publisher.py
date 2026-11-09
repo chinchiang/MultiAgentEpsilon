@@ -735,3 +735,26 @@ def test_collect_refuses_a_listing_whose_total_disagrees(bundle, tmp_path, monke
     served.total_count = len(served.items) + 1
     with pytest.raises(publisher.Denied, match="^LISTING_TOTAL$"):
         publisher.collect(github, bundle["settings"], 5, 100, bundle["gate_policy"])
+
+
+def test_guard_approval_counts_after_the_same_reviewer_approves_the_head_again(bundle):
+    # 審查者對同一 head 再按一次 Approve 後，guard 記錄的較早核准不再是「最新一筆」；先前因此整輪拒絕。 / After the
+    # reviewer approves the same head again, the approval the guard recorded is no longer the latest one; this used
+    # to refuse the whole run.
+    later = {**bundle["reviews"][0], "id": 15}
+    bundle["reviews"].append(later)
+    assert publisher.validate_bundle(**bundle)["review_ids"] == [15]
+
+
+@pytest.mark.parametrize("change", ["other_reviewer", "other_head", "not_approved"])
+def test_guard_approval_must_still_be_a_real_approval_of_this_head_by_that_reviewer(bundle, change):
+    later = {**bundle["reviews"][0], "id": 15}
+    bundle["reviews"].append(later)
+    if change == "other_reviewer":
+        mutate_json(bundle, "audit/trusted-guard.json", lambda d: d["baseline_approval"].update(reviewer="someone"))
+    elif change == "other_head":
+        bundle["reviews"][0] = {**bundle["reviews"][0], "commit_id": "d" * 40}
+    else:
+        bundle["reviews"][0] = {**bundle["reviews"][0], "state": "COMMENTED"}
+    with pytest.raises(publisher.Denied, match="^BASELINE_APPROVAL$"):
+        publisher.validate_bundle(**bundle)
