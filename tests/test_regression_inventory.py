@@ -27,6 +27,15 @@ def test_dynamic(x):
 def test_keyword(x):
     pass
 
+@pytest.mark.parametrize("x", argvalues=[1, 2, 3, 4])
+def test_mixed(x):
+    pass
+
+@pytest.mark.other("x", [1, 2, 3])
+@parametrize("x", [1, 2, 3])
+def test_not_parametrize(x):
+    pass
+
 @pytest.mark.parametrize("x", [])
 def test_empty(x):
     raises = 1
@@ -51,12 +60,14 @@ def measured(measure):
 def test_case_counts_multiply_literal_parameters_and_count_the_rest_once():
     assert measured(inventory.case_count) == {
         'tests/test_x.py::test_grid': 6, 'tests/test_x.py::test_dynamic': 1, 'tests/test_x.py::test_keyword': 2,
+        'tests/test_x.py::test_mixed': 4, 'tests/test_x.py::test_not_parametrize': 1,
         'tests/test_x.py::test_empty': 1, 'tests/test_x.py::TestGroup::test_inside': 1}
 
 
 def test_check_counts_asserts_and_pytest_raises_warns_and_fail():
     assert measured(inventory.check_count) == {
         'tests/test_x.py::test_grid': 2, 'tests/test_x.py::test_dynamic': 3, 'tests/test_x.py::test_keyword': 0,
+        'tests/test_x.py::test_mixed': 0, 'tests/test_x.py::test_not_parametrize': 0,
         'tests/test_x.py::test_empty': 1, 'tests/test_x.py::TestGroup::test_inside': 1}
 
 
