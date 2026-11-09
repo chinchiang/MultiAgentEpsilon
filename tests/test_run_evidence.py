@@ -255,13 +255,123 @@ def test_cleanup_repeats_until_no_container_of_the_run_remains(monkeypatch):
     fake = LateDocker([["first"], ["late"], []])
     monkeypatch.setattr(isolation, "docker", fake)
     monkeypatch.setattr(isolation, "CLEANUP_INTERVAL", 0)
+    monkeypatch.setattr(isolation, "CLEANUP_SETTLE", 0)
     isolation.cleanup_run("a" * 32)
     assert fake.removed == ["first", "late"]
+
+
+def test_cleanup_waits_for_a_settled_empty_listing(monkeypatch):
+    # 先前第一次列出空清單就返回；被終止的 docker CLI 稍後才建立的容器會被遺留。 / Cleanup used to return on the first
+    # empty listing, leaking a container that a terminated docker CLI created a moment later.
+    fake = LateDocker([[], ["late"], [], []])
+    monkeypatch.setattr(isolation, "docker", fake)
+    monkeypatch.setattr(isolation, "CLEANUP_INTERVAL", 0)
+    monkeypatch.setattr(isolation, "CLEANUP_SETTLE", 0)
+    isolation.cleanup_run("a" * 32)
+    assert fake.removed == ["late"]
+    assert fake.rounds == []
+
+
+def test_cleanup_sleeps_between_empty_listings(monkeypatch):
+    fake = LateDocker([])
+    slept = []
+    monkeypatch.setattr(isolation, "docker", fake)
+    monkeypatch.setattr(isolation.time, "sleep", slept.append)
+    isolation.cleanup_run("a" * 32)
+    assert slept == [isolation.CLEANUP_SETTLE] and isolation.CLEANUP_SETTLE >= 1
+
+
+def test_security_release_relies_on_the_settling_cleanup(tmp_path):
+    from security_harness.lifecycle import SecurityContainers
+    calls = []
+    SecurityContainers(tmp_path, "a" * 32, calls.append).release("a" * 32)
+    assert calls == ["a" * 32]
 
 
 def test_cleanup_fails_when_containers_keep_appearing(monkeypatch):
     fake = LateDocker([["again"]] * 10)
     monkeypatch.setattr(isolation, "docker", fake)
     monkeypatch.setattr(isolation, "CLEANUP_INTERVAL", 0)
+    monkeypatch.setattr(isolation, "CLEANUP_SETTLE", 0)
     with pytest.raises(RuntimeError, match="isolated containers remain after cleanup"):
         isolation.cleanup_run("a" * 32)
+
+
+def _gone(pid):
+    try:
+        state = Path(f"/proc/{pid}/stat").read_text().rsplit(")", 1)[1].split()[0]
+    except FileNotFoundError:
+        return True
+    return state == "Z"
+
+
+def test_supervised_isolation_worker_is_registered_and_stopped_with_the_run(tmp_path, monkeypatch):
+    # 先前 worker 從未登記，supervisor 逾時或取消時 stop_registered 看不到它，worker 與 docker CLI 成為孤兒。 /
+    # The worker used to be unregistered: on a supervisor timeout or cancel, stop_registered could not see it and the
+    # worker and its docker CLI were orphaned.
+    import shutil
+    import threading
+    import uuid
+    from security_harness import supervision
+    monkeypatch.setattr(run_security, "ROOT", tmp_path)
+    run_id = str(uuid.uuid4())
+    work = supervision.prepare_run(tmp_path, run_id, "security")
+    marker = tmp_path / "worker.pid"
+    script = ("import os,subprocess,sys,time;"
+              "p=subprocess.Popen([sys.executable,'-c','import time; time.sleep(60)']);"
+              f"open({str(marker)!r},'w').write(str(os.getpid())+' '+str(p.pid));time.sleep(60)")
+    outcome = {}
+
+    def run():
+        try:
+            outcome["done"] = run_security.run_isolation_worker([sys.executable, "-c", script], 30, run_id)
+        except BaseException as exc:  # noqa: BLE001 - 交回主執行緒檢查。 / Handed back to the main thread.
+            outcome["error"] = exc
+
+    thread = threading.Thread(target=run)
+    thread.start()
+    try:
+        import time
+        deadline = time.monotonic() + 10
+        while not marker.exists() or " " not in marker.read_text():
+            assert time.monotonic() < deadline, "worker never started"
+            time.sleep(0.02)
+        worker, grandchild = map(int, marker.read_text().split())
+        assert (work / "groups" / f"{worker}.json").exists()
+        supervision.stop_registered(work)
+        thread.join(10)
+        assert not thread.is_alive()
+        assert outcome["done"].returncode != 0
+        assert _gone(worker) and _gone(grandchild)
+    finally:
+        thread.join(10)
+        shutil.rmtree(supervision.temporary_directory(run_id), ignore_errors=True)
+
+
+def test_unsupervised_isolation_worker_runs_without_registration(tmp_path, monkeypatch):
+    import uuid
+    monkeypatch.setattr(run_security, "ROOT", tmp_path)
+    done = run_security.run_isolation_worker([sys.executable, "-c", "print('ok')"], 10, str(uuid.uuid4()))
+    assert (done.returncode, done.stdout) == (0, "ok\n")
+    assert not (tmp_path / ".state").exists()
+
+
+def test_isolation_worker_never_runs_when_registration_fails(tmp_path, monkeypatch):
+    import shutil
+    import uuid
+    from security_harness import supervision
+    monkeypatch.setattr(run_security, "ROOT", tmp_path)
+    run_id = str(uuid.uuid4())
+    supervision.prepare_run(tmp_path, run_id, "security")
+    marker = tmp_path / "ran"
+
+    def refuse(*args, **kwargs):
+        raise ValueError("invalid run owner")
+
+    monkeypatch.setattr(supervision, "register_group", refuse)
+    try:
+        with pytest.raises(ValueError, match="^invalid run owner$"):
+            run_security.run_isolation_worker([sys.executable, "-c", f"open({str(marker)!r},'w')"], 10, run_id)
+        assert not marker.exists()
+    finally:
+        shutil.rmtree(supervision.temporary_directory(run_id), ignore_errors=True)

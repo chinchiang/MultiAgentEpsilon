@@ -39,24 +39,45 @@ def sha256(data):
     return hashlib.sha256(data).hexdigest()
 
 
-def run_isolation_worker(command, timeout):
-    """在獨立 session 執行 isolation worker；逾時時終止整個程序群組，連同它的 docker CLI 子程序。
+def run_isolation_worker(command, timeout, run_id=None):
+    """在獨立 session 執行 isolation worker；有 supervisor 時先登記行程群組再放行，逾時時終止整個群組。
 
-Run the isolation worker in its own session. On timeout the whole process group is
-    terminated, including its docker CLI children, before the timeout is re-raised."""
-    from security_harness.supervision import terminate_group
-    process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, cwd=ROOT,
-                               start_new_session=True)
+Run the isolation worker in its own session. Under a supervisor its process group is
+    registered before the worker may run, so a supervisor timeout or cancel stops it too. On
+    timeout the whole group is terminated, including its docker CLI children, before the
+    timeout is re-raised."""
+    from security_harness import supervision
+    work = supervision.run_directory(ROOT, run_id) if run_id is not None else None
+    supervised = work is not None and (work / "owner.json").exists()
+    # 閘門在讀到 G 之前不執行 worker；擁有者在登記前死亡時讀到 EOF 即退出。 / The gate does not run the worker
+    # before it reads G; it exits on EOF if the owner dies before registration.
+    process = subprocess.Popen(supervision.gated_command(command), stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                               stderr=subprocess.PIPE, text=True, cwd=ROOT, start_new_session=True)
+    try:
+        if supervised:
+            supervision.register_group(work, process.pid)
+        process.stdin.write("G")
+        process.stdin.flush()  # communicate() 會關閉 stdin。 / communicate() closes stdin.
+    except BaseException:
+        try:
+            supervision.terminate_group(process.pid)
+        finally:
+            process.kill()
+            process.communicate(timeout=5)
+        raise
     try:
         stdout, stderr = process.communicate(timeout=timeout)
     except subprocess.TimeoutExpired:
         # 尚未 wait 的子程序 PID 不會被重用，可直接以它為群組 ID。 / An unreaped child's PID cannot be reused, so it is
         # safe to use as the group ID.
         try:
-            terminate_group(process.pid)
+            supervision.terminate_group(process.pid)
         finally:
             process.kill()
-            process.communicate()
+            try:
+                process.communicate(timeout=5)
+            except subprocess.TimeoutExpired:
+                pass  # 不讓收尾無限等待；原本的逾時照常拋出。 / Never wait forever; the original timeout is re-raised.
         raise
     return subprocess.CompletedProcess(command, process.returncode, stdout, stderr)
 
@@ -171,7 +192,8 @@ def main(audit, defer_final=False):
                 from security_harness.isolation import cleanup_run
                 try:
                     process = run_isolation_worker([sys.executable, "-I", str(ROOT / "scripts/isolation_worker.py"),
-                                                    str(candidate), variant, audit.data["run_id"]], roe["max_seconds"])
+                                                    str(candidate), variant, audit.data["run_id"]], roe["max_seconds"],
+                                                    audit.data["run_id"])
                 finally:
                     cleanup_run(audit.data["run_id"])
                 if process.returncode != 0:

@@ -74,6 +74,8 @@ PR #12 已由 CatGrocery 對最新 head `58d9bc0` 獨立核准，正式 [run 375
 
 **程式面（2026-11-08 第三次審視延後項目）：** 已全部完成：PR #71（AUTH worker 逾時終止整個程序群組、清理重試至清空、移除 #60 留下的收尾死碼）、PR #72（guard 與發布程式共用審查規則、候選測試數靜態下限、突變測試涵蓋 `github_trust`）、PR #73（模型 RoE 期限政策、報告 v3 封存輸入並以副本重驗）。
 
+**程式面（2026-11-09 第四次審視批次 F1）：** AUTH 的 isolation worker 改經登記閘門啟動，有 supervisor 時先登記行程群組再放行，supervisor 逾時或取消時會一併終止；容器清理須相隔 1 秒連續兩次列出空清單才算完成，`SecurityContainers.release` 不再自帶重複迴圈；bootstrap 的 Gitleaks 下載改為每個來源最多 3 次指數退避重試（連線錯誤、逾時、讀取中斷、5xx、429），`tools.lock.json` 可選擇以 `urls` 依序列出多個來源，雜湊或格式錯誤則改試下一個來源、不重試，壓縮檔成員須為一般檔案並以 `os.replace` 原子安裝。CI 執行的是 base 的 bootstrap，所以下載重試要等合併後才在 CI 生效。第四次審視的其餘項目（治理、模型層與文件、測試弱化審查）尚待後續批次。
+
 **已知限制：** 本地完整流程僅支援 Linux x86_64、Python 3.12 與 Docker（Windows 需使用 WSL）。開發用 oracle 已改為本機 loopback 真實 HTTP，不再使用棄用的 TestClient；pytest 現在把任何警告視為失敗。
 
 ## 可重現驗收
@@ -168,6 +170,8 @@ Deployment must use approved merged main and explicit regenerated evaluator/poli
 Feature work: G3, full G5, SBOM/SCA/CVE for other ecosystems, ASVS product applicability, a formal release, GLM native structured output, larger cross-family stability and bias experiments, and W15–W25.
 
 Code work deferred by the third review (November 8, 2026) is done: PR #71 (an AUTH worker timeout kills the whole process group, cleanup retries until nothing is left, and the finalization dead code #60 left is removed), PR #72 (the guard and the publisher share one review rule, a static floor on the candidate's tests, mutation coverage of `github_trust`) and PR #73 (the model RoE deadline policy, v3 reports that archive their inputs and are re-verified against those copies).
+
+Fourth-review batch F1 (November 9, 2026): the AUTH isolation worker now starts behind the registration gate, so under a supervisor its process group is registered before it may run and is stopped by a supervisor timeout or cancel; container cleanup finishes only after two empty listings one second apart, and `SecurityContainers.release` no longer carries its own duplicate loop; bootstrap's Gitleaks download retries each source up to three times with exponential backoff (connection errors, timeouts, truncated reads, 5xx and 429), `tools.lock.json` may list several sources in order under `urls`, a digest or format failure moves to the next source without retrying, and the archive member must be a regular file installed atomically with `os.replace`. CI runs the base's bootstrap, so the download retries take effect in CI only after merge. The other fourth-review items (governance, model layer and docs, review of weakened tests) remain for later batches.
 
 Known limits: the complete local flow supports Linux x86_64, Python 3.12 and Docker only (use WSL on Windows). The development oracle now uses real loopback HTTP instead of the deprecated TestClient, and pytest treats every warning as an error.
 
