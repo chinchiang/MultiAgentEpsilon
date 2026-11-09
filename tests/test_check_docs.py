@@ -253,3 +253,18 @@ def test_static_count_never_runs_candidate_code(tmp_path, monkeypatch, capsys):
     from security_harness import regression_inventory
     counts = regression_inventory.inventory(candidate, ["tests/test_x.py"])
     assert counts["tests/test_x.py::test_hostile"] == 1 and not (candidate / "PWNED").exists()
+
+
+@pytest.mark.parametrize("name,text,blocked", [
+    ("CLAUDE.md", "@AGENTS.md\n", False),
+    ("CLAUDE.md", "@AGENTS.md", False),
+    ("CLAUDE.md", "@AGENTS.md\nextra rules\n", True),
+    ("docs/CLAUDE.md", "@AGENTS.md\n", True),
+    ("docs/x.md", "@AGENTS.md\n", True),
+])
+def test_only_the_root_claude_pointer_may_skip_language_anchors(tmp_path, name, text, blocked):
+    # CLAUDE.md 只是指向 AGENTS.md 的指標；其他內容或其他位置仍須雙語錨點。 / CLAUDE.md is just a pointer to
+    # AGENTS.md; any other content or location still needs both language anchors.
+    root = repo(tmp_path, base_files(**{"AGENTS.md": BILINGUAL, name: text}))
+    found = [e for e in errors(root) if "language anchor" in e]
+    assert bool(found) is blocked

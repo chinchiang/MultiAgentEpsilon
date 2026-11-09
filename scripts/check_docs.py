@@ -18,6 +18,8 @@ from security_harness import candidate_git
 # 臺灣慣用語規則：中文段落與圖表不得使用這些中國大陸用語。 / Taiwan terminology: these mainland-Chinese terms
 # are refused in Chinese prose and diagrams.
 MAINLAND_TERMS = ('軟件', '信息', '數據庫', '服務器', '默認', '用戶', '文件夾', '服務端', '網絡', '視頻', '原碼')
+# 根目錄 CLAUDE.md 唯一允許的單行指標內容。 / The only one-line pointer the root CLAUDE.md may hold.
+POINTER = '@AGENTS.md'
 START = '<!-- repository-tree:start -->'
 END = '<!-- repository-tree:end -->'
 
@@ -145,6 +147,10 @@ def validate(paths, root=ROOT):
     markdown = [root / p for p in paths if p.endswith('.md')]
     for path in markdown:
         text = path.read_text(encoding='utf-8')
+        # 根目錄 CLAUDE.md 只能是指向 AGENTS.md 的單行指標；協作規則只寫在 AGENTS.md。 / The root CLAUDE.md may be
+        # only a one-line pointer to AGENTS.md, which holds the collaboration rules.
+        if path == root / 'CLAUDE.md' and text.rstrip('\n') == POINTER:
+            continue
         for anchor in ('zh-tw', 'en'):
             if text.count(f'<a id="{anchor}"></a>') != 1:
                 errors.append(f'{path.relative_to(root)}: language anchor / 語言入口 {anchor}')
