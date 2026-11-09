@@ -102,8 +102,11 @@ def configured_adapter(provider, roe_sha256, work=None, http=None):
     executable = os.getenv("AWS_CLI_PATH", "aws")
     if shutil.which(executable) is None:
         raise ModelError("CONFIGURATION")
+    # Bedrock 走 AWS CLI，其讀取逾時取自計畫給此供應商的呼叫期限。 / Bedrock goes through the AWS CLI, whose read
+    # timeout comes from the call deadline the plan gives this provider.
+    seconds = http.timeout_seconds if http is not None else 20
     return BedrockAdapter(setting("BEDROCK_MODEL_ID"), setting("BEDROCK_REGION"),
-                          AwsCLI(executable, run_directory=work))
+                          AwsCLI(executable, run_directory=work, timeout_seconds=seconds))
 
 
 def implementation_digest():

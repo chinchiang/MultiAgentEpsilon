@@ -202,9 +202,14 @@ Use the configured AWS credential chain. No shell or interactive login.
     Kill the dedicated process group and reap the CLI on cancellation/timeout.
     """
 
-    def __init__(self, executable="aws", run_directory=None):
+    def __init__(self, executable="aws", run_directory=None, timeout_seconds=20):
+        # 讀取逾時等於該供應商的呼叫期限，連線逾時不超過 10 秒；上限同 JsonHTTP。 / The read timeout equals the
+        # provider's call deadline and the connect timeout is at most 10 seconds; the ceiling matches JsonHTTP.
+        if type(timeout_seconds) is not int or not 1 <= timeout_seconds <= MODEL_CALL_CEILING:
+            raise ValueError("invalid AWS CLI timeout")
         self.executable = executable
         self.run_directory = run_directory
+        self.timeout_seconds = timeout_seconds
 
     async def converse(self, region, payload):
         # CLI 與 credential_process 只看見白名單內的 AWS 設定與基本程序／代理／CA 環境，不傳入 GH_TOKEN、其他供應商權杖或端點覆寫。
@@ -223,7 +228,8 @@ Use the configured AWS credential chain. No shell or interactive login.
             input_path = f"file:///proc/self/fd/{fd}"
             command = [self.executable, "bedrock-runtime", "converse", "--region", region,
                 "--cli-input-json", input_path, "--output", "json", "--no-cli-pager",
-                "--cli-connect-timeout", "10", "--cli-read-timeout", "20"]
+                "--cli-connect-timeout", str(min(10, self.timeout_seconds)),
+                "--cli-read-timeout", str(self.timeout_seconds)]
             if self.run_directory is not None:
                 from ..supervision import gated_command, register_group
                 command = gated_command(command)

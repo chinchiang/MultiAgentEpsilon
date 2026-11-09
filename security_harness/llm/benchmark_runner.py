@@ -50,9 +50,25 @@ def digest_bytes(raw):
     return hashlib.sha256(raw).hexdigest()
 
 
-def initial_report(providers, case_ids, run_id, output_tokens=OUTPUT_TOKENS, rounds=1, inputs=None):
+def implementation_sha256():
+    """盲審計畫綁定的實作雜湊：模型層實作與兩支盲審腳本。計畫與 worker 都以此計算。 / The implementation digest a
+    blind-review plan binds: the model layer plus the two blind-review scripts. The plan and the worker both use it."""
+    from . import config
     from .benchmark_score import file_digest
-    from .config import implementation_digest, ROOT
+    return digest(json.dumps([config.implementation_digest(), file_digest(config.ROOT / 'scripts/model_review.py'),
+                              file_digest(config.ROOT / 'scripts/review_adjudicate.py')]))
+
+
+def implementation_unchanged(report):
+    """worker 讀到的實作是否仍是計畫綁定的那一份；無法讀取即視為已變更。 / Whether the implementation the worker reads is
+    still the one the plan bound; an unreadable implementation counts as changed."""
+    try:
+        return implementation_sha256() == report['implementation_sha256']
+    except OSError:
+        return False
+
+
+def initial_report(providers, case_ids, run_id, output_tokens=OUTPUT_TOKENS, rounds=1, inputs=None):
     inputs = snapshot_inputs() if inputs is None else inputs
     policy = deadline_policy(inputs['model-roe.json'])
     cases = load_cases(inputs['catalog.json'])
@@ -62,15 +78,13 @@ def initial_report(providers, case_ids, run_id, output_tokens=OUTPUT_TOKENS, rou
     planned = [p['provider'] for p in plan]
     limits = Limits(max_calls=len(plan), reserved_output_tokens=output_tokens * len(plan),
                     timeout_seconds=max(call_seconds(policy, p) for p in planned))
-    implementation = [implementation_digest(), file_digest(ROOT / 'scripts/model_review.py'),
-                      file_digest(ROOT / 'scripts/review_adjudicate.py')]
     checks = [{**p, 'status': 'NOT_RUN', 'code': None, 'review': None, 'call_id': None,
                'request_sha256': request_digest(review_request(cases[p['case_id']], p['review_id'], output_tokens))}
               for p in plan]
     return {'schema_version': REPORT_VERSION, 'operation': 'model-smoke', 'task': 'blind-review', 'run_id': run_id,
             'advisory_only': True, 'data_class': 'synthetic', 'status': 'INCOMPLETE', 'code': None,
             'started_at': datetime.now(timezone.utc).isoformat(),
-            'implementation_sha256': digest(json.dumps(implementation)),
+            'implementation_sha256': implementation_sha256(),
             'case_catalog_sha256': digest_bytes(inputs['catalog.json']), 'oracle_sha256': digest_bytes(inputs['oracle.json']),
             'model_roe_sha256': digest_bytes(inputs['model-roe.json']), 'deadline_policy': policy,
             'rounds': rounds, 'sampling_policy': {p: ('provider-default' if p == 'bedrock' else 'temperature=0' if not p.startswith('mock-') else 'deterministic-fixture') for p in providers},
@@ -115,9 +129,10 @@ async def run_worker(root, run_id, plan_digest):
     try:
         from .benchmark_score import file_digest
         if (file_digest(CASES_PATH) != report['case_catalog_sha256']
-                or file_digest(config.ROOT / 'security/model-roe.json') != report['model_roe_sha256']):
-            # 呼叫前須核對計畫綁定的目錄與 RoE；不可先花費再偵測。 / Calls must use the catalog and RoE the plan was
-            # bound to; never spend first, detect later.
+                or file_digest(config.ROOT / 'security/model-roe.json') != report['model_roe_sha256']
+                or implementation_unchanged(report) is False):
+            # 呼叫前須核對計畫綁定的目錄、RoE 與實作；不可先花費再偵測。 / Calls must use the catalog, RoE and
+            # implementation the plan was bound to; never spend first, detect later.
             report['code'] = 'CONFIGURATION'
             for check in report['checks']:
                 check.update(status='ERROR', code='CONFIGURATION')

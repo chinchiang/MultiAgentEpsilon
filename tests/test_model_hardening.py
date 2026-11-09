@@ -317,6 +317,11 @@ def test_smoke_worker_spends_nothing_after_the_bound_roe_is_swapped(tmp_path, mo
     report = smoke.initial_report(["mock", "lmstudio"], str(uuid.uuid4()))
     tampered_roe(tmp_path, monkeypatch, lambda roe: roe.update(max_calls_per_run=15))
     live_settings(monkeypatch, "lmstudio")
+    # 換掉 RoE 也會改變實作雜湊並讓 worker 全部拒絕；此處固定雜湊，只驗證 live 授權這一層。 / Swapping the RoE also
+    # changes the implementation digest and makes the worker refuse everything; pin the digest here to test only the
+    # live authorization layer.
+    from security_harness.llm import config
+    monkeypatch.setattr(config, "implementation_digest", lambda: report["implementation_sha256"])
     persist(tmp_path / "artifacts" / report["run_id"] / "report.json", report)
     assert asyncio.run(smoke.run_worker(tmp_path, report["run_id"], smoke_plan_digest(report))) == 1
     data = json.loads((tmp_path / "artifacts" / report["run_id"] / "report.json").read_text())
