@@ -4,7 +4,7 @@
 
 # 協作指引
 
-本檔是代理人協作規則的唯一來源；`CLAUDE.md` 只以 `@AGENTS.md` 匯入本檔、不另寫規則，規則只改本檔。
+本檔是代理人協作規則的唯一來源；`CLAUDE.md` 只有一行 `@AGENTS.md` 匯入本檔、不另寫規則，規則只改本檔。
 
 ## 語言
 
@@ -36,7 +36,7 @@
 
 # Collaboration instructions
 
-This file is the only source of agent collaboration rules; `CLAUDE.md` only imports it with `@AGENTS.md` and holds no rules of its own, so edit rules only in this file.
+This file is the only source of agent collaboration rules; `CLAUDE.md` is the single line `@AGENTS.md` importing it and holds no rules of its own, so edit rules only in this file.
 
 Use Traditional Chinese and Taiwan usage for explanations and reports, with Chinese/English technical terms. Preserve code, commands, paths and identifiers; use English elsewhere only when necessary.
 
