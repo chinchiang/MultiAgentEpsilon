@@ -66,6 +66,10 @@ def alive(pid):
 
 
 def setup_driver(tmp_path, *, hang=True, timeout=20, pause=None, child_registration=False):
+    # 夾具寫出的 pid／run-id 檔一律先寫暫存檔再原子替換：測試看到檔案時內容必已完整，
+    # 否則空檔會讓 assert_clean 對零個 pid 判定「全部已結束」而空洞通過。
+    # Fixture pid/run-id files are written then atomically renamed, so a visible file is complete; an empty one
+    # would let assert_clean pass vacuously over zero pids.
     aws = tmp_path / 'aws-fixture'
     aws.write_text(f'#!{sys.executable}\n' + '''import json,os,signal,subprocess,sys,time
 from pathlib import Path
@@ -73,7 +77,7 @@ payload=json.loads(Path(sys.argv[sys.argv.index('--cli-input-json')+1].removepre
 assert payload['messages'][0]['content'][0]['text'].startswith('Reply with exactly')
 temp=Path(os.environ['TMPDIR'])/'nested';temp.mkdir();(temp/'owned.tmp').write_text('synthetic')
 child=subprocess.Popen([sys.executable,'-c','import signal,time; signal.signal(signal.SIGTERM,signal.SIG_IGN); time.sleep(60)'],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
-Path('aws-pids').write_text(str(os.getpid())+' '+str(child.pid))
+Path('aws-pids.tmp').write_text(str(os.getpid())+' '+str(child.pid));os.replace('aws-pids.tmp','aws-pids')
 ''' + ('''signal.signal(signal.SIGTERM,signal.SIG_IGN)
 time.sleep(60)
 ''' if hang else '''print(json.dumps({'output':{'message':{'role':'assistant','content':[{'text':'EPSILON_SYNTHETIC_OK'}]}},'stopReason':'end_turn'}))
@@ -82,13 +86,13 @@ time.sleep(60)
     worker = ROOT / 'scripts/model_worker.py'
     if child_registration:
         worker = tmp_path / 'worker.py'
-        worker.write_text(f'''import asyncio,sys,time
+        worker.write_text(f'''import asyncio,os,sys,time
 from pathlib import Path
 sys.path.insert(0,{str(ROOT)!r})
 from security_harness import supervision
 from scripts.model_smoke import run_worker
 def paused_register(work,pid,role='child'):
-    Path('gated-child').write_text(str(pid))
+    Path('gated-child.tmp').write_text(str(pid));os.replace('gated-child.tmp','gated-child')
     time.sleep(60)
 supervision.register_group=paused_register
 raise SystemExit(asyncio.run(run_worker(Path.cwd(),sys.argv[2],sys.argv[4])))
@@ -103,11 +107,11 @@ from security_harness.llm import lifecycle as life
 root=Path.cwd(); run_id=str(uuid.uuid4())
 report=initial_report(['bedrock','mock'],run_id)
 life.persist(root/'artifacts'/run_id/'report.json',report)
-Path('run-id').write_text(run_id)
+Path('run-id.tmp').write_text(run_id);os.replace('run-id.tmp','run-id')
 pause={pause!r}
 if pause=='registration':
     def delayed(work,pid,role='child'):
-        Path('gated-worker').write_text(str(pid))
+        Path('gated-worker.tmp').write_text(str(pid));os.replace('gated-worker.tmp','gated-worker')
         time.sleep(60)
     supervision.register_group=delayed
 if pause=='finish':

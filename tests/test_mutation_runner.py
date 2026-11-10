@@ -68,7 +68,10 @@ def test_guard():
 def test_timeout_is_separate_from_killed_and_child_is_reaped(tmp_path):
     root = worker_root(tmp_path)
     pid = tmp_path / 'child.pid'
-    (root / 'test_wait.py').write_text(f'import os,time\nfrom pathlib import Path\nPath({str(pid)!r}).write_text(str(os.getpid()))\ntime.sleep(60)\n')
+    # 先寫暫存檔再原子替換，逾時終止時不會留下空的 pid 檔。 / Write then atomically rename, so a timeout kill never leaves an empty pid file.
+    (root / 'test_wait.py').write_text(f'import os,time\nfrom pathlib import Path\n'
+                                       f'Path({str(pid) + ".tmp"!r}).write_text(str(os.getpid()))\n'
+                                       f'os.replace({str(pid) + ".tmp"!r}, {str(pid)!r})\ntime.sleep(60)\n')
     before = time.monotonic()
     assert run_tests(root, ['test_wait.py'], root / 'run.log', 2) == ('TIMEOUT', 0)
     assert time.monotonic() - before < 10
