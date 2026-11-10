@@ -395,7 +395,8 @@ def test_cli_timeout_kills_child_group_and_reaps_parent(tmp_path):
     pidfile = tmp_path / "pids"
     cli = cli_fixture(tmp_path, "import os,subprocess,sys,time\n"
         "p=subprocess.Popen([sys.executable,'-c','import time; time.sleep(60)'])\n"
-        f"open({str(pidfile)!r}, 'w').write(str(os.getpid())+' '+str(p.pid))\n"
+        f"open({str(pidfile) + '.tmp'!r}, 'w').write(str(os.getpid())+' '+str(p.pid))\n"
+        f"os.replace({str(pidfile) + '.tmp'!r}, {str(pidfile)!r})\n"
         "time.sleep(60)\n")
     result, evidence = invoke(BedrockAdapter("synthetic-profile", "ap-southeast-1", cli), limits=Limits(timeout_seconds=0.3))
     assert result is None and evidence["status"] == "TIMEOUT"
@@ -407,8 +408,11 @@ def test_cli_timeout_kills_child_group_and_reaps_parent(tmp_path):
 
 def test_cli_external_cancellation_reaps_process(tmp_path):
     pidfile = tmp_path / "pid"
+    # 先寫暫存檔再原子替換：測試看到 pidfile 時內容必已完整，否則讀到空字串會檢查 /proc/ 本身。
+    # Write then atomically rename, so a visible pidfile is never empty (an empty read would check /proc/ itself).
     cli = cli_fixture(tmp_path, "import os,time\n"
-                      f"open({str(pidfile)!r}, 'w').write(str(os.getpid()))\n"
+                      f"open({str(pidfile) + '.tmp'!r}, 'w').write(str(os.getpid()))\n"
+                      f"os.replace({str(pidfile) + '.tmp'!r}, {str(pidfile)!r})\n"
                       "time.sleep(60)\n")
     async def scenario():
         gateway = Gateway()
