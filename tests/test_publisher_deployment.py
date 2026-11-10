@@ -158,3 +158,16 @@ def test_publisher_guide_states_the_template_regression_floor():
     guide = (ROOT / "docs/trusted-check-publisher.zh-TW.md").read_text(encoding="utf-8")
     assert f"範本目前為 {floor}，" in guide
     assert f"the template is currently {floor};" in guide
+
+
+def test_publisher_guide_states_the_template_identifiers_and_reviewers():
+    # 部署指南中英兩段手抄範本的儲存庫 ID、workflow ID 與審查者；範本改動時漏改文件會直接失敗。 / Both language
+    # sections of the guide copy the template's repository ID, workflow ID and reviewers by hand; changing the
+    # template without the guide now fails.
+    template = json.loads((ROOT / "security/trusted-publisher.example.json").read_text(encoding="utf-8"))
+    guide = (ROOT / "docs/trusted-check-publisher.zh-TW.md").read_text(encoding="utf-8")
+    assert f"範本儲存庫 ID 是 {template['repository_id']}、workflow ID 是 {template['workflow_id']}" in guide
+    assert f"repository ID {template['repository_id']}/workflow ID {template['workflow_id']}" in guide
+    reviewers = template["reviewers"]
+    assert f"（範本為 {'、'.join(reviewers)}）" in guide
+    assert f"baseline_reviewers ({', '.join(reviewers)})" in guide

@@ -2,6 +2,7 @@
 
 Keep property-test caches in the existing generated area, outside source digests."""
 import os
+import signal
 import sys
 from pathlib import Path
 
@@ -14,6 +15,25 @@ if sys.version_info[:2] != (3, 12):
     pytest.exit("use the repository .venv (Python 3.12) / 請使用儲存庫 .venv（Python 3.12）", returncode=4)
 
 set_hypothesis_home_dir(Path(__file__).resolve().parents[1] / '.state/hypothesis')
+
+
+# 每項測試的牆鐘上限；終止路徑若退化，失敗會指出卡住的測試，而不是等整個 CI job 逾時。 / Per-test wall-clock
+# limit: if a termination path regresses, the failure names the stuck test instead of waiting for the CI job timeout.
+TEST_TIMEOUT_SECONDS = 180
+
+
+@pytest.hookimpl(hookwrapper=True)
+def pytest_runtest_call(item):
+    def expired(signum, frame):
+        pytest.fail(f"test exceeded {TEST_TIMEOUT_SECONDS} s / 測試超過 {TEST_TIMEOUT_SECONDS} 秒: {item.nodeid}",
+                    pytrace=False)
+    previous = signal.signal(signal.SIGALRM, expired)
+    signal.setitimer(signal.ITIMER_REAL, TEST_TIMEOUT_SECONDS)
+    try:
+        yield
+    finally:
+        signal.setitimer(signal.ITIMER_REAL, 0)
+        signal.signal(signal.SIGALRM, previous)
 
 
 def pytest_report_header(config):

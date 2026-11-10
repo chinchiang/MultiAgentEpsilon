@@ -5,11 +5,13 @@ import json
 import urllib.parse
 
 from security_harness.github_http import Denied, strict_json
+from security_harness.github_trust import GITHUB_ACTIONS_APP_ID
 
 PAGING = ("per_page", "page")
 # cursor 分頁端點以這些參數翻頁與排序，不參與路由。 / Cursor-paged endpoints page and sort with these; they take no part in routing.
 CURSOR = ("direction", "before", "after")
-ACTIONS_APP_ID = 15368
+# 與正式判斷共用同一個 App ID，不另抄一份。 / The same App ID as the real checks, not a second copy.
+ACTIONS_APP_ID = GITHUB_ACTIONS_APP_ID
 
 
 class FakeGitHub:

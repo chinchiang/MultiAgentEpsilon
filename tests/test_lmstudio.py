@@ -146,7 +146,9 @@ def test_cancellation_and_deadline_close_the_response_stream():
         transport = httpx.MockTransport(lambda _: httpx.Response(200,
             headers={'Content-Type': 'application/json'}, stream=stream))
         adapter = LMStudioAdapter(MODEL, BASE, http=LMStudioHTTP(BASE, transport=transport))
-        gateway = Gateway(Limits(timeout_seconds=0.02))
+        # 取消情境的期限要遠大於取消前的等待，否則忙碌的 CI 會先觸發逾時。 / In the cancel case the deadline must far
+        # exceed the wait before cancelling, or a busy CI runner hits the timeout first.
+        gateway = Gateway(Limits(timeout_seconds=5 if cancel else 0.02))
         task = asyncio.create_task(gateway.generate(adapter, Request('synthetic', 'synthetic')))
         if cancel:
             await asyncio.sleep(0.005); task.cancel()

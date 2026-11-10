@@ -8,7 +8,7 @@ import shutil
 import time
 
 import pytest
-from scripts.mutation_check import mutations, classify, run_tests
+from scripts.mutation_check import MAX_MUTANTS, TARGETS, classify, missing_targets, mutations, run_tests
 
 
 @pytest.mark.parametrize('xml,code,expected', [
@@ -73,8 +73,11 @@ def test_timeout_is_separate_from_killed_and_child_is_reaped(tmp_path):
                                        f'Path({str(pid) + ".tmp"!r}).write_text(str(os.getpid()))\n'
                                        f'os.replace({str(pid) + ".tmp"!r}, {str(pid)!r})\ntime.sleep(60)\n')
     before = time.monotonic()
-    assert run_tests(root, ['test_wait.py'], root / 'run.log', 2) == ('TIMEOUT', 0)
-    assert time.monotonic() - before < 10
+    # 期限要留給隔離 pytest 啟動並寫出 pid；只給 2 秒時忙碌機器上 pid 檔可能還不存在。 / The deadline must leave room
+    # for the isolated pytest to start and write its pid; with only 2 s the pid file may not exist on a busy machine.
+    assert run_tests(root, ['test_wait.py'], root / 'run.log', 6) == ('TIMEOUT', 0)
+    assert time.monotonic() - before < 20
+    assert pid.exists(), 'the child never started before the deadline'
     child = int(pid.read_text())
     with pytest.raises(ProcessLookupError, match='No such process'):
         os.kill(child, 0)
@@ -100,3 +103,27 @@ def test_nested_same_column_boolean_nodes_are_mutated_independently():
 def test_mutation_worker_denies_process_launch_paths():
     from scripts.mutation_worker import DENIED_EVENTS
     assert {'subprocess.Popen', 'os.system', 'os.exec', 'os.posix_spawn', 'os.fork', 'socket.connect'} <= DENIED_EVENTS
+
+
+ROOT = Path(__file__).resolve().parents[1]
+
+
+def test_every_mutation_target_resolves_and_a_renamed_one_is_reported():
+    # 函式改名後，它的突變原本會靜默消失。 / A renamed function used to drop its mutants silently.
+    for path, (functions, _) in TARGETS.items():
+        assert missing_targets((ROOT / path).read_text(encoding='utf-8'), functions) == [], path
+    source = 'def present(a, b):\n    return a == b\n\n\nclass Gate:\n    def check(self, a):\n        return a\n'
+    assert missing_targets(source, ('present', 'Gate.check')) == []
+    assert missing_targets(source, ('present', 'renamed_away', 'Gate.gone')) == ['Gate.gone', 'renamed_away']
+
+
+def test_mutation_guide_lists_every_target_and_the_mutant_cap():
+    # 目標清單與上限在文件中英兩段手抄；增刪目標時漏改文件會直接失敗。 / The target list and cap are copied by hand into
+    # both language sections of the guide; adding or removing a target without the guide now fails.
+    guide = (ROOT / 'docs/mutation-testing.zh-TW.md').read_text(encoding='utf-8')
+    chinese, english = guide.split('<a id="en"></a>', 1)
+    for path in TARGETS:
+        assert f'`{path}`' in chinese, path
+        assert Path(path).name in english, path
+    assert f'超過 {MAX_MUTANTS} 個突變' in chinese
+    assert f'more-than-{MAX_MUTANTS}' in english

@@ -128,6 +128,12 @@ def delete_statement(tree, target):
     raise AssertionError('guard statement has no parent list')
 
 
+def missing_targets(source, functions):
+    """指定卻找不到的目標函式；改名後不可讓它的突變靜默消失。 / Named target functions that cannot be found: a
+    renamed function must not let its mutants silently disappear."""
+    return sorted(set(functions) - {name for name, _ in target_functions(ast.parse(source), functions)})
+
+
 def mutations(source, functions):
     tree = ast.parse(source)
     output = []
@@ -247,6 +253,8 @@ def run(root, output):
         for name, (functions, tests) in TARGETS.items():
             path = snapshot / name
             original = path.read_text()
+            if missing_targets(original, functions):
+                raise ValueError('mutation target not found')
             mutants = mutations(original, functions)
             total += len(mutants)
             if not mutants or total > MAX_MUTANTS:
