@@ -8,7 +8,7 @@ import json
 import os
 from datetime import datetime, timedelta, timezone
 from . import supervision
-from .results import EVIDENCE_VERSION, SUBJECT_FORMAT, decide, required_gate_kinds
+from .results import EVIDENCE_VERSION, SUBJECT_FORMAT, decide, read_regular, required_gate_kinds
 from .supervision import PlanMismatch, child_environment, plan_changed, plan_digest
 
 # 遠大於 RoE 的 120 秒執行上限。 / Well beyond the RoE's 120-second run limit.
@@ -102,14 +102,10 @@ The security role's external resources at the seam: the run's containers, remove
         """讀回 worker 最後原子保存的報告；無法解析時回傳 None 與例外型別。 / Read back the worker's last atomically
         persisted report; when it cannot be parsed, return None and the exception type."""
         try:
-            # 不跟隨符號連結，並限制大小；報告目錄可被同 uid 程序改寫。 / Never follow a symlink and bound the size:
-            # the report directory is writable by any process under the same uid.
-            fd = os.open(self.report_path(), os.O_RDONLY | os.O_NOFOLLOW)
-            with os.fdopen(fd, 'rb') as handle:
-                raw = handle.read(REPORT_LIMIT + 1)
-            if len(raw) > REPORT_LIMIT:
-                raise ValueError('evidence too large')
-            data = json.loads(raw)
+            # 不跟隨符號連結、只讀一般檔案（FIFO 不會卡住）並限制大小；報告目錄可被同 uid 程序改寫。 / Never follow a
+            # symlink, read only a regular file (a FIFO cannot block) and bound the size: the report directory is
+            # writable by any process under the same uid.
+            data = json.loads(read_regular(self.report_path(), REPORT_LIMIT))
             if not isinstance(data, dict) or data.get('run_id') != self.run_id:
                 raise ValueError('invalid evidence identity')
             return data, None

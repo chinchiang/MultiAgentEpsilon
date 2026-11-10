@@ -53,13 +53,9 @@ Digest of a blind review's immutable plan, budget, identities and per-request di
 def read_report(root, run_id):
     path = root / 'artifacts' / run_id / 'report.json'
     try:
-        if path.is_symlink() or path.stat().st_size > REPORT_LIMIT:
-            raise ValueError('invalid evidence')
-        with path.open('rb') as handle:
-            raw = handle.read(REPORT_LIMIT + 1)
-        if len(raw) > REPORT_LIMIT:
-            raise ValueError('invalid evidence size')
-        data = strict_json(raw)
+        # 不跟隨符號連結、只讀一般檔案（FIFO 不會卡住）並限制大小。 / Never follow a symlink, read only a regular
+        # file (a FIFO cannot block) and bound the size.
+        data = strict_json(read_regular(path, REPORT_LIMIT))
         if (data.get('run_id') != run_id or data.get('operation') != 'model-smoke' or
                 data.get('schema_version') not in REPORT_VERSIONS):
             raise ValueError('invalid evidence identity')

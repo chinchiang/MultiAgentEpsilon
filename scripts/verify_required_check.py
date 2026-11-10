@@ -26,7 +26,7 @@ from pathlib import Path
 if __name__ == "__main__":
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from security_harness.github_readonly import GitHubReader, ReadOnlyGitHub
-from security_harness.github_http import Denied
+from security_harness.github_http import Denied, need
 from security_harness.github_trust import GITHUB_ACTIONS_APP_ID, GitHubTrust
 
 REQUIRED_CHECK = "trusted-security-pilot"
@@ -35,10 +35,6 @@ WORKFLOW_PATH = ".github/workflows/security.yml"
 BASE_BRANCH = "main"
 SHA = re.compile(r"[0-9a-f]{40}")
 
-
-def need(condition, code):
-    if not condition:
-        raise Denied(code)
 
 
 def verify(reader, number):
