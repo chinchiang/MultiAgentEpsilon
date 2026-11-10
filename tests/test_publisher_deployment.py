@@ -148,3 +148,13 @@ def test_repository_leaves_headroom_under_publisher_source_and_call_limits():
     # 冷快取約需每檔一次 blob 請求加上約 30 次其他呼叫。 / A cold cache needs about one blob call per file plus ~30 others.
     assert len(tracked) * 2 <= publisher.MAX_SOURCE_FILES
     assert publisher.MAX_SOURCE_FILES + 50 <= github_http.API_CALL_BUDGET
+
+
+def test_publisher_guide_states_the_template_regression_floor():
+    # 部署指南中英兩段寫出的範本下限必須等於範本本身，避免上調下限時漏改文件。 / Both language sections of the deployment
+    # guide must state the template's own floor, so raising the floor cannot leave the guide behind.
+    floor = json.loads((ROOT / "security/trusted-publisher.example.json").read_text(encoding="utf-8"))[
+        "minimum_regression_tests"]
+    guide = (ROOT / "docs/trusted-check-publisher.zh-TW.md").read_text(encoding="utf-8")
+    assert f"範本目前為 {floor}，" in guide
+    assert f"the template is currently {floor};" in guide
