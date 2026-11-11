@@ -758,3 +758,115 @@ def test_guard_approval_must_still_be_a_real_approval_of_this_head_by_that_revie
         bundle["reviews"][0] = {**bundle["reviews"][0], "state": "COMMENTED"}
     with pytest.raises(publisher.Denied, match="^BASELINE_APPROVAL$"):
         publisher.validate_bundle(**bundle)
+
+
+# 以下測試讓每道發布檢查都以自己的拒絕碼攔下，而非靠較晚的檢查碰巧拒絕；突變測試藉此偵測任一檢查被刪或弱化。 / The tests
+# below make every publisher check refuse with its own code rather than by a later check's accident, so the mutation
+# campaign detects any check being deleted or weakened.
+SETTINGS_ATTACKS = {
+    "schema": ("schema_version", 2, "SETTINGS_SCHEMA"),
+    "repository": ("repository", "owner repo", "REPOSITORY"),
+    "zero_installation": ("installation_id", 0, "SETTINGS_INCOMPLETE"),
+    "check_name": ("check_name", "other/check", "CHECK_SCOPE"),
+    "workflow_path": ("workflow_path", ".github/workflows/other.yml", "WORKFLOW_PATH"),
+    "evaluator_sha": ("evaluator_sha", "A" * 40, "UNAPPROVED_EVALUATOR"),
+    "evaluator_digest": ("evaluator_digest", "sha256:" + "e" * 64, "EVALUATOR_DIGEST"),
+    "policy_digest": ("policy_digest", "F" * 64, "POLICY_DIGEST"),
+    "relative_verifier": ("attestation_verifier", "tools/gh", "ATTESTATION_SETTINGS"),
+    "duplicate_reviewers": ("reviewers", ["reviewer", "reviewer"], "REVIEWERS"),
+    "malformed_reviewer": ("reviewers", ["bad name"], "REVIEWERS"),
+}
+
+
+@pytest.mark.parametrize("attack", sorted(SETTINGS_ATTACKS))
+def test_each_publisher_setting_is_refused_by_its_own_check(bundle, attack):
+    key, value, code = SETTINGS_ATTACKS[attack]
+    publisher.validate_settings(bundle["settings"], bundle["gate_policy"])
+    bundle["settings"][key] = value
+    with pytest.raises(publisher.Denied, match=f"^{code}$"):
+        publisher.validate_settings(bundle["settings"], bundle["gate_policy"])
+
+
+@pytest.mark.parametrize("attack,code", [
+    ("closed", "PR_NOT_REVIEWABLE"), ("draft", "PR_NOT_REVIEWABLE"), ("base_repository", "PR_REPOSITORY"),
+    ("base_name", "PR_REPOSITORY"), ("base_ref", "PR_REPOSITORY"), ("candidate_sha", "CANDIDATE_SHA")])
+def test_pull_request_is_refused_by_its_own_check(bundle, attack, code):
+    # review_decision 也拒絕 draft；此處直接驗證 validate_pr，讓它不被較晚的重複檢查掩蓋。 / review_decision refuses drafts
+    # too; validate_pr is checked directly so the later duplicate cannot mask its removal.
+    pr = bundle["pr"]
+    publisher.validate_pr(pr, bundle["settings"])
+    if attack == "closed": pr["state"] = "closed"
+    elif attack == "draft": pr["draft"] = True
+    elif attack == "base_repository": pr["base"]["repo"]["id"] = 20
+    elif attack == "base_name": pr["base"]["repo"]["full_name"] = "owner/other"
+    elif attack == "base_ref": pr["base"]["ref"] = "release"
+    else: pr["head"]["sha"] = "B" * 40
+    with pytest.raises(publisher.Denied, match=f"^{code}$"):
+        publisher.validate_pr(pr, bundle["settings"])
+
+
+@pytest.mark.parametrize("other,code", [
+    ({"id": "101", "head_sha": "b" * 40}, "RUN_LISTING"),
+    ({"id": 101}, "RUN_LISTING"),
+    ({"id": 101, "head_sha": "b" * 40, "head_branch": "feature"}, "RUN_LISTING_IDENTITY"),
+    ({"id": 101, "head_sha": "b" * 40, "head_repository": {"id": 10}}, "RUN_LISTING_IDENTITY")])
+def test_malformed_run_listing_entries_fail_closed(bundle, other, code):
+    with pytest.raises(publisher.Denied, match=f"^{code}$"):
+        publisher.reject_newer_runs(bundle["run"], [bundle["run"], other], "b" * 40)
+
+
+def test_older_run_of_the_same_head_does_not_supersede_this_run(bundle):
+    older = {**bundle["run"], "id": 99}
+    publisher.reject_newer_runs(bundle["run"], [older, bundle["run"]], "b" * 40)
+
+
+def junit(tests=360, cases=360, child=b"", padding=0):
+    body = b"".join(f'<testcase classname="synthetic" name="case_{i}">'.encode() + child + b"</testcase>"
+                    for i in range(cases))
+    return (f'<testsuites><testsuite tests="{tests}" failures="0" errors="0" skipped="0">'.encode() + body
+            + b" " * padding + b"</testsuite></testsuites>")
+
+
+def test_junit_at_the_size_limit_is_accepted_and_one_byte_more_is_refused(bundle):
+    limit = 2 * 1024**2
+    exact = junit(padding=limit - len(junit()))
+    assert len(exact) == limit
+    bundle["files"]["trusted/artifacts/pytest.xml"] = exact
+    assert publisher.validate_bundle(**bundle)["tests"] == 360
+    bundle["files"]["trusted/artifacts/pytest.xml"] = exact[:-len(b"</testsuites>")] + b" </testsuites>"
+    with pytest.raises(publisher.Denied, match="^JUNIT_LIMIT$"):
+        publisher.validate_bundle(**bundle)
+
+
+@pytest.mark.parametrize("attack,code", [
+    ("foreign_root", "JUNIT_ROOT"), ("no_suites", "NO_REGRESSIONS"), ("count_above_cases", "JUNIT_CASES"),
+    ("failure_element", "JUNIT_CASES"), ("below_floor", "REGRESSION_FAILURE"), ("latest_pointer", "LATEST_POINTER"),
+    ("blocked_report", "REPORT_NOT_ALLOW"), ("negative_other_gate", "NEGATIVE_GATES")])
+def test_each_evidence_check_refuses_with_its_own_code(bundle, attack, code):
+    files = bundle["files"]
+    if attack == "foreign_root": files["trusted/artifacts/pytest.xml"] = b'<results tests="360"/>'
+    elif attack == "no_suites": files["trusted/artifacts/pytest.xml"] = b"<testsuites/>"
+    elif attack == "count_above_cases": files["trusted/artifacts/pytest.xml"] = junit(tests=361)
+    elif attack == "failure_element": files["trusted/artifacts/pytest.xml"] = junit(child=b"<failure/>")
+    elif attack == "below_floor": bundle["settings"]["minimum_regression_tests"] = 361
+    elif attack == "latest_pointer": files["trusted/artifacts/latest.txt"] = b"../11111111"
+    elif attack == "blocked_report":
+        mutate_json(bundle, next(p for p in files if "11111111" in p), lambda d: d.update(decision="BLOCK"))
+    else:
+        # 缺陷版除 AUTH 以外的閘門也須正常完成。 / Every gate of the seeded-defect run other than AUTH must still complete.
+        mutate_json(bundle, next(p for p in files if "22222222" in p), lambda d: d["records"][0].update(execution="ERROR"))
+    with pytest.raises(publisher.Denied, match=f"^{code}$"):
+        publisher.validate_bundle(**bundle)
+
+
+@pytest.mark.parametrize("attack,code", [
+    ("attempt_zero", "RUN_ATTEMPT"), ("signing_step_failed", "ATTESTATION_STEP_INCOMPLETE"),
+    ("completion_step_failed", "COMPLETION_STEP_INCOMPLETE")])
+def test_run_attempt_and_final_steps_are_refused_by_their_own_checks(bundle, attack, code):
+    jobs = {j["name"]: j for j in bundle["jobs"]}
+    if attack == "attempt_zero": bundle["run"]["run_attempt"] = 0
+    elif attack == "signing_step_failed":
+        jobs["Attest evaluator-owned evidence"]["steps"][0]["conclusion"] = "failure"
+    else: jobs["trusted-security-pilot"]["steps"][0]["conclusion"] = "failure"
+    with pytest.raises(publisher.Denied, match=f"^{code}$"):
+        publisher.validate_bundle(**bundle)

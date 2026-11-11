@@ -83,13 +83,25 @@ TARGETS = {
     'security_harness/regression_inventory.py': (
         ('parametrize_cases', 'case_count', 'check_count', 'declared_removals', 'floor_errors'),
         ('tests/test_regression_inventory.py',)),
+    # 發布程式是預定的最後合併閘門；每道檢查都須以自己的拒絕碼被測到。 / The publisher is the intended final merge gate;
+    # every check must be caught by a test expecting its own refusal code.
+    'security_harness/trusted_publisher.py': (
+        ('validate_settings', 'reject_newer_runs', 'validate_pr', 'validate_evidence', 'validate_bundle'),
+        ('tests/test_trusted_publisher.py',)),
+    # 部署 App 前，審查者合併前執行的必要檢查來源核對。 / The required-check source verification reviewers run before
+    # merging, until the App is deployed.
+    'scripts/verify_required_check.py': (
+        ('verify',), ('tests/test_verify_required_check.py',)),
     'security_harness/llm/benchmark.py': (
         ('bounded_text', 'validate_review', 'parse_review'), ('tests/test_model_benchmark.py', '--deselect=tests/test_model_benchmark.py::test_review_cli_supervision_and_explicit_live_opt_in',
                                                               '--deselect=tests/test_model_benchmark.py::test_review_cli_accepts_large_budgets_only_within_the_total_cap', 'tests/test_security_properties.py')),
 }
 # 突變總數上限；超過代表目標範圍失控，應拆分而非加長期限。 / Cap on the mutant total; exceeding it means the target set
 # grew out of hand and should be split rather than given a longer deadline.
-MAX_MUTANTS = 512
+MAX_MUTANTS = 640
+# 整批突變的牆鐘期限（秒）；CI job 的 timeout-minutes 須另留安裝與上傳的餘裕。 / Wall-clock deadline for the whole
+# campaign in seconds; the CI job's timeout-minutes must leave room for setup and upload on top.
+CAMPAIGN_SECONDS = 1500
 SWAPS = {ast.Eq: ast.NotEq, ast.NotEq: ast.Eq, ast.Lt: ast.LtE, ast.LtE: ast.Lt,
          ast.Gt: ast.GtE, ast.GtE: ast.Gt, ast.In: ast.NotIn, ast.NotIn: ast.In,
          ast.Is: ast.IsNot, ast.IsNot: ast.Is}
@@ -230,7 +242,7 @@ def run(root, output):
               'test_tools': {n: importlib.metadata.version(n) for n in ('pytest', 'hypothesis', 'sortedcontainers')},
               'limitations': 'Trusted local predicates only; not a sandbox or full-repository score.'}
     write_json(output, report)
-    deadline = time.monotonic() + 1200
+    deadline = time.monotonic() + CAMPAIGN_SECONDS
     # 固定快照不含 .git、憑證、外部附件或執行產物。 / Fixed snapshot excludes Git metadata, credentials, attachments and runtime artifacts.
     with tempfile.TemporaryDirectory(prefix='epsilon-mutations-') as directory:
         snapshot = Path(directory) / 'source'

@@ -154,11 +154,11 @@ jobs:
           if-no-files-found: error
 
   mutation-tests:
-    # 突變測試有自己的 20 分鐘期限，獨立 job 避免耗盡評估工作的時間。 / The mutation campaign has its own
-    # 20-minute deadline; a separate job keeps it from exhausting the evaluator's budget.
+    # 突變測試有自己的 25 分鐘期限，獨立 job 避免耗盡評估工作的時間。 / The mutation campaign has its own
+    # 25-minute deadline; a separate job keeps it from exhausting the evaluator's budget.
     name: ${{ github.event_name == 'workflow_dispatch' && 'manual-mutation-tests' || 'trusted-mutation-tests' }}
     runs-on: ubuntu-24.04
-    timeout-minutes: 30
+    timeout-minutes: 35
     permissions:
       contents: read
     steps:

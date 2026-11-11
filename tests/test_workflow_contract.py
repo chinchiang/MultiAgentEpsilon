@@ -7,6 +7,8 @@ import subprocess
 import pytest
 from pathlib import Path
 
+from scripts.mutation_check import CAMPAIGN_SECONDS
+
 WORKFLOW = (Path(__file__).resolve().parents[1] / ".github/workflows/security.yml").read_text()
 
 
@@ -106,11 +108,11 @@ def test_every_action_is_pinned_to_a_full_sha_with_a_version_comment():
 
 
 def test_job_time_budgets_fit_the_mutation_deadline():
-    # 突變活動期限 1200 秒，必須在獨立且更長的 job 內。 / The 1200 s campaign needs its own, longer job.
+    # 突變活動期限 CAMPAIGN_SECONDS，必須在獨立且更長的 job 內。 / The CAMPAIGN_SECONDS campaign needs its own, longer job.
     assert 'mutation_check.py' not in job('trusted-security-pilot')
     mutation = job('mutation-tests')
     assert 'mutation_check.py' in mutation
-    assert int(re.search(r'timeout-minutes: (\d+)', mutation).group(1)) * 60 > 1200 + 5 * 60
+    assert int(re.search(r'timeout-minutes: (\d+)', mutation).group(1)) * 60 > CAMPAIGN_SECONDS + 5 * 60
     assert 'candidate' not in mutation.replace('No candidate', '').replace('no candidate', '')
     assert 'contents: read' in mutation and 'id-token' not in mutation
 
