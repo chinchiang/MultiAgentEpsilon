@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
-"""CI 自我檢查本次上傳證據是否符合專用發布器契約。依 upload-artifact 的方式封裝 trusted/artifacts 與 audit，再使用發布器的解包與驗證邏輯，讓證據漂移在產生當下就失敗。GitHub 審查、執行清單與設定 pins 仍由發布器驗證。
+"""CI 自我檢查本次上傳證據是否符合專用發布器契約。依 upload-artifact 的方式封裝 trusted/artifacts 與 audit，再使用發布器的解包與驗證邏輯，PR run 另驗 guard 證據格式，讓證據漂移在產生當下就失敗。GitHub 審查、執行清單與設定 pins 仍由發布器驗證。
 
 CI self-check: would the dedicated publisher accept the evidence this run uploads?
 
 Zips trusted/artifacts/ and audit/ the way upload-artifact does and runs the
 publisher's own unpack and artifact contract, so evidence/contract drift fails the
-run that produced it instead of surfacing only after deployment. GitHub metadata
-(reviews, run listing, settings pins) remains the publisher's job.
+run that produced it instead of surfacing only after deployment. On pull request
+runs it also checks the guard evidence format. GitHub metadata (reviews, run listing, settings pins) remains the
+publisher's job.
 """
 import argparse
 import hashlib
@@ -20,6 +21,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 if __name__ == "__main__":
     sys.path.insert(0, str(ROOT))
+from security_harness import guard_evidence
 from security_harness.results import subject_digest, write_json
 from security_harness.trusted_publisher import Denied, strict_json, unpack_evidence, validate_evidence
 from scripts.write_ci_provenance import commit, provenance as ci_provenance
@@ -34,6 +36,19 @@ def artifact_zip(workspace):
                 if path.is_file() and not path.is_symlink():
                     archive.write(path, path.relative_to(workspace).as_posix())
     return data.getvalue()
+
+
+def check_guard(files, provenance):
+    """PR run 的 guard 證據須符合發布程式讀取的格式；push 與排程 run 不執行 guard，也不得留下 guard 證據。 / A PR
+    run's guard evidence must match the format the publisher reads; push and scheduled runs skip the guard and must
+    not carry guard evidence."""
+    guard = files.get("audit/trusted-guard.json")
+    if provenance["pr_number"] > 0:
+        if guard is None:
+            raise Denied("EVIDENCE_FILE_MISSING")
+        guard_evidence.validate(strict_json(guard), provenance["base_sha"], provenance["candidate_sha"])
+    elif guard is not None:
+        raise Denied("TRUSTED_GUARD")
 
 
 def main():
@@ -56,6 +71,7 @@ def main():
         tests = validate_evidence(settings, gate_policy, files, provenance=provenance,
                                   candidate_sha=provenance["candidate_sha"], subject=subject_digest(candidate),
                                   now=datetime.now(timezone.utc))
+        check_guard(files, provenance)
         result = {"decision": "ALLOW", "code": "PUBLISHABLE", "tests": tests,
                   "candidate_sha": provenance["candidate_sha"], "evaluator_sha": settings["evaluator_sha"]}
     except Denied as exc:

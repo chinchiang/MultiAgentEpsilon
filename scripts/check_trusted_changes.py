@@ -16,7 +16,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 if __name__ == "__main__":
     sys.path.insert(0, str(ROOT))
-from security_harness import candidate_git
+from security_harness import candidate_git, guard_evidence
 from security_harness.github_readonly import GitHubReader, ReadOnlyGitHub
 from security_harness.github_http import Denied
 from security_harness.github_trust import GitHubTrust, approved_review as approved_review
@@ -66,14 +66,9 @@ def main():
             approval_error = f"Denied:{exc}"
         except Exception as exc:
             approval_error = type(exc).__name__
-    blocked = approval_error is not None or (bool(changed) and approval is None)
-    evidence = {"schema_version": 2, "base_sha": args.base, "candidate_sha": head,
-                "protected_changes": changed, "decision": "BLOCK" if blocked else "ALLOW",
-                "baseline_approval": approval, "approval_error": approval_error,
-                # 沒有核准時的固定診斷碼，例如 INDEPENDENT_APPROVAL_MISSING。 / The fixed diagnostic code when no
-                # approval counts, such as INDEPENDENT_APPROVAL_MISSING.
-                "approval_refusal": refusals[0] if refusals else None,
-                "policy": "trusted base remains authoritative for this run"}
+    evidence = guard_evidence.build(args.base, head, changed, approval, approval_error,
+                                    refusals[0] if refusals else None)
+    blocked = evidence["decision"] == "BLOCK"
     if args.output:
         args.output.parent.mkdir(parents=True, exist_ok=True)
         args.output.write_text(json.dumps(evidence, indent=2) + "\n")

@@ -84,7 +84,7 @@ PR 使用 `.github/workflows/security.yml` 的 `pull_request_target`：evaluator
 | 可信審查與 CI 證據 | [`check_trusted_changes.py`](../scripts/check_trusted_changes.py)、[`verify_required_check.py`](../scripts/verify_required_check.py)、[`write_ci_provenance.py`](../scripts/write_ci_provenance.py)、[`check_publishable_evidence.py`](../scripts/check_publishable_evidence.py) |
 | 尚待部署的發布器 | [`trusted_publisher.py`](../security_harness/trusted_publisher.py)、[`publish_trusted_check.py`](../scripts/publish_trusted_check.py)、[`prepare_publisher_deployment.py`](../scripts/prepare_publisher_deployment.py)、[`deploy/trusted-publisher/`](../deploy/trusted-publisher/) |
 
-共同 GitHub 信任判定模組（GitHub trust module）位於 [`github_trust.py`](../security_harness/github_trust.py)：透過 GitHub reader 蒐集完整的審查與執行來源證據，供變更守門檢查（guard）、可信發布程式（publisher）及必要檢查驗證（required-check）使用。守門檢查與發布程式共用同一套審查規則（`review_decision`：非 draft、唯一 PR、規則集要求最後推送核准、推送後核准、排除推送者與提交身分）；簽章、artifact 與發布仍由發布程式負責。來源證據僅在單次命令內重用，發布成功前仍重新讀取可變狀態，沒有跨次快取或原子快照保證。
+共同 GitHub 信任判定模組（GitHub trust module）位於 [`github_trust.py`](../security_harness/github_trust.py)：透過 GitHub reader 蒐集完整的審查與執行來源證據，供變更守門檢查（guard）、可信發布程式（publisher）及必要檢查驗證（required-check）使用。守門檢查與發布程式共用同一套審查規則（`review_decision`：非 draft、唯一 PR、規則集要求最後推送核准、推送後核准、排除推送者與提交身分）；簽章、artifact 與發布仍由發布程式負責。可信工作流程的 job、步驟、必要檢查與 artifact 名稱集中在 [`workflow_contract.py`](../security_harness/workflow_contract.py)；guard 證據格式由 [`guard_evidence.py`](../security_harness/guard_evidence.py) 定義，guard 寫入、CI 自我檢查與發布程式讀取共用同一份。來源證據僅在單次命令內重用，發布成功前仍重新讀取可變狀態，沒有跨次快取或原子快照保證。
 
 ## 目錄結構
 
@@ -209,6 +209,7 @@ MultiAgentEpsilon/
 │   ├── github_http.py
 │   ├── github_readonly.py
 │   ├── github_trust.py
+│   ├── guard_evidence.py
 │   ├── inputs.py
 │   ├── isolation.py
 │   ├── janitor.py
@@ -222,7 +223,8 @@ MultiAgentEpsilon/
 │   ├── scope.py
 │   ├── secrets.py
 │   ├── supervision.py
-│   └── trusted_publisher.py
+│   ├── trusted_publisher.py
+│   └── workflow_contract.py
 ├── tests/
 │   ├── __init__.py
 │   ├── conftest.py
@@ -242,6 +244,7 @@ MultiAgentEpsilon/
 │   ├── test_github_trust.py
 │   ├── test_gitleaks.py
 │   ├── test_governance_consistency.py
+│   ├── test_guard_evidence.py
 │   ├── test_import_boundaries.py
 │   ├── test_inputs.py
 │   ├── test_isolation.py
@@ -394,7 +397,7 @@ Main push evaluates its own commit. Manual workflow uses chosen ref and distinct
 
 The Chinese section's linked component table and complete repository tree use unchanged language-neutral paths and are shared by both editions. Installation: scripts/bootstrap.py/build_runtime.py, requirements.lock/tools.lock. Execution: run_security.py/security_worker.py/audit.py. Scope/input/policy: scope.py/inputs.py/results.py and security JSON. G1/G2: preflight.py/dependencies.py/secrets.py/scan_content.py/candidate_git.py. Isolation/oracle: isolation.py/container_http.py/authorization.py/fixture_database.py/fixture_app. Lifecycle: supervision.py (supervised runs: registration, handshake, deadline, group stop, the finalization protocol and supervision outcome, and the shared base environment)/lifecycle.py (the security role)/janitor.py/limits.py/cleanup_runs.py and llm/lifecycle.py. Models: gateway.py/adapters.py/lmstudio.py/transport.py/output_schema.py. Reviews: model_review.py/benchmark*.py/review_adjudicate.py/model_compare.py/comparison.py. CI: check_trusted_changes.py/verify_required_check.py/write_ci_provenance.py/check_publishable_evidence.py. Deployment: trusted_publisher.py/publish_trusted_check.py/prepare_publisher_deployment.py and deploy/trusted-publisher.
 
-The shared [GitHub trust module](../security_harness/github_trust.py) collects complete review and run-source evidence through the GitHub reader for the guard, publisher and required-check verifier. The guard and the publisher share one review rule (`review_decision`: not a draft, a unique PR, a ruleset requiring last-push approval, approval after the push, pushers and commit identities excluded); signatures, artifacts and publication remain in the publisher. Source evidence is reused only within one command. Mutable state is still reread before success; there is no cross-command cache or atomic-snapshot guarantee.
+The shared [GitHub trust module](../security_harness/github_trust.py) collects complete review and run-source evidence through the GitHub reader for the guard, publisher and required-check verifier. The guard and the publisher share one review rule (`review_decision`: not a draft, a unique PR, a ruleset requiring last-push approval, approval after the push, pushers and commit identities excluded); signatures, artifacts and publication remain in the publisher. The trusted workflow's job, step, required-check and artifact names live in [workflow_contract.py](../security_harness/workflow_contract.py), and the guard evidence format is defined once in [guard_evidence.py](../security_harness/guard_evidence.py) for the guard, the CI self-check and the publisher. Source evidence is reused only within one command. Mutable state is still reread before success; there is no cross-command cache or atomic-snapshot guarantee.
 
 Directory purposes: .github CI/review ownership; deploy production templates; docs architecture/coverage/acceptance; fixture_app synthetic target; scripts operational entries; security protected policy/tools/cases; security_harness trusted core (llm model path); tests contracts/mutations/isolation/recovery. __init__.py marks packages. The tracked tree excludes generated files, caches, Git internals, and private attachments.
 

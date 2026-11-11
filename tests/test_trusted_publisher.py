@@ -12,7 +12,7 @@ from pathlib import Path
 
 import pytest
 
-from security_harness import trusted_publisher as publisher
+from security_harness import guard_evidence, trusted_publisher as publisher
 from security_harness.github_trust import HeadPush, parse_time as publisher_time
 from security_harness.results import result, subject_digest
 from security_harness.github_readonly import GitHubReader
@@ -88,9 +88,10 @@ def bundle():
                   "run_attempt": 1, "event": "pull_request_target", "workflow_sha": "a"*40,
                   "workflow_ref": "owner/repo/.github/workflows/security.yml@refs/heads/main",
                   "pr_number": 5, "base_sha": "a"*40, "candidate_sha": "b"*40}
-    guard = {"schema_version": 2, "decision": "ALLOW", "base_sha": "a"*40, "candidate_sha": "b"*40,
-             "protected_changes": ["security/policy.json"], "approval_error": None,
-             "baseline_approval": {"review_id": 11, "reviewer": "reviewer", "commit_id": "b"*40}}
+    # 以 guard 實際使用的建構函式產生，證據格式只有一份定義。 / Built with the guard's own builder, so the evidence
+    # format has a single definition.
+    guard = guard_evidence.build("a"*40, "b"*40, ["security/policy.json"],
+                                 {"review_id": 11, "reviewer": "reviewer", "commit_id": "b"*40}, None, None)
     files = {"audit/ci-provenance.json": json.dumps(provenance).encode(),
              "audit/trusted-guard.json": json.dumps(guard).encode(),
              "trusted/artifacts/latest.txt": run_id.encode(),

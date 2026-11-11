@@ -89,6 +89,10 @@ TARGETS = {
     'security_harness/trusted_publisher.py': (
         ('validate_settings', 'reject_newer_runs', 'validate_pr', 'validate_evidence', 'validate_bundle'),
         ('tests/test_trusted_publisher.py',)),
+    # guard 證據格式由 guard 寫入、CI 自我檢查與發布程式共用。 / The guard evidence format shared by the guard, the CI
+    # self-check and the publisher.
+    'security_harness/guard_evidence.py': (('build', 'validate'), ('tests/test_guard_evidence.py',)),
+    'scripts/check_publishable_evidence.py': (('check_guard',), ('tests/test_guard_evidence.py',)),
     # 部署 App 前，審查者合併前執行的必要檢查來源核對。 / The required-check source verification reviewers run before
     # merging, until the App is deployed.
     'scripts/verify_required_check.py': (
