@@ -8,12 +8,13 @@ import pytest
 from pathlib import Path
 
 from scripts.mutation_check import CAMPAIGN_SECONDS
+from security_harness import workflow_contract as contract
 
 WORKFLOW = (Path(__file__).resolve().parents[1] / ".github/workflows/security.yml").read_text()
 
 
 def job_name_expression():
-    match = re.search(r"^  trusted-security-pilot:\n(?:    #.*\n)*    name: (.+)$", WORKFLOW, re.MULTILINE)
+    match = re.search(rf"^  {contract.EVALUATION.id}:\n(?:    #.*\n)*    name: (.+)$", WORKFLOW, re.MULTILINE)
     assert match, "job must declare an explicit, event-dependent name"
     return match.group(1)
 
@@ -76,10 +77,10 @@ def completion_job():
 def test_required_check_is_downstream_of_both_evaluation_and_signing():
     job = completion_job()
     assert "'manual-security-completion' || 'trusted-security-pilot'" in job
-    assert 'needs: [trusted-security-pilot, attest-evidence, mutation-tests]' in job
+    assert 'needs: [evaluation, attest-evidence, mutation-tests]' in job
     assert 'if: always()' in job and 'permissions: {}' in job
     assert 'uses:' not in job and 'checkout' not in job and 'secrets.' not in job
-    assert '${{ needs.trusted-security-pilot.result }}' in job
+    assert '${{ needs.evaluation.result }}' in job
     assert '${{ needs.attest-evidence.result }}' in job
     assert '${{ needs.mutation-tests.result }}' in job
 
@@ -109,7 +110,7 @@ def test_every_action_is_pinned_to_a_full_sha_with_a_version_comment():
 
 def test_job_time_budgets_fit_the_mutation_deadline():
     # 突變活動期限 CAMPAIGN_SECONDS，必須在獨立且更長的 job 內。 / The CAMPAIGN_SECONDS campaign needs its own, longer job.
-    assert 'mutation_check.py' not in job('trusted-security-pilot')
+    assert 'mutation_check.py' not in job(contract.EVALUATION.id)
     mutation = job('mutation-tests')
     assert 'mutation_check.py' in mutation
     assert int(re.search(r'timeout-minutes: (\d+)', mutation).group(1)) * 60 > CAMPAIGN_SECONDS + 5 * 60
@@ -118,7 +119,7 @@ def test_job_time_budgets_fit_the_mutation_deadline():
 
 
 def test_candidate_documents_are_checked_without_execution():
-    evaluator = job('trusted-security-pilot')
+    evaluator = job(contract.EVALUATION.id)
     assert 'run: python -I scripts/check_docs.py --root ../candidate' in evaluator
     assert evaluator.index('check_docs.py --root ../candidate') < evaluator.index('Evaluate candidate through external oracle')
 
@@ -129,15 +130,47 @@ def test_edited_events_are_never_skipped_at_job_level():
     assert not re.search(r"^    if: .*(event\.action|edited)", WORKFLOW, re.MULTILINE)
 
 
-def test_publisher_step_names_match_the_workflow():
+def workflow_jobs():
+    """頂層 job id 依出現順序。 / Top-level job ids in order of appearance."""
+    body = WORKFLOW.split('\njobs:\n', 1)[1]
+    return re.findall(r'^  ([a-z][a-z0-9-]*):$', body, re.MULTILINE)
+
+
+def test_every_contract_job_and_step_lives_in_its_own_job_block():
+    # 只檢查字串出現在檔案某處時，步驟移到別的 job 也會通過。 / Checking that a name appears anywhere in the file
+    # let a step move to another job unnoticed.
+    assert workflow_jobs() == [j.id for j in (contract.EVALUATION, contract.MUTATION, contract.ATTESTATION,
+                                              contract.COMPLETION)]
+    for spec in contract.JOBS:
+        block = job(spec.id)
+        name = re.search(r'^    name: (.+)$', block, re.MULTILINE).group(1)
+        assert name == spec.name or name.endswith(f"|| '{spec.name}' }}}}"), spec
+        for step in spec.steps:
+            assert f'      - name: {step}\n' in block, (spec.id, step)
+            for other in contract.JOBS:
+                if other is not spec:
+                    assert f'- name: {step}\n' not in job(other.id), (other.id, step)
+
+
+def test_publisher_and_verifier_take_names_from_the_contract():
+    from scripts import audit_merge_protection, verify_required_check
     from security_harness import trusted_publisher as publisher
-    workflow = WORKFLOW
-    for name in (*publisher.REQUIRED_STEPS, *publisher.MUTATION_STEPS, publisher.COMPLETION_STEP):
-        assert f'- name: {name}\n' in workflow, name
+    assert publisher.REQUIRED_STEPS == contract.EVALUATION.steps
+    assert publisher.MUTATION_STEPS == contract.MUTATION.steps
+    assert publisher.COMPLETION_STEP == contract.COMPLETION.steps[0]
+    assert verify_required_check.REQUIRED_CHECK == audit_merge_protection.REQUIRED_CHECK == contract.COMPLETION.name
+    # 必要檢查名稱與 artifact 前綴須是 workflow 實際產生的名稱。 / The required check and artifact prefixes must be
+    # what the workflow actually produces.
+    assert f"|| '{contract.REQUIRED_CHECK}' }}}}" in job(contract.COMPLETION.id)
+    evidence = f"|| '{contract.EVIDENCE_ARTIFACT_PREFIX}' }}}}-${{{{ github.run_id }}}}-${{{{ github.run_attempt }}}}"
+    assert evidence in job(contract.ATTESTATION.id) and evidence in job(contract.EVALUATION.id)
+    assert (f"|| '{contract.MUTATION_ARTIFACT_PREFIX}' }}}}-${{{{ github.run_id }}}}-${{{{ github.run_attempt }}}}"
+            in job(contract.MUTATION.id))
+    assert contract.evidence_artifact(100, 2) == f"{contract.EVIDENCE_ARTIFACT_PREFIX}-100-2"
 
 
 def test_static_checks_pin_rules_for_trusted_and_candidate_trees():
-    evaluator = job('trusted-security-pilot')
+    evaluator = job(contract.EVALUATION.id)
     # 快取不可留在受掃描的樹中。 / No cache may be left inside a scanned tree.
     assert evaluator.count('ruff check --no-cache --isolated --select F,E9') == 2
     assert 'ruff check --no-cache --isolated --select F,E9 --target-version py312 ../candidate' in evaluator
@@ -147,7 +180,7 @@ def test_static_checks_pin_rules_for_trusted_and_candidate_trees():
 CACHE_KEY = "key: gitleaks-${{ runner.os }}-${{ hashFiles('trusted/security/tools.lock.json') }}"
 
 
-@pytest.mark.parametrize("name", ["trusted-security-pilot", "mutation-tests"])
+@pytest.mark.parametrize("name", [contract.EVALUATION.id, contract.MUTATION.id])
 def test_scanner_cache_is_restored_before_bootstrap_and_saved_only_outside_pull_requests(name):
     # 快取只放已由 bootstrap 驗證雜湊的 gitleaks；PR run 只讀，避免候選相關工作寫入快取。取回後 bootstrap 仍重算雜湊。 /
     # The cache holds only the gitleaks binary bootstrap has verified; PR runs only read it, so no run that handles a

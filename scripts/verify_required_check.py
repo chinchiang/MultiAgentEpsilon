@@ -27,9 +27,10 @@ if __name__ == "__main__":
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from security_harness.github_readonly import GitHubReader, ReadOnlyGitHub
 from security_harness.github_http import Denied, need
+from security_harness import workflow_contract
 from security_harness.github_trust import GITHUB_ACTIONS_APP_ID, GitHubTrust
 
-REQUIRED_CHECK = "trusted-security-pilot"
+REQUIRED_CHECK = workflow_contract.REQUIRED_CHECK
 ACTIONS_APP_ID = GITHUB_ACTIONS_APP_ID
 WORKFLOW_PATH = ".github/workflows/security.yml"
 BASE_BRANCH = "main"

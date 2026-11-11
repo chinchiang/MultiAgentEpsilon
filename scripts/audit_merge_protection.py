@@ -14,6 +14,7 @@ if __name__ == "__main__":
 from security_harness.github_readonly import GitHubReader, ReadOnlyGitHub
 from security_harness.results import write_json
 from security_harness.github_trust import GITHUB_ACTIONS_APP_ID as ACTIONS_APP_ID
+from security_harness.workflow_contract import REQUIRED_CHECK
 
 
 def codeowners_reviewers(text):
@@ -47,7 +48,7 @@ def inspect_configuration(branch, rulesets, pr, collaborators, reviewers, codeow
     checks = [check for r in rules if r['type'] == 'required_status_checks'
               for check in r.get('parameters', {}).get('required_status_checks', [])]
     # 檢查名稱可偽造，只採計預期整合來源。 / A context name alone is forgeable; only the expected integration counts.
-    required = [c for c in checks if c.get('context') == 'trusted-security-pilot'
+    required = [c for c in checks if c.get('context') == REQUIRED_CHECK
                 and c.get('integration_id') == ACTIONS_APP_ID]
     dedicated = [c for c in checks if c.get('context') == 'epsilon/trusted-merge' and publisher_app_id
                  and c.get('integration_id') == publisher_app_id and publisher_app_id != ACTIONS_APP_ID]

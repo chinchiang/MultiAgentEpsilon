@@ -6,6 +6,7 @@ import urllib.parse
 
 from security_harness.github_http import Denied, strict_json
 from security_harness.github_trust import GITHUB_ACTIONS_APP_ID
+from security_harness.workflow_contract import EVALUATION
 
 PAGING = ("per_page", "page")
 # cursor 分頁端點以這些參數翻頁與排序，不參與路由。 / Cursor-paged endpoints page and sort with these; they take no part in routing.
@@ -50,7 +51,7 @@ class FakeGitHub:
         self.routes.setdefault(suite, Listing("workflow_runs", [], None)).items.append(run)
         return run
 
-    def attempt(self, run, conclusion="success", name="trusted-security-evaluation"):
+    def attempt(self, run, conclusion="success", name=EVALUATION.name):
         """run 前進到下一個 attempt 並產生該 attempt 的 job；回傳對應的 check run，其 id 等於 job id。 / Advance the run to
         its next attempt with that attempt's own job, and return the matching check run, whose id is the job id."""
         run["run_attempt"] += 1

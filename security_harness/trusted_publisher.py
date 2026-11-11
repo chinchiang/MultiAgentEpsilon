@@ -22,6 +22,7 @@ from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
 from xml.etree import ElementTree
 
+from . import guard_evidence
 from .github_http import Denied, GitHub, need, strict_json
 from .github_readonly import GitHubReader
 from .github_trust import (GITHUB_ACTIONS_APP_ID, GitHubTrust, head_scope, review_decision, run_scope,
@@ -29,9 +30,9 @@ from .github_trust import (GITHUB_ACTIONS_APP_ID, GitHubTrust, head_scope, revie
 from .inputs import excluded
 from .limits import LIMITS
 from .supervision import child_environment
+from .workflow_contract import ATTESTATION, COMPLETION, EVALUATION, JOBS, MUTATION, evidence_artifact
 from .results import EVIDENCE_VERSION, decide, seeded_defects, validate_cases, validate_policy
 
-GUARD_SCHEMA_VERSION = 2
 # 冷快取時每個來源檔需要一次 blob 請求，預算須高於檔案上限。 / A cold cache costs one blob request per source
 # file, so the call budget must exceed the file ceiling.
 MAX_SOURCE_FILES = 500
@@ -100,15 +101,10 @@ def validate_pr(pr, settings):
     need(SHA.fullmatch(pr["head"]["sha"]), "CANDIDATE_SHA")
 
 
-REQUIRED_STEPS = ("Record evaluator-owned CI provenance", "Check protected changes and exact-head independent approval",
-                  "Bilingual documentation checks / 雙語文件檢查", "Candidate documentation checks / 候選文件檢查",
-                  "Static checks / 靜態檢查",
-                  "Evaluator regressions and isolation adversarial checks", "Prove seeded defect still blocks",
-                  "Evaluate candidate through external oracle", "Remove evaluator regression database",
-                  "Reap cancelled security runs", "Retain evaluator-owned evidence")
-# 突變測試在獨立 job，有自己的期限。 / Mutation testing runs in its own job with its own deadline.
-MUTATION_STEPS = ("Offline security mutation checks", "Retain mutation report")
-COMPLETION_STEP = "Require evaluator, attestation and mutation success"
+# 步驟名稱的唯一來源是 workflow_contract。 / workflow_contract is the only source of step names.
+REQUIRED_STEPS = EVALUATION.steps
+MUTATION_STEPS = MUTATION.steps
+COMPLETION_STEP = COMPLETION.steps[0]
 CLEANUP_KEYS = ("completed", "temporary_directory_removed", "run_directory_removed", "process_group_terminated")
 
 
@@ -220,37 +216,34 @@ def validate_bundle(settings, gate_policy, pr, run, newer_runs, jobs, files, rev
     need(type(run["run_attempt"]) is int and run["run_attempt"] >= 1, "RUN_ATTEMPT")
     reject_newer_runs(run, newer_runs, pr["head"]["sha"])
     named = {j["name"]: j for j in jobs}
-    need(len(jobs) == len(named) == 4
-         and set(named) == {"trusted-security-evaluation", "trusted-mutation-tests",
-                            "Attest evaluator-owned evidence", "trusted-security-pilot"}
+    need(len(jobs) == len(named) == len(JOBS)
+         and set(named) == {j.name for j in JOBS}
          and all(j["conclusion"] == "success" for j in jobs), "JOB_SOURCE")
-    steps = {s["name"]: s["conclusion"] for s in named["trusted-security-evaluation"]["steps"]}
+    steps = {s["name"]: s["conclusion"] for s in named[EVALUATION.name]["steps"]}
     need(all(steps.get(s) == "success" for s in REQUIRED_STEPS), "REQUIRED_STEP_INCOMPLETE")
-    mutation = {s["name"]: s["conclusion"] for s in named["trusted-mutation-tests"]["steps"]}
+    mutation = {s["name"]: s["conclusion"] for s in named[MUTATION.name]["steps"]}
     need(all(mutation.get(s) == "success" for s in MUTATION_STEPS), "MUTATION_STEP_INCOMPLETE")
-    signing = named["Attest evaluator-owned evidence"]["steps"]
-    need(any(s["name"] == "Sign evaluator-owned evidence" and s["conclusion"] == "success"
+    signing = named[ATTESTATION.name]["steps"]
+    need(any(s["name"] == ATTESTATION.steps[0] and s["conclusion"] == "success"
              for s in signing), "ATTESTATION_STEP_INCOMPLETE")
-    completion = named['trusted-security-pilot']['steps']
+    completion = named[COMPLETION.name]['steps']
     need(any(s['name'] == COMPLETION_STEP and s['conclusion'] == 'success'
              for s in completion), 'COMPLETION_STEP_INCOMPLETE')
     approvals = review_decision(pr, reviews, permissions, settings["reviewers"], commit_identities, push)
-    guard = strict_json(evidence_file(files, "audit/trusted-guard.json"))
-    need(guard.get("schema_version") == GUARD_SCHEMA_VERSION and guard.get("decision") == "ALLOW"
-         and guard.get("base_sha") == pr["base"]["sha"] and guard.get("candidate_sha") == pr["head"]["sha"]
-         and guard.get("approval_error") is None, "TRUSTED_GUARD")
-    if guard.get("protected_changes"):
-        approval = guard.get("baseline_approval") or {}
+    guard = guard_evidence.validate(strict_json(evidence_file(files, "audit/trusted-guard.json")),
+                                    pr["base"]["sha"], pr["head"]["sha"])
+    if guard["protected_changes"]:
+        approval = guard["baseline_approval"]
         # guard 記錄的必須是該審查者對現行 head 的一筆真實核准，且同一審查者現在仍被採計；審查者對同一 head 再按一次
         # Approve 只換掉最新一筆的 ID，不必整輪重跑。 / The guard's record must be a real approval of the current head by
         # that reviewer, and the same reviewer must still count now; approving the same head again only changes the
         # latest review ID and needs no rerun.
-        recorded = [r for r in reviews if r.get("id") == approval.get("review_id")]
+        recorded = [r for r in reviews if r.get("id") == approval["review_id"]]
         counted = {r["user"]["login"] for r in reviews if r.get("id") in approvals}
         need(len(recorded) == 1 and recorded[0]["state"] == "APPROVED"
-             and recorded[0]["user"]["login"] == approval.get("reviewer")
-             and recorded[0]["commit_id"] == pr["head"]["sha"] == approval.get("commit_id")
-             and approval.get("reviewer") in counted and approval.get("reviewer") in settings["reviewers"],
+             and recorded[0]["user"]["login"] == approval["reviewer"]
+             and recorded[0]["commit_id"] == pr["head"]["sha"] == approval["commit_id"]
+             and approval["reviewer"] in counted and approval["reviewer"] in settings["reviewers"],
              "BASELINE_APPROVAL")
     provenance = expected_provenance(settings, run["id"], run["run_attempt"], pr["number"],
                                      pr["base"]["sha"], pr["head"]["sha"])
@@ -420,7 +413,7 @@ def collect(client, settings, number, run_id, gate_policy, blob_cache=None):
     need(any(r["id"] == run_id for r in runs), "RUN_NOT_LISTED")
     jobs = reader.items(f"actions/runs/{run_id}/attempts/{run['run_attempt']}/jobs", key="jobs")
     artifacts = reader.items(f"actions/runs/{run_id}/artifacts", key="artifacts")
-    name = f"trusted-security-{run_id}-{run['run_attempt']}"
+    name = evidence_artifact(run_id, run['run_attempt'])
     selected = [a for a in artifacts if a["name"] == name and not a["expired"]]
     need(len(selected) == 1 and selected[0]["size_in_bytes"] <= 16 * 1024**2, "ARTIFACT_IDENTITY")
     artifact = selected[0]

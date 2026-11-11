@@ -35,7 +35,7 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request_target' && github.event.action != 'edited' }}
 
 jobs:
-  trusted-security-pilot:
+  evaluation:
     # 手動執行使用維護者選擇的 ref（可能就是候選）， / A manual run evaluates a maintainer-selected ref (possibly the candidate
     # 因此不可使用正式必要檢查名稱。 / itself), so it must never report under the required check name.
     name: ${{ github.event_name == 'workflow_dispatch' && 'manual-security-evaluation' || 'trusted-security-evaluation' }}
@@ -210,7 +210,7 @@ jobs:
 
   attest-evidence:
     name: Attest evaluator-owned evidence
-    needs: trusted-security-pilot
+    needs: evaluation
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     permissions:
@@ -223,12 +223,12 @@ jobs:
         uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
         with:
           subject-name: ${{ github.event_name == 'workflow_dispatch' && 'manual-security' || 'trusted-security' }}-${{ github.run_id }}-${{ github.run_attempt }}
-          subject-digest: sha256:${{ needs.trusted-security-pilot.outputs.evidence-digest }}
+          subject-digest: sha256:${{ needs.evaluation.outputs.evidence-digest }}
 
   security-completion:
     # 規則集採計最終工作，僅評估成功不足以放行。 / The ruleset counts this final job; evaluator success alone cannot satisfy it.
     name: ${{ github.event_name == 'workflow_dispatch' && 'manual-security-completion' || 'trusted-security-pilot' }}
-    needs: [trusted-security-pilot, attest-evidence, mutation-tests]
+    needs: [evaluation, attest-evidence, mutation-tests]
     if: always()
     runs-on: ubuntu-24.04
     timeout-minutes: 2
@@ -236,7 +236,7 @@ jobs:
     steps:
       - name: Require evaluator, attestation and mutation success
         env:
-          EVALUATOR_RESULT: ${{ needs.trusted-security-pilot.result }}
+          EVALUATOR_RESULT: ${{ needs.evaluation.result }}
           ATTESTATION_RESULT: ${{ needs.attest-evidence.result }}
           MUTATION_RESULT: ${{ needs.mutation-tests.result }}
         run: |
