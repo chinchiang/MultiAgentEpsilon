@@ -8,7 +8,7 @@ import shutil
 import time
 
 import pytest
-from scripts.mutation_check import MAX_MUTANTS, TARGETS, classify, missing_targets, mutations, run_tests
+from scripts.mutation_check import CAMPAIGN_SECONDS, MAX_MUTANTS, TARGETS, classify, missing_targets, mutations, run_tests
 
 
 @pytest.mark.parametrize('xml,code,expected', [
@@ -127,3 +127,6 @@ def test_mutation_guide_lists_every_target_and_the_mutant_cap():
         assert Path(path).name in english, path
     assert f'超過 {MAX_MUTANTS} 個突變' in chinese
     assert f'more-than-{MAX_MUTANTS}' in english
+    assert CAMPAIGN_SECONDS % 60 == 0
+    assert f'整批上限 {CAMPAIGN_SECONDS // 60} 分鐘' in chinese
+    assert f'Campaign deadline is {CAMPAIGN_SECONDS // 60} minutes.' in english
