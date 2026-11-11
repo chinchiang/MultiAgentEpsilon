@@ -152,7 +152,7 @@ def test_every_contract_job_and_step_lives_in_its_own_job_block():
                     assert f'- name: {step}\n' not in job(other.id), (other.id, step)
 
 
-def test_publisher_and_verifier_take_names_from_the_contract():
+def test_publisher_step_names_match_the_workflow():
     from scripts import audit_merge_protection, verify_required_check
     from security_harness import trusted_publisher as publisher
     assert publisher.REQUIRED_STEPS == contract.EVALUATION.steps
