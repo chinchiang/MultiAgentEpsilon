@@ -5,10 +5,11 @@ import ast
 import os
 from pathlib import Path
 import shutil
+import threading
 import time
 
 import pytest
-from scripts.mutation_check import CAMPAIGN_SECONDS, MAX_MUTANTS, TARGETS, classify, missing_targets, mutations, run_tests
+from scripts.mutation_check import CAMPAIGN_SECONDS, MAX_MUTANTS, MAX_WORKERS, TARGETS, Workers, classify, missing_targets, mutations, run_tests
 
 
 @pytest.mark.parametrize('xml,code,expected', [
@@ -130,3 +131,59 @@ def test_mutation_guide_lists_every_target_and_the_mutant_cap():
     assert CAMPAIGN_SECONDS % 60 == 0
     assert f'整批上限 {CAMPAIGN_SECONDS // 60} 分鐘' in chinese
     assert f'Campaign deadline is {CAMPAIGN_SECONDS // 60} minutes.' in english
+    assert f'最多 {MAX_WORKERS} 個 worker 平行處理' in chinese
+    assert f'spread over up to {MAX_WORKERS} workers' in english
+
+
+def worker_snapshots(tmp_path, count):
+    """每個快照放在自己的上層目錄，與突變活動相同。 / Each snapshot sits in its own parent, as in the campaign."""
+    snapshots = []
+    for index in range(count):
+        root = worker_root(tmp_path / f'w{index}')
+        (root / 'target.py').write_text('def value():\n    return 1\n')
+        (root / 'test_target.py').write_text('from target import value\n\n\ndef test_value():\n    assert value() == 1\n')
+        snapshots.append(root)
+    return snapshots
+
+
+def test_parallel_workers_keep_mutant_order_and_restore_every_snapshot(tmp_path):
+    snapshots = worker_snapshots(tmp_path, 2)
+    mutants = [(f'm{i}', f'def value():\n    return {v}\n') for i, v in enumerate((2, 1, 3, 1, 4))]
+    statuses = Workers(snapshots).run('target.py', mutants, ['test_target.py'], 1, {('test_target', 'test_value')},
+                                      time.monotonic() + 120)
+    assert statuses == ['KILLED', 'SURVIVED', 'KILLED', 'SURVIVED', 'KILLED']
+    for root in snapshots:
+        assert (root / 'target.py').read_text() == 'def value():\n    return 1\n'
+
+
+def test_cancelling_parallel_workers_reaps_running_children_and_fails(tmp_path):
+    # 取消不得被當成攔截或完成；執行中的子程序群組須被終止。 / Cancellation is never a kill or a completed campaign,
+    # and running child process groups must be terminated.
+    snapshots = worker_snapshots(tmp_path, 2)
+    slow = 'import time\n\n\ndef value():\n    time.sleep(60)\n    return 1\n'
+    workers = Workers(snapshots)
+    outcome = {}
+
+    def campaign():
+        try:
+            workers.run('target.py', [('a', slow), ('b', slow)], ['test_target.py'], 1,
+                        {('test_target', 'test_value')}, time.monotonic() + 120)
+        except BaseException as error:
+            outcome['error'] = error
+
+    thread = threading.Thread(target=campaign)
+    before = time.monotonic()
+    thread.start()
+    while len(workers.active) < 2 and time.monotonic() - before < 20:
+        time.sleep(0.05)
+    children = [process.pid for process in workers.active]
+    assert len(children) == 2
+    workers.cancel()
+    thread.join(20)
+    assert not thread.is_alive() and time.monotonic() - before < 30
+    assert isinstance(outcome.get('error'), RuntimeError)
+    for child in children:
+        with pytest.raises(ProcessLookupError):
+            os.kill(child, 0)
+    for root in snapshots:
+        assert (root / 'target.py').read_text() == 'def value():\n    return 1\n'
