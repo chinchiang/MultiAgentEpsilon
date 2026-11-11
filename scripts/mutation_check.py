@@ -12,6 +12,7 @@ import signal
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 import xml.etree.ElementTree as ET
 
@@ -102,6 +103,10 @@ MAX_MUTANTS = 640
 # 整批突變的牆鐘期限（秒）；CI job 的 timeout-minutes 須另留安裝與上傳的餘裕。 / Wall-clock deadline for the whole
 # campaign in seconds; the CI job's timeout-minutes must leave room for setup and upload on top.
 CAMPAIGN_SECONDS = 1500
+# 同時執行的突變子程序數；每個 worker 有自己的快照與暫存目錄，互不改寫。上限依 GitHub 託管 runner 的 4 核。 / Mutant
+# children run concurrently; each worker owns its snapshot and temporary directory, so none rewrites another's files.
+# Capped at the 4 cores of a GitHub-hosted runner.
+MAX_WORKERS = 4
 SWAPS = {ast.Eq: ast.NotEq, ast.NotEq: ast.Eq, ast.Lt: ast.LtE, ast.LtE: ast.Lt,
          ast.Gt: ast.GtE, ast.GtE: ast.Gt, ast.In: ast.NotIn, ast.NotIn: ast.In,
          ast.Is: ast.IsNot, ast.IsNot: ast.Is}
@@ -206,7 +211,7 @@ def classify(returncode, xml_path, baseline_count, expected_ids=None):
     return 'ERROR'
 
 
-def run_tests(snapshot, tests, output, timeout):
+def run_tests(snapshot, tests, output, timeout, active=None):
     env = {'PATH': os.defpath, 'LANG': 'C.UTF-8', 'HOME': str(snapshot),
            'TMPDIR': str(snapshot.parent), 'PYTEST_DISABLE_PLUGIN_AUTOLOAD': '1'}
     worker = snapshot / 'scripts/mutation_worker.py'
@@ -214,6 +219,8 @@ def run_tests(snapshot, tests, output, timeout):
     with output.open('wb') as log:
         process = subprocess.Popen([sys.executable, '-I', '-B', str(worker), str(snapshot), str(xml), *tests],
                                    cwd=snapshot, env=env, stdout=log, stderr=log, start_new_session=True)
+        if active is not None:
+            active.add(process)
         try:
             code = process.wait(timeout=timeout)
         except (subprocess.TimeoutExpired, KeyboardInterrupt):
@@ -228,11 +235,82 @@ def run_tests(snapshot, tests, output, timeout):
                 os.killpg(process.pid, signal.SIGKILL)
             except ProcessLookupError:
                 pass
+            if active is not None:
+                active.discard(process)
     try:
         count = len(list(ET.parse(xml).getroot().iter('testcase')))
     except (OSError, ET.ParseError):
         count = 0
     return code, count
+
+
+class Workers:
+    """固定數量的快照輪流取用突變；任一 worker 失敗或主程序中斷時，停止派工並終止執行中的子程序群組。 / A fixed set of
+    snapshots takes mutants in turn; when any worker fails or the main process is interrupted, no further mutant is
+    handed out and every running child process group is killed."""
+
+    def __init__(self, snapshots):
+        self.snapshots = snapshots
+        self.active = set()
+        self.stop = threading.Event()
+
+    def cancel(self):
+        self.stop.set()
+        for process in list(self.active):
+            try:
+                os.killpg(process.pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+
+    def run(self, name, mutants, tests, count, baseline_ids, deadline):
+        """依原順序回傳每個突變的結果。 / Return each mutant's outcome in the original order."""
+        statuses = [None] * len(mutants)
+        pending = iter(range(len(mutants)))
+        lock = threading.Lock()
+        failures = []
+
+        def work(snapshot):
+            path = snapshot / name
+            original = path.read_text()
+            try:
+                while not self.stop.is_set():
+                    with lock:
+                        index = next(pending, None)
+                    if index is None:
+                        return
+                    if time.monotonic() >= deadline:
+                        raise TimeoutError('campaign deadline')
+                    path.write_text(mutants[index][1])
+                    log = snapshot / 'mutant.log'
+                    log.with_suffix('.xml').unlink(missing_ok=True)
+                    code, _ = run_tests(snapshot, tests, log, min(30, deadline - time.monotonic()), self.active)
+                    statuses[index] = ('TIMEOUT' if code == 'TIMEOUT'
+                                       else classify(code, log.with_suffix('.xml'), count, baseline_ids))
+            except BaseException as error:
+                failures.append(error)
+                self.cancel()
+            finally:
+                path.write_text(original)
+
+        threads = [threading.Thread(target=work, args=(s,), daemon=True) for s in self.snapshots]
+        for thread in threads:
+            thread.start()
+        try:
+            for thread in threads:
+                # 以短逾時輪詢，讓 SIGTERM 轉成的 KeyboardInterrupt 能在主執行緒送達。 / Join with a short timeout so
+                # the KeyboardInterrupt raised from SIGTERM reaches the main thread.
+                while thread.is_alive():
+                    thread.join(0.5)
+        except BaseException:
+            self.cancel()
+            for thread in threads:
+                thread.join()
+            raise
+        if failures:
+            raise failures[0]
+        if self.stop.is_set() or None in statuses:
+            raise RuntimeError('mutation workers stopped early')
+        return statuses
 
 
 def run(root, output):
@@ -245,8 +323,10 @@ def run(root, output):
     deadline = time.monotonic() + CAMPAIGN_SECONDS
     # 固定快照不含 .git、憑證、外部附件或執行產物。 / Fixed snapshot excludes Git metadata, credentials, attachments and runtime artifacts.
     with tempfile.TemporaryDirectory(prefix='epsilon-mutations-') as directory:
-        snapshot = Path(directory) / 'source'
-        snapshot.mkdir()
+        # 每個 worker 的快照放在自己的上層目錄，TMPDIR（快照的上層）因此也各自獨立。 / Each worker's snapshot sits in its
+        # own parent directory, so TMPDIR (the snapshot's parent) is separate per worker too.
+        snapshot = Path(directory) / 'w0' / 'source'
+        snapshot.mkdir(parents=True)
         for folder in ('security_harness', 'scripts', 'tests', 'security'):
             for path in (root / folder).rglob('*'):
                 if path.is_file() and path.suffix in ('.py', '.json', '.toml') and '__pycache__' not in path.parts:
@@ -261,6 +341,15 @@ def run(root, output):
                     for p in snapshot.rglob('*') if p.is_file()}
         report['snapshot_sha256'] = hashlib.sha256(json.dumps(manifest, sort_keys=True).encode()).hexdigest()
         report['source_sha256'] = {n: manifest[n] for n in TARGETS}
+        report['workers'] = max(1, min(MAX_WORKERS, os.cpu_count() or 1))
+        snapshots = [snapshot]
+        for index in range(1, report['workers']):
+            copy_root = Path(directory) / f'w{index}' / 'source'
+            for name in manifest:
+                (copy_root / name).parent.mkdir(parents=True, exist_ok=True)
+                (copy_root / name).write_bytes((snapshot / name).read_bytes())
+            snapshots.append(copy_root)
+        workers = Workers(snapshots)
         total = 0
         for name, (functions, tests) in TARGETS.items():
             path = snapshot / name
@@ -286,18 +375,11 @@ def run(root, output):
             path.write_text(original)
             report['baselines'].append({'target': name, 'tests': count, 'selection': list(tests),
                                         'passed': True, 'normalized_passed': True})
-            for identity, source in mutants:
-                if time.monotonic() >= deadline:
-                    raise TimeoutError('campaign deadline')
-                path.write_text(source)
-                log = snapshot / 'mutant.log'
-                log.with_suffix('.xml').unlink(missing_ok=True)
-                code, _ = run_tests(snapshot, tests, log, min(30, deadline - time.monotonic()))
-                status = 'TIMEOUT' if code == 'TIMEOUT' else classify(code, log.with_suffix('.xml'), count, baseline_ids)
+            statuses = workers.run(name, mutants, tests, count, baseline_ids, deadline)
+            for (identity, source), status in zip(mutants, statuses):
                 report['mutants'].append({'id': name + ':' + identity, 'status': status,
                     'mutant_sha256': hashlib.sha256(source.encode()).hexdigest()})
-                write_json(output, report)
-            path.write_text(original)
+            write_json(output, report)
         if any(not (root / n).is_file() or hashlib.sha256((root / n).read_bytes()).hexdigest() != digest
                for n, digest in manifest.items()):
             raise ValueError('source changed during campaign')
