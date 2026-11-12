@@ -16,7 +16,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 if __name__ == "__main__":
     sys.path.insert(0, str(ROOT))
-from security_harness import candidate_git, guard_evidence
+from security_harness import candidate_git, guard_evidence, trust_scope
 from security_harness.github_readonly import GitHubReader, ReadOnlyGitHub
 from security_harness.github_http import Denied
 from security_harness.github_trust import GitHubTrust, approved_review as approved_review
@@ -34,12 +34,10 @@ def live_approval(number, head, base, refusals=None):
     # refuse a policy that asks for anything else.
     if policy.get("schema_version") != 1 or policy.get("require_independent_author") is not True:
         raise ValueError("unsupported trust policy")
-    repo = policy["repository"]
-    if not re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", repo):
-        raise ValueError("invalid trusted repository")
-    reader = GitHubReader(ReadOnlyGitHub(), repo)
+    scope = trust_scope.load(ROOT)
+    reader = GitHubReader(ReadOnlyGitHub(), scope.repository)
     return GitHubTrust(reader).baseline_approval(number, head, base, policy["baseline_reviewers"],
-                                                 os.environ.get("GITHUB_RUN_ID"), refusals)
+                                                 os.environ.get("GITHUB_RUN_ID"), refusals, scope.base_branch)
 
 
 def main():

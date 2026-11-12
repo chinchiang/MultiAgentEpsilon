@@ -30,7 +30,7 @@ def scenario(*twins, pr_state="open", statuses=()):
 
 def trusted_run(github, run_id=100, suite=10, **fields):
     trusted = {"event": "pull_request_target", "path": checker.WORKFLOW_PATH, "head_branch": "feature",
-               "head_repository": {"id": 10}}
+               "head_repository": {"id": 10}, "repository": {"id": 10, "full_name": "owner/repo"}}
     return github.workflow_run(run_id, HEAD, suite, **{**trusted, **fields})
 
 
@@ -109,6 +109,7 @@ def test_green_evaluator_cannot_hide_failed_or_incomplete_signing_workflow(statu
     ("ambiguous", "CHECK_RUN_SOURCE_AMBIGUOUS"),
     ("latest_failed", "LATEST_CHECK_NOT_SUCCESS"),
     ("extra_forged_success", "UNTRUSTED_CHECK_SOURCE"),
+    ("other_repository", "UNTRUSTED_CHECK_SOURCE"),
 ])
 def test_forged_or_manual_sources_block(attack, code):
     github = scenario()
@@ -126,6 +127,10 @@ def test_forged_or_manual_sources_block(attack, code):
     elif attack == "latest_failed":
         evaluate(github, trusted_run(github))
         evaluate(github, trusted_run(github, 101, suite=11), "failure")
+    elif attack == "other_repository":
+        # 發布程式要求 run 屬於本儲存庫，verifier 也須一致。 / The publisher requires the run to belong to this
+        # repository; the verifier must agree.
+        evaluate(github, trusted_run(github, repository={"id": 99, "full_name": "someone/fork"}))
     elif attack == "extra_forged_success":
         evaluate(github, trusted_run(github))
         evaluate(github, trusted_run(github, 101, suite=11, event="push"))

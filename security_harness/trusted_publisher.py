@@ -25,12 +25,13 @@ from xml.etree import ElementTree
 from . import guard_evidence
 from .github_http import Denied, GitHub, need, strict_json
 from .github_readonly import GitHubReader
-from .github_trust import (GITHUB_ACTIONS_APP_ID, GitHubTrust, head_scope, review_decision, run_scope,
+from .github_trust import (GITHUB_ACTIONS_APP_ID, GitHubTrust, head_scope, review_decision, run_scope, trusted_run,
                            validate_run_base as validate_run_base)
 from .inputs import excluded
 from .limits import LIMITS
 from .supervision import child_environment
-from .workflow_contract import ATTESTATION, COMPLETION, EVALUATION, JOBS, MUTATION, evidence_artifact
+from .workflow_contract import (ATTESTATION, BASE_BRANCH, COMPLETION, EVALUATION, JOBS, MUTATION, PUBLISHED_CHECK,
+                                WORKFLOW_PATH, evidence_artifact)
 from .results import EVIDENCE_VERSION, decide, seeded_defects, validate_cases, validate_policy
 
 # 冷快取時每個來源檔需要一次 blob 請求，預算須高於檔案上限。 / A cold cache costs one blob request per source
@@ -48,8 +49,8 @@ def validate_settings(settings, gate_policy):
     for key in ("repository_id", "app_id", "installation_id", "workflow_id", "minimum_regression_tests"):
         need(type(settings.get(key)) is int and settings[key] > 0, "SETTINGS_INCOMPLETE")
     need(settings["app_id"] != GITHUB_ACTIONS_APP_ID, "SHARED_ACTIONS_APP")
-    need(settings.get("base_branch") == "main" and settings.get("check_name") == "epsilon/trusted-merge", "CHECK_SCOPE")
-    need(settings.get("workflow_path") == ".github/workflows/security.yml", "WORKFLOW_PATH")
+    need(settings.get("base_branch") == BASE_BRANCH and settings.get("check_name") == PUBLISHED_CHECK, "CHECK_SCOPE")
+    need(settings.get("workflow_path") == WORKFLOW_PATH, "WORKFLOW_PATH")
     need(SHA.fullmatch(settings.get("evaluator_sha") or ""), "UNAPPROVED_EVALUATOR")
     need(MANIFEST.fullmatch(settings.get("evaluator_digest") or ""), "EVALUATOR_DIGEST")
     need(DIGEST.fullmatch(settings.get("policy_digest") or ""), "POLICY_DIGEST")
@@ -116,7 +117,7 @@ def evidence_file(files, name):
 def expected_provenance(settings, run_id, run_attempt, pr_number, base_sha, candidate_sha):
     return {"schema_version": 1, "repository": settings["repository"], "repository_id": settings["repository_id"],
             "run_id": run_id, "run_attempt": run_attempt, "event": "pull_request_target",
-            "workflow_ref": settings["repository"] + "/" + settings["workflow_path"] + "@refs/heads/main",
+            "workflow_ref": settings["repository"] + "/" + settings["workflow_path"] + "@refs/heads/" + settings["base_branch"],
             "workflow_sha": settings["evaluator_sha"], "pr_number": pr_number,
             "base_sha": base_sha, "candidate_sha": candidate_sha}
 
@@ -202,17 +203,14 @@ def validate_bundle(settings, gate_policy, pr, run, newer_runs, jobs, files, rev
                     push, commit_identities=()):
     validate_settings(settings, gate_policy)
     validate_pr(pr, settings)
-    need(run["repository"]["id"] == settings["repository_id"]
-         and run["repository"]["full_name"] == settings["repository"], "RUN_REPOSITORY")
+    need(run["repository"]["id"] == settings["repository_id"], "RUN_REPOSITORY")
     # pull_request_target 從 PR 的 base 分支執行此路徑， / A pull_request_target run executes this path from the PR's *base* branch, and the
     # run 未記錄 base；其他分支修改副本也有相同 workflow_id／path， / run does not record which base: workflow_id/path also match a modified copy on
     # 因此 collect 前由 validate_run_base 綁定此 PR。 / another branch. validate_run_base binds the run to this PR before collection.
-    need(run["workflow_id"] == settings["workflow_id"] and run["path"] == settings["workflow_path"]
-         and run["event"] == "pull_request_target", "RUN_SOURCE")
-    need(run["status"] == "completed" and run["conclusion"] == "success", "RUN_NOT_SUCCESS")
     # GitHub 將 pull_request_target run 與 check suite 記在 PR head， / GitHub reports pull_request_target runs (and their check suites) on the PR head
     # evaluator commit 則由下方可信 workflow provenance 綁定。 / commit; the evaluator commit is bound below via the trusted workflow's provenance.
-    need(run["head_sha"] == pr["head"]["sha"], "RUN_SHA")
+    trusted_run(run, pr["head"]["sha"], settings["repository"], settings["workflow_path"], settings["workflow_id"])
+    need(run["status"] == "completed" and run["conclusion"] == "success", "RUN_NOT_SUCCESS")
     need(type(run["run_attempt"]) is int and run["run_attempt"] >= 1, "RUN_ATTEMPT")
     reject_newer_runs(run, newer_runs, pr["head"]["sha"])
     named = {j["name"]: j for j in jobs}
@@ -381,7 +379,7 @@ Use a pinned verifier for cryptography, then bind its verified SLSA statement
         command = [str(binary), "attestation", "verify", str(artifact), "--bundle", str(bundle),
                    "--repo", settings["repository"], "--signer-workflow",
                    settings["repository"] + "/" + settings["workflow_path"],
-                   "--signer-digest", settings["evaluator_sha"], "--source-ref", "refs/heads/main",
+                   "--signer-digest", settings["evaluator_sha"], "--source-ref", "refs/heads/" + settings["base_branch"],
                    "--deny-self-hosted-runners", "--predicate-type", "https://slsa.dev/provenance/v1",
                    "--format", "json"]
         try:

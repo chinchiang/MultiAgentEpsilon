@@ -27,6 +27,13 @@ COMPLETION = Job("security-completion", "trusted-security-pilot", ("Require eval
 JOBS = (EVALUATION, MUTATION, ATTESTATION, COMPLETION)
 
 REQUIRED_CHECK = COMPLETION.name
+# pull_request_target 從 PR base 分支執行此路徑的 workflow。 / pull_request_target runs this workflow path from the PR's
+# base branch.
+WORKFLOW_PATH = ".github/workflows/security.yml"
+BASE_BRANCH = "main"
+# 專用發布程式自己發布的檢查名稱（部署後取代 REQUIRED_CHECK）。 / The check the dedicated publisher posts (replacing
+# REQUIRED_CHECK once deployed).
+PUBLISHED_CHECK = "epsilon/trusted-merge"
 # 上傳的 artifact 名稱為「前綴-run_id-run_attempt」。 / Uploaded artifacts are named prefix-run_id-run_attempt.
 EVIDENCE_ARTIFACT_PREFIX = "trusted-security"
 MUTATION_ARTIFACT_PREFIX = "trusted-mutations"

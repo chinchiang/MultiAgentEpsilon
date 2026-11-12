@@ -59,6 +59,16 @@ def run_scope(run):
     return run.get("head_sha"), (run.get("head_repository") or {}).get("id"), run.get("head_branch")
 
 
+def trusted_run(run, head_sha, repository, workflow_path, workflow_id=None):
+    """這個 run 是否來自可信 workflow 對此 head 的 pull_request_target；verifier 與發布程式共用。各項依序檢查，拒絕碼
+    指出哪一項不符。 / Whether this run is the trusted workflow's pull_request_target run for this head, shared by the
+    verifier and the publisher. Each check runs in turn and its refusal code names the one that failed."""
+    need((run.get("repository") or {}).get("full_name") == repository, "RUN_REPOSITORY")
+    need(run.get("event") == "pull_request_target" and run.get("path") == workflow_path
+         and (workflow_id is None or run.get("workflow_id") == workflow_id), "RUN_SOURCE")
+    need(run.get("head_sha") == head_sha, "RUN_SHA")
+
+
 def related_pull_path(prefix, pr):
     repo = (pr["head"].get("repo") or {}).get("full_name", "")
     need(re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", repo), "PR_HEAD_REPOSITORY")
@@ -265,9 +275,9 @@ Read the head's push time and pushers; refuse a fork, a shared head, a ruleset t
         reviews = self._reader.items(f"pulls/{number}/reviews")
         return review_decision(pr, reviews, self._permissions(reviews), reviewers, excluded, push)
 
-    def baseline_approval(self, number, head, base, reviewers, run_id=None, refusals=None):
+    def baseline_approval(self, number, head, base, reviewers, run_id=None, refusals=None, base_branch="main"):
         pr = self._reader.get(f"pulls/{number}")
-        push = self.head_push(number, pr, "main")
+        push = self.head_push(number, pr, base_branch)
         reviews = self._reader.items(f"pulls/{number}/reviews")
         # 提交身分可自報，因此只能排除審查者， / Commit identities are self-asserted, so they are used only to exclude reviewers;
         # 真實推送者仍由規則集原生最後推送核准檢查判定。 / the ruleset's native last-push approval remains the authoritative pusher check.
@@ -276,5 +286,5 @@ Read the head's push time and pushers; refuse a fork, a shared head, a ruleset t
             if not re.fullmatch(r"[1-9][0-9]*", run_id):
                 raise ValueError("invalid run identity")
             run = self._reader.get(f"actions/runs/{run_id}")
-            self.run_base(pr, "main").validate(run)
+            self.run_base(pr, base_branch).validate(run)
         return approved_review(pr, reviews, head, base, reviewers, self._permissions(reviews), excluded, push, refusals)
