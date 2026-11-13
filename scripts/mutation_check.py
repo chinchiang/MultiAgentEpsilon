@@ -99,13 +99,22 @@ TARGETS = {
     # merging, until the App is deployed.
     'scripts/verify_required_check.py': (
         ('verify',), ('tests/test_verify_required_check.py',)),
+    # 相依套件弱點掃描證據：每道檢查都以精確拒絕碼測到。 / Dependency vulnerability scan evidence: every check is
+    # caught by a test expecting its exact refusal.
+    'security_harness/dependencies.py': (
+        ('identifier', 'findings_for', 'validate_evidence'), ('tests/test_dependencies.py',)),
+    # 機密掃描前的封存展開與二進位審查；選用不需 gitleaks、測試 ID 固定的純函式測試。 / Archive expansion and binary
+    # review before the secret scan; uses pure tests with fixed IDs that need no gitleaks binary.
+    'security_harness/scan_content.py': (
+        ('load_binary_allowlist', 'is_text', 'zip_extra', 'zip_central', 'zip_payloads', 'ContentInventory.account',
+         'ContentInventory.gunzip', 'ContentInventory.member', 'ContentInventory.add'), ('tests/test_scan_content.py',)),
     'security_harness/llm/benchmark.py': (
         ('bounded_text', 'validate_review', 'parse_review'), ('tests/test_model_benchmark.py', '--deselect=tests/test_model_benchmark.py::test_review_cli_supervision_and_explicit_live_opt_in',
                                                               '--deselect=tests/test_model_benchmark.py::test_review_cli_accepts_large_budgets_only_within_the_total_cap', 'tests/test_security_properties.py')),
 }
 # 突變總數上限；超過代表目標範圍失控，應拆分而非加長期限。 / Cap on the mutant total; exceeding it means the target set
 # grew out of hand and should be split rather than given a longer deadline.
-MAX_MUTANTS = 640
+MAX_MUTANTS = 800
 # 整批突變的牆鐘期限（秒）；CI job 的 timeout-minutes 須另留安裝與上傳的餘裕。 / Wall-clock deadline for the whole
 # campaign in seconds; the CI job's timeout-minutes must leave room for setup and upload on top.
 CAMPAIGN_SECONDS = 1500

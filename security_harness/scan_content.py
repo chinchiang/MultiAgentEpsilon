@@ -182,7 +182,7 @@ A single gzip member only: no header extra field, printable-ASCII name and
         for flag in (0x08, 0x10):
             if flags & flag:
                 end = data.find(b'\x00', position)
-                if end < 0 or not GZIP_TEXT.fullmatch(data[position:end]):
+                if end == -1 or not GZIP_TEXT.fullmatch(data[position:end]):
                     raise UnsupportedContent("binary gzip header field")
                 position = end + 1
         maximum = self.budget()

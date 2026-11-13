@@ -2,6 +2,7 @@
 
 Known-vulnerability counterexamples and incomplete/tampered coverage block."""
 from copy import deepcopy
+import hashlib
 from datetime import datetime, timedelta, timezone
 import json
 
@@ -161,3 +162,60 @@ def test_osv_json_rejects_nonfinite_numbers_even_in_metadata(number):
     from security_harness.dependencies import strict_json, DependencyError
     with pytest.raises(DependencyError, match='^nonfinite\\ JSON$'):
         strict_json('{"vulns": [], "metadata": {"score": ' + number + '}}')
+
+
+# 以下直接呼叫判斷函式並比對精確拒絕碼，讓每道檢查被拿掉或邊界被改時都有測試失敗。 / The tests below call the
+# decision functions directly and expect the exact refusal, so removing a check or moving a boundary fails a test.
+RECORD = {'name': 'example', 'version': '1.0'}
+
+
+def numbered(index, **extra):
+    return advisory(id=f'GHSA-example-{index:04d}', **extra)
+
+
+def test_advisory_list_must_be_a_list():
+    with pytest.raises(deps.DependencyError, match='^invalid\\ advisory\\ list$'):
+        deps.findings_for(RECORD, {'vulns': {}})
+
+
+def test_advisory_list_size_boundary_is_inclusive():
+    assert len(deps.findings_for(RECORD, {'vulns': [numbered(i) for i in range(256)]})) == 256
+    with pytest.raises(deps.DependencyError, match='^invalid\\ advisory\\ list$'):
+        deps.findings_for(RECORD, {'vulns': [numbered(i) for i in range(257)]})
+
+
+def test_alias_list_size_boundary_is_inclusive():
+    aliases = [f'CVE-2026-{i:05d}' for i in range(101)]
+    assert len(deps.findings_for(RECORD, {'vulns': [advisory(aliases=aliases[:100])]})[0]['aliases']) == 100
+    with pytest.raises(deps.DependencyError, match='^invalid\\ aliases$'):
+        deps.findings_for(RECORD, {'vulns': [advisory(aliases=aliases)]})
+
+
+def test_provenance_packages_must_be_a_list():
+    packages, evidence = clean_evidence(2, NOW)
+    with pytest.raises(deps.DependencyError, match='^missing\\ provenance\\ packages$'):
+        deps.validate_evidence(evidence, tuple(packages), 2, 0, NOW, 3600)
+
+
+def test_evidence_age_boundary_is_inclusive():
+    packages, evidence = clean_evidence(2, NOW)
+    assert deps.validate_evidence(evidence, packages, 2, 0, NOW + timedelta(seconds=3600), 3600) is None
+    with pytest.raises(deps.DependencyError, match='^stale\\ scan$'):
+        deps.validate_evidence(evidence, packages, 2, 0, NOW + timedelta(seconds=3601), 3600)
+
+
+def test_package_without_approved_hashes_is_an_sbom_mismatch_even_when_the_sbom_agrees():
+    packages, evidence = clean_evidence(2, NOW)
+    packages[0]['approved_hashes'] = []
+    declared = [{'name': p['name'], 'version': p['version'], 'hashes': set(p['approved_hashes'])} for p in packages]
+    evidence['sbom'] = deps.sbom(declared)
+    evidence['sbom_sha256'] = hashlib.sha256(deps.encoded(evidence['sbom'])).hexdigest()
+    with pytest.raises(deps.DependencyError, match='^SBOM\\ mismatch$'):
+        deps.validate_evidence(evidence, packages, 2, 0, NOW, 3600)
+
+
+def test_failed_query_alone_is_incomplete_coverage():
+    packages, evidence = clean_evidence(2, NOW)
+    evidence['queries'][0]['status'] = 'ERROR'
+    with pytest.raises(deps.DependencyError, match='^incomplete\\ query\\ coverage$'):
+        deps.validate_evidence(evidence, packages, 2, 0, NOW, 3600)
