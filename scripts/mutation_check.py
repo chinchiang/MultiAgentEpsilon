@@ -54,8 +54,8 @@ TARGETS = {
     # the publisher; only tests that never call git are selected, since the worker forbids subprocesses.
     'security_harness/github_trust.py': (
         ('validate_review', 'review_decision', 'approved_review', 'pr_commit_identities', 'validate_run_base',
-         'GitHubTrust.head_push', 'GitHubTrust.review_ids', 'GitHubTrust.baseline_approval'),
-        ('tests/test_github_trust.py', 'tests/test_trusted_publisher.py',
+         'trusted_run', 'GitHubTrust.head_push', 'GitHubTrust.review_ids', 'GitHubTrust.baseline_approval'),
+        ('tests/test_github_trust.py', 'tests/test_trusted_publisher.py', 'tests/test_trust_scope.py',
          'tests/test_trusted_changes.py::test_baseline_approval_binds_independent_reviewer_and_current_head',
          'tests/test_trusted_changes.py::test_listed_reviewer_without_write_access_cannot_approve_baseline',
          'tests/test_trusted_changes.py::test_head_commit_identities_only_remove_approvals',
@@ -92,6 +92,8 @@ TARGETS = {
     # guard 證據格式由 guard 寫入、CI 自我檢查與發布程式共用。 / The guard evidence format shared by the guard, the CI
     # self-check and the publisher.
     'security_harness/guard_evidence.py': (('build', 'validate'), ('tests/test_guard_evidence.py',)),
+    # guard、verifier 與發布程式共用的信任範圍。 / The trust scope shared by the guard, verifier and publisher.
+    'security_harness/trust_scope.py': (('load',), ('tests/test_trust_scope.py',)),
     'scripts/check_publishable_evidence.py': (('check_guard',), ('tests/test_guard_evidence.py',)),
     # 部署 App 前，審查者合併前執行的必要檢查來源核對。 / The required-check source verification reviewers run before
     # merging, until the App is deployed.

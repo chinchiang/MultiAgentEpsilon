@@ -35,6 +35,7 @@ relative to it."""
     def __init__(self, transport, repo):
         need(re.fullmatch(r"[A-Za-z0-9-]+/[A-Za-z0-9_.-]+", repo) and repo.split("/")[1] not in (".", ".."), "REPOSITORY")
         self._transport = transport
+        self.repository = repo
         self.prefix = f"https://api.github.com/repos/{repo}/"
 
     def _url(self, path):

@@ -27,13 +27,13 @@ if __name__ == "__main__":
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from security_harness.github_readonly import GitHubReader, ReadOnlyGitHub
 from security_harness.github_http import Denied, need
-from security_harness import workflow_contract
-from security_harness.github_trust import GITHUB_ACTIONS_APP_ID, GitHubTrust
+from security_harness import trust_scope, workflow_contract
+from security_harness.github_trust import GITHUB_ACTIONS_APP_ID, GitHubTrust, trusted_run
 
 REQUIRED_CHECK = workflow_contract.REQUIRED_CHECK
 ACTIONS_APP_ID = GITHUB_ACTIONS_APP_ID
-WORKFLOW_PATH = ".github/workflows/security.yml"
-BASE_BRANCH = "main"
+WORKFLOW_PATH = workflow_contract.WORKFLOW_PATH
+BASE_BRANCH = workflow_contract.BASE_BRANCH
 SHA = re.compile(r"[0-9a-f]{40}")
 
 
@@ -56,8 +56,12 @@ def verify(reader, number):
         need(check["app"]["id"] == ACTIONS_APP_ID and check["head_sha"] == head, "FOREIGN_CHECK_SOURCE")
         source = reader.check_source(check)
         run = source["run"]
-        need(run["event"] == "pull_request_target" and run["path"] == WORKFLOW_PATH
-             and run["head_sha"] == head, "UNTRUSTED_CHECK_SOURCE")
+        # 與發布程式共用同一判斷；任一項不符都是不可信來源。 / The same rule the publisher applies; any mismatch is an
+        # untrusted source.
+        try:
+            trusted_run(run, head, reader.repository, WORKFLOW_PATH)
+        except Denied:
+            raise Denied("UNTRUSTED_CHECK_SOURCE") from None
         try:
             source_evidence.validate(run)
         except ValueError as exc:
@@ -79,7 +83,7 @@ def verify(reader, number):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    trusted = json.loads((Path(__file__).resolve().parents[1] / "security/trust-policy.json").read_text())["repository"]
+    trusted = trust_scope.load(Path(__file__).resolve().parents[1]).repository
     parser.add_argument("--repo", default=trusted, help="預設為信任政策中的儲存庫 / defaults to the trust-policy repository")
     parser.add_argument("--pr", type=int, required=True, help="要核對的 PR 編號 / pull request number to verify")
     args = parser.parse_args()
