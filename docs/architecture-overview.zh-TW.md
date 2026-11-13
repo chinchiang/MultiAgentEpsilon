@@ -113,6 +113,7 @@ MultiAgentEpsilon/
 │   │   ├── model-review-flow.svg
 │   │   ├── security-flow.mmd
 │   │   └── security-flow.svg
+│   ├── approval-gate-design.zh-TW.md
 │   ├── architecture-overview.zh-TW.md
 │   ├── asvs-coverage.zh-TW.md
 │   ├── audit-20261009.zh-TW.md
