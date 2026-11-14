@@ -15,7 +15,7 @@ def test_identical_oracle_rejects_vulnerable_and_accepts_fixed():
     vulnerable = run_authorization(dsn, "vulnerable")
     fixed = run_authorization(dsn, "fixed")
     contract = json.loads((Path(__file__).resolve().parents[1] / "security/policy.json").read_text())["gate_contracts"]["AUTH"]
-    assert len(vulnerable) == len(fixed) == len(contract["case_ids"]) == 48
+    assert len(vulnerable) == len(fixed) == len(contract["case_ids"]) == 50
     failed = {x["case"] for x in vulnerable if not x["passed"]}
     assert failed == set(contract["seeded_defect_case_ids"]) == {
         "bob: unauthorized read denied without data",
@@ -111,3 +111,16 @@ def test_oracle_search_path_resolves_builtins_before_fixture_schema():
             assert conn.execute("SELECT count(*) AS n FROM items").fetchone()["n"] == 3
     finally:
         fixture_database.cleanup(dsn, schema)
+
+
+def test_new_contract_cases_fit_the_roe_and_are_not_seeded_defects():
+    """契約案例數不得超過 RoE 上限；/health 與租戶欄位兩案例在修正版與缺陷版都須通過。
+
+    The contract fits the RoE case cap; the /health and tenant-field cases pass on both variants."""
+    root = Path(__file__).resolve().parents[1]
+    contract = json.loads((root / "security/policy.json").read_text())["gate_contracts"]["AUTH"]
+    roe = json.loads((root / "security/roe.json").read_text())
+    assert len(contract["case_ids"]) == len(set(contract["case_ids"])) <= roe["max_cases"]
+    added = {"health exposes only readiness", "tenant field cannot be reassigned"}
+    assert added <= set(contract["case_ids"])
+    assert not added & set(contract["seeded_defect_case_ids"])

@@ -94,7 +94,9 @@
         "random bearer token denied",
         "unlisted item method rejected without side effect",
         "unlisted item create not found",
-        "unlisted route not found"
+        "unlisted route not found",
+        "health exposes only readiness",
+        "tenant field cannot be reassigned"
       ],
       "seeded_defect_case_ids": [
         "bob: unauthorized read denied without data",
