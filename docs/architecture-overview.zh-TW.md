@@ -76,7 +76,7 @@ PR 使用 `.github/workflows/security.yml` 的 `pull_request_target`：evaluator
 | G1／G2 | [`preflight.py`](../security_harness/preflight.py)、[`dependencies.py`](../security_harness/dependencies.py)、[`secrets.py`](../security_harness/secrets.py)、[`scan_content.py`](../security_harness/scan_content.py)、[`candidate_git.py`](../security_harness/candidate_git.py) |
 | 隔離與外部 oracle | [`isolation.py`](../security_harness/isolation.py)、[`container_http.py`](../security_harness/container_http.py)、[`authorization.py`](../security_harness/authorization.py)、[`fixture_database.py`](../security_harness/fixture_database.py)、[`fixture_app/app.py`](../fixture_app/app.py) |
 | 突變與性質測試 | [`mutation_check.py`](../scripts/mutation_check.py)、[`mutation_worker.py`](../scripts/mutation_worker.py)、[`test_security_properties.py`](../tests/test_security_properties.py) |
-| 文件與合併保護檢查 | [`check_docs.py`](../scripts/check_docs.py)、[`audit_merge_protection.py`](../scripts/audit_merge_protection.py) |
+| 文件與合併保護檢查 | [`check_docs.py`](../scripts/check_docs.py)、[`audit_merge_protection.py`](../scripts/audit_merge_protection.py)、[`monitor_ruleset.py`](../scripts/monitor_ruleset.py)（排程監看線上規則集） |
 | 程序生命週期與回收 | [`supervision.py`](../security_harness/supervision.py)（受監督執行：登記、握手、期限、群組停止、收尾協定與監督結果，以及共用的基本環境）、[`lifecycle.py`](../security_harness/lifecycle.py)（security 角色）、[`janitor.py`](../security_harness/janitor.py)、[`limits.py`](../security_harness/limits.py)、[`cleanup_runs.py`](../scripts/cleanup_runs.py)；模型另用 [`llm/lifecycle.py`](../security_harness/llm/lifecycle.py) |
 | LM Studio、批次比較與遠端主機授權 | [`lmstudio.py`](../security_harness/llm/lmstudio.py)、[`comparison.py`](../security_harness/llm/comparison.py)、[`config.py`](../security_harness/llm/config.py) |
 | 模型 transport／adapter | [`gateway.py`](../security_harness/llm/gateway.py)、[`adapters.py`](../security_harness/llm/adapters.py)、[`transport.py`](../security_harness/llm/transport.py)、[`output_schema.py`](../security_harness/llm/output_schema.py) |
@@ -95,6 +95,7 @@ PR 使用 `.github/workflows/security.yml` 的 `pull_request_target`：evaluator
 MultiAgentEpsilon/
 ├── .github/
 │   ├── workflows/
+│   │   ├── ruleset-monitor.yml
 │   │   └── security.yml
 │   └── CODEOWNERS
 ├── deploy/
@@ -160,6 +161,7 @@ MultiAgentEpsilon/
 │   ├── model_review.py
 │   ├── model_smoke.py
 │   ├── model_worker.py
+│   ├── monitor_ruleset.py
 │   ├── mutation_check.py
 │   ├── mutation_worker.py
 │   ├── preflight.py
@@ -268,6 +270,8 @@ MultiAgentEpsilon/
 │   ├── test_response_comparison.py
 │   ├── test_review_boundaries.py
 │   ├── test_review_variants.py
+│   ├── test_ruleset_monitor.py
+│   ├── test_ruleset_monitor_workflow.py
 │   ├── test_ruleset_template.py
 │   ├── test_run_evidence.py
 │   ├── test_scan_content.py

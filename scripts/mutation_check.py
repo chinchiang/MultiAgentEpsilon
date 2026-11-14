@@ -99,6 +99,12 @@ TARGETS = {
     # merging, until the App is deployed.
     'scripts/verify_required_check.py': (
         ('verify',), ('tests/test_verify_required_check.py',)),
+    # 合併保護稽核與排程監看共用的規則集判斷；每一項保護被改弱都須由測試點名。 / The ruleset rules shared by the
+    # merge-protection audit and the scheduled monitor; a test must name every protection that is weakened.
+    'scripts/audit_merge_protection.py': (
+        ('ruleset_protections',),
+        ('tests/test_ruleset_monitor.py', 'tests/test_merge_protection.py')),
+    'scripts/monitor_ruleset.py': (('assess', 'monitor'), ('tests/test_ruleset_monitor.py',)),
     # 相依套件弱點掃描證據：每道檢查都以精確拒絕碼測到。 / Dependency vulnerability scan evidence: every check is
     # caught by a test expecting its exact refusal.
     'security_harness/dependencies.py': (
