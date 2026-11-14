@@ -203,7 +203,10 @@ def mutations(source, functions):
     return output
 
 
-def classify(returncode, xml_path, baseline_count, expected_ids=None):
+def classify(returncode, xml_path, baseline_count, expected_ids=None, fail_fast=False):
+    """fail_fast 時第一個失敗就停止：攔截只需基準案例的子集且有失敗，存活仍須跑完全部基準案例。 / With fail_fast
+    the run stops at the first failure: a kill needs a failing subset of the baseline cases, while a survivor must
+    still run every baseline case."""
     try:
         root = ET.parse(xml_path).getroot()
         cases = list(root.iter('testcase'))
@@ -212,14 +215,14 @@ def classify(returncode, xml_path, baseline_count, expected_ids=None):
         skipped = list(root.iter('skipped'))
         identities = [(c.get('classname'), c.get('name')) for c in cases]
         if (any(not all(isinstance(v, str) and v.strip() for v in pair) for pair in identities)
-                or len(set(identities)) != len(identities)
-                or (expected_ids is not None and set(identities) != expected_ids)):
+                or len(set(identities)) != len(identities) or errors or skipped or not cases):
             return 'ERROR'
-        if errors or skipped or len(cases) != baseline_count or not cases:
-            return 'ERROR'
-        if returncode == 0 and not failures:
+        complete = len(cases) == baseline_count and (expected_ids is None or set(identities) == expected_ids)
+        partial = (fail_fast and len(cases) <= baseline_count
+                   and (expected_ids is None or set(identities) <= expected_ids))
+        if returncode == 0 and not failures and complete:
             return 'SURVIVED'
-        if returncode == 1 and failures:
+        if returncode == 1 and failures and (complete or partial):
             return 'KILLED'
     except (OSError, ET.ParseError):
         pass
@@ -298,9 +301,13 @@ class Workers:
                     path.write_text(mutants[index][1])
                     log = snapshot / 'mutant.log'
                     log.with_suffix('.xml').unlink(missing_ok=True)
-                    code, _ = run_tests(snapshot, tests, log, min(30, deadline - time.monotonic()), self.active)
+                    # 突變以失敗即停執行；基準與對照仍完整執行。 / Mutants run fail-fast; baselines and the control
+                    # still run in full.
+                    code, _ = run_tests(snapshot, ('-x', *tests), log, min(30, deadline - time.monotonic()),
+                                        self.active)
                     statuses[index] = ('TIMEOUT' if code == 'TIMEOUT'
-                                       else classify(code, log.with_suffix('.xml'), count, baseline_ids))
+                                       else classify(code, log.with_suffix('.xml'), count, baseline_ids,
+                                                     fail_fast=True))
             except BaseException as error:
                 failures.append(error)
                 self.cancel()

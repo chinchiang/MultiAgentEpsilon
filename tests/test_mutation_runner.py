@@ -7,6 +7,7 @@ from pathlib import Path
 import shutil
 import threading
 import time
+import xml.etree.ElementTree as ET
 
 import pytest
 from scripts.mutation_check import CAMPAIGN_SECONDS, MAX_MUTANTS, MAX_WORKERS, TARGETS, Workers, classify, missing_targets, mutations, run_tests
@@ -187,3 +188,55 @@ def test_cancelling_parallel_workers_reaps_running_children_and_fails(tmp_path):
             os.kill(child, 0)
     for root in snapshots:
         assert (root / 'target.py').read_text() == 'def value():\n    return 1\n'
+
+
+# 失敗即停：突變子程序遇到第一個失敗就停止，攔截只需基準案例的子集；存活仍須跑完全部基準案例。 / Fail fast: a mutant
+# run stops at its first failure, so a kill needs only a subset of the baseline cases; a survivor must still run them
+# all.
+BASELINE = {('test', 'a'), ('test', 'b')}
+
+
+@pytest.mark.parametrize('xml,code,expected', [
+    ('<testsuite><testcase classname="test" name="a"><failure/></testcase></testsuite>', 1, 'KILLED'),
+    ('<testsuite><testcase classname="test" name="a"/><testcase classname="test" name="b"><failure/></testcase>'
+     '</testsuite>', 1, 'KILLED'),
+    ('<testsuite><testcase classname="test" name="a"/></testsuite>', 0, 'ERROR'),
+    ('<testsuite><testcase classname="test" name="a"/></testsuite>', 1, 'ERROR'),
+    ('<testsuite><testcase classname="test" name="a"/><testcase classname="test" name="b"/></testsuite>', 0,
+     'SURVIVED'),
+    ('<testsuite><testcase classname="other" name="a"><failure/></testcase></testsuite>', 1, 'ERROR'),
+    ('<testsuite><testcase classname="test" name="a"><failure/></testcase><testcase classname="test" name="a"/>'
+     '</testsuite>', 1, 'ERROR'),
+    ('<testsuite><testcase classname="test" name="a"><error/></testcase></testsuite>', 1, 'ERROR'),
+    ('<testsuite><testcase classname="test" name="a"><skipped/></testcase><testcase classname="test" name="b">'
+     '<failure/></testcase></testsuite>', 1, 'ERROR'),
+    ('<testsuite><testcase classname="test" name="a"><failure/></testcase></testsuite>', 2, 'ERROR'),
+    ('<testsuite/>', 1, 'ERROR'),
+], ids=['first-fails', 'second-fails', 'partial-pass', 'partial-no-failure', 'full-pass', 'foreign-case',
+        'duplicate-case', 'error', 'skipped', 'wrong-exit', 'no-cases'])
+def test_fail_fast_kill_needs_a_failing_baseline_subset_and_survival_needs_every_case(xml, code, expected, tmp_path):
+    path = tmp_path / 'tests.xml'
+    path.write_text(xml)
+    assert classify(code, path, 2, BASELINE, fail_fast=True) == expected
+
+
+def test_without_fail_fast_a_partial_run_is_still_an_error(tmp_path):
+    path = tmp_path / 'tests.xml'
+    path.write_text('<testsuite><testcase classname="test" name="a"><failure/></testcase></testsuite>')
+    assert classify(1, path, 2, BASELINE) == 'ERROR'
+
+
+def test_mutants_run_fail_fast_and_stop_after_the_first_failure(tmp_path):
+    snapshots = worker_snapshots(tmp_path, 1)
+    root = snapshots[0]
+    (root / 'test_target.py').write_text('from target import value\n\n\ndef test_value():\n    assert value() == 1\n\n\n'
+                                         'def test_second():\n    assert value() == 1\n')
+    baseline = {('test_target', 'test_value'), ('test_target', 'test_second')}
+    statuses = Workers(snapshots).run('target.py', [('m', 'def value():\n    return 2\n'), ('s', 'def value():\n'
+                                      '    return 1\n')], ['test_target.py'], 2, baseline, time.monotonic() + 120)
+    assert statuses == ['KILLED', 'SURVIVED']
+    # 最後一個突變存活，JUnit 有兩個案例；改看被攔截突變的紀錄須只有一個案例。 / The last mutant survived with two cases;
+    # rerun the killed one alone to see that it stopped after one case.
+    Workers(snapshots).run('target.py', [('m', 'def value():\n    return 2\n')], ['test_target.py'], 2, baseline,
+                           time.monotonic() + 120)
+    assert len(list(ET.parse(root / 'mutant.xml').getroot().iter('testcase'))) == 1
