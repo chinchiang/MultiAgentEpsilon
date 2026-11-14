@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 
 from .github_http import Denied, need
+from .workflow_contract import BASE_BRANCH
 
 # 共用 App 身分不能單獨證明 check 來源。 / The shared App identity alone does not prove a check's source.
 GITHUB_ACTIONS_APP_ID = 15368
@@ -275,7 +276,7 @@ Read the head's push time and pushers; refuse a fork, a shared head, a ruleset t
         reviews = self._reader.items(f"pulls/{number}/reviews")
         return review_decision(pr, reviews, self._permissions(reviews), reviewers, excluded, push)
 
-    def baseline_approval(self, number, head, base, reviewers, run_id=None, refusals=None, base_branch="main"):
+    def baseline_approval(self, number, head, base, reviewers, run_id=None, refusals=None, base_branch=BASE_BRANCH):
         pr = self._reader.get(f"pulls/{number}")
         push = self.head_push(number, pr, base_branch)
         reviews = self._reader.items(f"pulls/{number}/reviews")
