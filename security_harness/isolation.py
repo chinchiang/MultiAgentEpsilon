@@ -136,6 +136,33 @@ Remove this run's containers until two listings CLEANUP_SETTLE seconds apart are
     raise RuntimeError("isolated containers remain after cleanup")
 
 
+CANDIDATE_ROLE = "epsilon_app"
+# 每 0.05 秒查一次，最多 100 次（約 5 秒）。 / One query every 0.05 seconds, at most 100 times (about 5 seconds).
+SESSION_END_ROUNDS = 100
+
+
+def stop_candidate(kill, dsn, schema, connect=connect, rounds=SESSION_END_ROUNDS, pause=0.05):
+    """終止候選程序後，結束它留在資料庫端的連線，並回報當時是否還有敘述在執行。只終止程序並不夠：PostgreSQL 不會察覺
+    用戶端已死，執行中的敘述照樣跑完並提交。
+
+After killing the candidate process, end the sessions it left in the database and report whether a statement was
+    still running. Killing the process alone is not enough: PostgreSQL does not notice the dead client, so a
+    running statement still completes and commits."""
+    kill()
+    busy = False
+    with connect(dsn, schema) as conn:
+        for _ in range(rounds):
+            sessions = conn.execute("SELECT pid, state, pg_terminate_backend(pid) AS ended FROM pg_stat_activity "
+                                    "WHERE usename = %s", (CANDIDATE_ROLE,)).fetchall()
+            # 每輪結束交易，下一輪才讀得到新的連線狀態。 / End the transaction so the next round reads fresh session state.
+            conn.commit()
+            if not sessions:
+                return busy
+            busy = busy or any(row["state"] != "idle" for row in sessions)
+            time.sleep(pause)
+    raise RuntimeError("candidate database sessions did not end")
+
+
 def run_isolated(candidate: Path, variant="fixed", run_id=None) -> dict:
     """評估一次；只有橋接請求超過期限時，清理後以新的容器與 schema 整輪重跑一次。
 
@@ -273,10 +300,12 @@ def _run_once(candidate: Path, variant, run_id) -> dict:
                 time.sleep(0.1)
             else:
                 raise RuntimeError("isolated HTTP service unavailable")
-            # 靜置後、最終快照前終止候選（SIGKILL），最終比對之後不會再有候選寫入。 / Kill the candidate after
-            # the settle period and before the final snapshot, so no candidate write can follow the last comparison.
+            # 靜置後、最終快照前終止候選（SIGKILL）並結束它在資料庫端的連線，最終比對之後不會再有候選寫入。 / Kill the
+            # candidate after the settle period and end its database sessions before the final snapshot, so no
+            # candidate write can follow the last comparison.
             client.deadline = time.monotonic() + EVALUATION_SECONDS
-            cases = evaluate(client, dsn, schema, passwords, connect, stop=lambda: docker("kill", names[1]))
+            cases = evaluate(client, dsn, schema, passwords, connect,
+                             stop=lambda: stop_candidate(lambda: docker("kill", names[1]), dsn, schema))
             evidence = {**app_isolation,
                         "database": db_isolation,
                         "oracle": "host oracle; bounded container HTTP bridge + independent database queries",

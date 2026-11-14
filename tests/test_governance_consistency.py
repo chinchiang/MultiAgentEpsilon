@@ -60,3 +60,14 @@ def test_migration_steps_do_not_exclude_the_run_actor_from_approving():
     text = (ROOT / "docs/trusted-execution.zh-TW.md").read_text()
     assert "核准者不可是 CI 的觸發者" not in text
     assert "approver must not be the run's actor" not in text
+
+
+def test_readme_states_the_auth_case_count_of_the_policy_contract():
+    """README 的 AUTH 案例數（中英）等於政策契約的案例數。
+
+    The AUTH case count in the README equals the policy contract in both languages."""
+    count = len(json.loads((ROOT / "security/policy.json").read_text())["gate_contracts"]["AUTH"]["case_ids"])
+    readme = (ROOT / "README.md").read_text()
+    assert f"AUTH 有 {count} 個必要案例" in readme
+    assert f"| AUTH | {count} synthetic authentication/authorization" in readme
+    assert set(re.findall(r"exact unique set of (\d+) cases", readme)) == {str(count)}

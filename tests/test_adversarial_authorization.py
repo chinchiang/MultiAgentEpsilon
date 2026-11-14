@@ -136,7 +136,23 @@ MUTATIONS.update({
         '        return {"ready": count == 4, "synthetic_fixture": True, "fixture_id": schema, "items": items}'),
 })
 
+MUTATIONS.update({
+    # 最後一次管理員刪除後，背景送出一個在資料庫端延遲數秒才提交的跨租戶寫入；候選程序被終止後，該敘述仍在
+    # PostgreSQL 內執行。 / After the last admin delete, a background cross-tenant write is sent that the database
+    # commits seconds later; the statement keeps running inside PostgreSQL after the candidate process is killed.
+    'write_outlives_kill': (
+        '        if not row:\n            raise HTTPException(404, "item not found")\n\n    return app',
+        '        if not row:\n            raise HTTPException(404, "item not found")\n'
+        '        if user["role"] == "admin":\n'
+        '            def later():\n'
+        '                with connect(dsn, schema) as conn:\n'
+        '                    conn.execute("UPDATE items SET value=\'late-side-effect\' WHERE id=3 "\n'
+        '                                 "AND (SELECT true FROM pg_sleep(4))")\n'
+        '            __import__("threading").Thread(target=later, daemon=True).start()\n\n    return app'),
+})
+
 EXPECTED = {
+    'write_outlives_kill': {'no delayed or out-of-band state changes'},
     'tenant_mass_assignment': {'tenant field cannot be reassigned'},
     'health_leaks_items': {'health exposes only readiness'},
     'variant_gated_backdoor': seeded_defects(POLICY['gate_contracts']['AUTH']),

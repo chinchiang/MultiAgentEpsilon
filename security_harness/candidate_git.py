@@ -17,6 +17,9 @@ OVERRIDES = (
     "protocol.allow=never",
     # 候選不可把提交中繼資料轉成掃描器讀不懂的編碼。 / The candidate cannot re-encode commit metadata away from the scanner.
     "i18n.logOutputEncoding=UTF-8",
+    # commit-graph 記的父 commit 不與 commit 物件核對；偽造後可讓歷史掃描漏掉舊提交。 / Parents recorded in the
+    # commit-graph are not checked against the commit objects; a forged one hides earlier commits from the scan.
+    "core.commitGraph=false",
 )
 
 

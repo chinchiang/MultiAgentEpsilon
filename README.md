@@ -66,7 +66,7 @@ CI runner 以一般使用者（非 root）執行。若本機或容器內以 root
 
 結果 schema 為第 3 版，拒絕舊版 gate 證據：每筆 gate 綁定相同 run ID、subject 與 policy digest。subject 使用 `worktree-manifest-v1`，雜湊明確編碼的逐檔路徑、型態、執行權限、大小及內容 SHA-256。AUTH 必須包含政策指定的唯一案例集合；缺漏、重複、未知 ID 或彙總不一致均 BLOCK。
 
-AUTH 有 48 個必要案例（含契約外的隨機權杖、未列出的方法與路由探測），包含錯誤密碼及不存在帳號、admin 的同租戶寫入（允許）與跨租戶寫入（拒絕且無副作用），以及寫入與匯出端點對匿名、偽造、過期與已登出身分的拒絕。oracle 自行維護預期狀態，案例之間或最後靜置期間出現的延遲寫入也會失敗。拒絕回應、讀取及匯出依合成 API 契約比對完整 JSON 與型別，拒絕重複 key；回應標頭也屬於契約，只允許固定的 date、server、content-type、相符的 content-length，以及 bridge 關閉連線時回送的 `connection: close`，額外標頭或 cookie 都使案例失敗；每個案例核對完整 users／items／sessions 快照與允許的變更。這是合成 fixture 的契約，不是任意 API 的通用回應規則。十種已重現缺陷（含 admin 寫入條件越過租戶邊界、寫入端點較弱的工作階段檢查、回應後才排程的跨租戶寫入，以及拒絕讀取時把資料放進回應標頭）的真實隔離回歸見 `tests/test_adversarial_authorization.py`。
+AUTH 有 50 個必要案例（含契約外的隨機權杖、未列出的方法與路由探測），包含錯誤密碼及不存在帳號、admin 的同租戶寫入（允許）與跨租戶寫入（拒絕且無副作用），以及寫入與匯出端點對匿名、偽造、過期與已登出身分的拒絕。oracle 自行維護預期狀態，案例之間或最後靜置期間出現的延遲寫入也會失敗。拒絕回應、讀取及匯出依合成 API 契約比對完整 JSON 與型別，拒絕重複 key；回應標頭也屬於契約，只允許固定的 date、server、content-type、相符的 content-length，以及 bridge 關閉連線時回送的 `connection: close`，額外標頭或 cookie 都使案例失敗；每個案例核對完整 users／items／sessions 快照與允許的變更。這是合成 fixture 的契約，不是任意 API 的通用回應規則。十種已重現缺陷（含 admin 寫入條件越過租戶邊界、寫入端點較弱的工作階段檢查、回應後才排程的跨租戶寫入，以及拒絕讀取時把資料放進回應標頭）的真實隔離回歸見 `tests/test_adversarial_authorization.py`。
 
 每次執行在解析設定前建立 `artifacts/<run-id>/report.json`；錯誤只保存階段與例外類型，不記錄敏感例外文字。`artifacts/latest.txt` 是 security run 索引；bootstrap、preflight 與 runtime-build 使用各自的索引。這些是未簽章的執行證據，不是可信 attestation。`python3 -I scripts/dev_db.py status` 可查詢本地開發資料庫是否執行中；停止並刪除它：
 
@@ -196,7 +196,7 @@ Reports are created before configuration parsing at `artifacts/<run-id>/report.j
 | G0/G4 | Synthetic scope, authorization matrix, threat examples | Product owner, full threat model, approved applicability |
 | G1 | PyPI provenance, pinned hashes, cooling, wheel-only installation, declared-lock CycloneDX SBOM, OSV queries | Installed-image inventory, KEV/EPSS, malicious-package behavior, other ecosystems |
 | G2 | Gitleaks; worktree and candidate-HEAD history; bounded gzip/ZIP/tar expansion and metadata scanning | Server-side push protection, unavailable history/caches, credential revocation |
-| AUTH | 48 synthetic authentication/authorization, side-effect and out-of-contract probe cases | Complete product DAST, TLS, CSRF, JWT, SSRF testing |
+| AUTH | 50 synthetic authentication/authorization, side-effect and out-of-contract probe cases | Complete product DAST, TLS, CSRF, JWT, SSRF testing |
 | Policy/evidence | Strict contracts, failure blocking, digests, protected changes, CI signatures and source verification | Dedicated publisher deployment, exception lifecycle, complete developer-role remote probes |
 | Models | Mock, Gemini, Bedrock, GLM and DeepSeek interfaces (DeepSeek disabled in the RoE); LM Studio text interface (Nemotron, Qwen) and batch comparison; on-prem IEC gateway authorized for GLM | Real on-prem acceptance, larger cross-family stability/bias studies |
 

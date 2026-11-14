@@ -1,0 +1,45 @@
+name: Ruleset monitor
+
+on:
+  schedule:
+    # 每天比對線上 main 規則集與稽核要求；被改弱時此 workflow 失敗並通知擁有者。 / Compare the live main ruleset with
+    # the audit requirements daily; a weakened ruleset fails this workflow and notifies the owner.
+    - cron: '47 1 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ruleset-monitor
+  cancel-in-progress: false
+
+jobs:
+  monitor:
+    # 名稱刻意不同於必要檢查：監看結果不得被規則集當成合併依據。 / Deliberately not the required check name: the
+    # ruleset must never take a monitor result as a merge decision.
+    name: ruleset-monitor
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Checkout the default branch
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Set Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: '3.12'
+      - name: Compare the live ruleset with the audit requirements
+        env:
+          # 內建唯讀權杖；讀不到 bypass 名單時該項列為 unknown。 / The built-in read-only token; a bypass list it
+          # cannot read is reported as unknown.
+          GH_TOKEN: ${{ github.token }}
+        run: python -I scripts/monitor_ruleset.py --output artifacts/ruleset-monitor.json
+      - name: Retain the monitor evidence
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: ruleset-monitor-${{ github.run_id }}-${{ github.run_attempt }}
+          path: artifacts/ruleset-monitor.json
+          retention-days: 30

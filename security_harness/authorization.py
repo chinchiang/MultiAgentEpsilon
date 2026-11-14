@@ -95,10 +95,12 @@ Restore only this run's synthetic schema after a failed case, avoiding cascades.
 
 
 def evaluate(client, dsn, schema, passwords, connect, settle=SETTLE_SECONDS, stop=None):
-    """stop 在靜置後停止候選程序，再做最終快照；之後候選不可能再寫入。
+    """stop 在靜置後停止候選（含它在資料庫端的連線），再做最終快照；之後候選不可能再寫入。stop 回傳真值時，
+    代表停止當下仍有工作在進行，計為延遲副作用。
 
-When given, stop() halts the candidate after the settle period and before the final snapshot,
-so no candidate write can arrive after the last comparison."""
+When given, stop() halts the candidate (its database sessions included) after the settle period and before the
+final snapshot, so no candidate write can arrive after the last comparison. A true result means work was still in
+flight when it was stopped and counts as a delayed side effect."""
     cases = []
     initial = snapshot(dsn, schema, connect)
     seeded_items = [{"id": i, "tenant": tenant, "owner": name, "value": name + "-private"}
@@ -296,8 +298,11 @@ so no candidate write can arrive after the last comparison."""
     # 靜置讓排程中的寫入落地，再停止候選做最終比對，之後不會再有任何寫入。 / Settle so scheduled writes land, then
     # stop the candidate for the final comparison, after which no write can arrive.
     time.sleep(settle)
-    if stop is not None:
-        stop()
+    # stop 回傳真值代表候選被停止時仍有工作在進行（例如資料庫端還在執行的敘述），視同延遲副作用。 / A true result
+    # from stop means the candidate still had work in flight when it was stopped (a statement still running in
+    # the database, say), which counts as a delayed side effect.
+    if stop is not None and stop():
+        model["drift"] = True
     observe()
     cases.append({"case": DRIFT_CASE, "passed": not model["drift"]})
     return cases
