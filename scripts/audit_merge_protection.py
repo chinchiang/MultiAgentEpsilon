@@ -33,7 +33,11 @@ Owners GitHub would request for every path ('*'), from the base branch file."""
     return sorted(set.intersection(*rules.values()))
 
 
-def inspect_configuration(branch, rulesets, pr, collaborators, reviewers, codeowners=None, publisher_app_id=None):
+def ruleset_protections(branch, rulesets):
+    """只依賴分支與規則集的保護項目；稽核與排程監看共用。回傳（各項結果、生效規則集、必要檢查、全部檢查）。
+
+Protections that depend only on the branch and its rulesets, shared by the audit and the scheduled monitor.
+    Returns (results, active rulesets, required checks, all checks)."""
     active = [r for r in rulesets if r.get('enforcement') == 'active' and r.get('target') == 'branch'
               and any(x in ('~DEFAULT_BRANCH', 'refs/heads/main')
                       for x in r.get('conditions', {}).get('ref_name', {}).get('include', []))
@@ -50,16 +54,7 @@ def inspect_configuration(branch, rulesets, pr, collaborators, reviewers, codeow
     # 檢查名稱可偽造，只採計預期整合來源。 / A context name alone is forgeable; only the expected integration counts.
     required = [c for c in checks if c.get('context') == REQUIRED_CHECK
                 and c.get('integration_id') == ACTIONS_APP_ID]
-    dedicated = [c for c in checks if c.get('context') == 'epsilon/trusted-merge' and publisher_app_id
-                 and c.get('integration_id') == publisher_app_id and publisher_app_id != ACTIONS_APP_ID]
-    identities = {c['login']: c.get('role_name') for c in collaborators}
-    independent = [name for name in reviewers if name != pr['user']['login']
-                   and identities.get(name) in ('write', 'maintain', 'admin')]
-    owners = codeowners_reviewers(codeowners)
-    owner_reviewers = [name for name in owners if name != pr['user']['login']
-                       and identities.get(name) in ('write', 'maintain', 'admin')]
-    developer = [name for name, role in identities.items() if role in ('write', 'maintain') and name != pr['user']['login']]
-    configuration = {
+    protections = {
         'main_protected': bool(branch.get('protected')),
         'active_main_ruleset': bool(active),
         # 無規則集寫入權限時 GitHub 省略 bypass_actors；未知不等於沒有。 / GitHub omits bypass_actors for callers without ruleset write access: unknown is not "none".
@@ -74,10 +69,30 @@ def inspect_configuration(branch, rulesets, pr, collaborators, reviewers, codeow
         'unattributed_changes_extra_approval': any(
             p.get('require_extra_approval_for_unattributed_changes') is True for p in reviews),
         'required_check_present': bool(required),
-        'dedicated_app_check_required': bool(dedicated),
-        'base_codeowner_independent_reviewer': bool(owner_reviewers),
         'strict_checks': any(r['type'] == 'required_status_checks' and
                             r.get('parameters', {}).get('strict_required_status_checks_policy') for r in rules),
+    }
+    return protections, active, required, checks
+
+
+def inspect_configuration(branch, rulesets, pr, collaborators, reviewers, codeowners=None, publisher_app_id=None):
+    protections, active, required, checks = ruleset_protections(branch, rulesets)
+    dedicated = [c for c in checks if c.get('context') == 'epsilon/trusted-merge' and publisher_app_id
+                 and c.get('integration_id') == publisher_app_id and publisher_app_id != ACTIONS_APP_ID]
+    identities = {c['login']: c.get('role_name') for c in collaborators}
+    independent = [name for name in reviewers if name != pr['user']['login']
+                   and identities.get(name) in ('write', 'maintain', 'admin')]
+    owners = codeowners_reviewers(codeowners)
+    owner_reviewers = [name for name in owners if name != pr['user']['login']
+                       and identities.get(name) in ('write', 'maintain', 'admin')]
+    developer = [name for name, role in identities.items() if role in ('write', 'maintain') and name != pr['user']['login']]
+    configuration = {
+        **{name: protections[name] for name in (
+            'main_protected', 'active_main_ruleset', 'no_bypass', 'no_delete_or_force_push', 'independent_review_required',
+            'merge_commit_only', 'review_thread_resolution_required', 'unattributed_changes_extra_approval', 'required_check_present')},
+        'dedicated_app_check_required': bool(dedicated),
+        'base_codeowner_independent_reviewer': bool(owner_reviewers),
+        'strict_checks': protections['strict_checks'],
         'configured_independent_reviewer_available': bool(independent),
         'non_admin_developer_available': bool(developer),
     }
