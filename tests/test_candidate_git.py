@@ -125,9 +125,16 @@ def test_forged_commit_graph_cannot_hide_history_from_the_scan(tmp_path):
     oids = [bytes(data[lookup + 20 * i:lookup + 20 * i + 20]).hex() for i in range((commits - lookup) // 20)]
     entry = commits + oids.index(candidate_git.head(repo)) * 36
     data[entry + 20:entry + 24] = struct.pack(">I", 0x70000000)  # 「沒有父 commit」 / "no parent"
+    # git 把 commit-graph 寫成唯讀；非 root 執行（如 CI runner）須先開寫入權限才能竄改。 / Git writes the
+    # commit-graph read-only, so a non-root run (a CI runner, say) must make it writable before tampering.
+    graph.chmod(0o644)
     graph.write_bytes(bytes(data))
-    plain = subprocess.run(["git", "-C", str(repo), "rev-list", "--objects", "HEAD"], check=True,
-                           capture_output=True, text=True).stdout
-    assert "old.txt" not in plain, "the forged graph must hide the file from an unhardened git"
+    # 未加防護的 git 2.43 實測會漏掉 old.txt；較新的版本若自行核對或拒絕這份檔案也無妨，所以這裡不作斷言。 /
+    # An unhardened git 2.43 was observed to drop old.txt; a newer one that checks or rejects the file is fine
+    # too, so nothing is asserted about it here.
+    subprocess.run(["git", "-C", str(repo), "rev-list", "--objects", "HEAD"], capture_output=True)
+    # 加固後的呼叫不讀 commit-graph，任何版本都必須列出舊提交的檔案。 / The hardened call never reads the
+    # commit-graph, so on every version it must list the earlier commit's file.
+    assert "core.commitGraph=false" in candidate_git.command(repo, "rev-list")
     _, blobs = history_blobs(repo, required=True)
     assert any(name == "old.txt" for _, name, _ in blobs)
