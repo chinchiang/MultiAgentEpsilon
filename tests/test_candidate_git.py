@@ -102,3 +102,32 @@ def test_every_candidate_git_call_uses_the_hardened_helper():
     offenders = [p.relative_to(ROOT).as_posix() for p in sources
                  if p.name != "candidate_git.py" and ('["git"' in p.read_text() or "['git'" in p.read_text())]
     assert offenders == []
+
+
+def test_forged_commit_graph_cannot_hide_history_from_the_scan(tmp_path):
+    # git 預設信任 commit-graph 記的父 commit，不與 commit 物件核對；候選可藉此讓舊提交的內容不被列出。 /
+    # Git trusts the parents recorded in the commit-graph without checking the commit objects, so a candidate
+    # could hide what earlier commits contained.
+    import struct
+    repo = repository(tmp_path / "repo")
+    (repo / "old.txt").write_text("removed-later\n")
+    git(repo, "add", ".")
+    git(repo, "commit", "-qm", "adds old.txt")
+    git(repo, "rm", "-q", "old.txt")
+    git(repo, "commit", "-qm", "removes old.txt")
+    git(repo, "commit-graph", "write", "--reachable")
+    graph = repo / ".git/objects/info/commit-graph"
+    data = bytearray(graph.read_bytes())
+    assert data[:4] == b"CGPH" and data[5] == 1, "SHA-1 commit-graph expected"
+    chunks = {bytes(data[8 + 12 * i:12 + 12 * i]): struct.unpack(">Q", data[12 + 12 * i:20 + 12 * i])[0]
+              for i in range(data[6] + 1)}
+    lookup, commits = chunks[b"OIDL"], chunks[b"CDAT"]
+    oids = [bytes(data[lookup + 20 * i:lookup + 20 * i + 20]).hex() for i in range((commits - lookup) // 20)]
+    entry = commits + oids.index(candidate_git.head(repo)) * 36
+    data[entry + 20:entry + 24] = struct.pack(">I", 0x70000000)  # 「沒有父 commit」 / "no parent"
+    graph.write_bytes(bytes(data))
+    plain = subprocess.run(["git", "-C", str(repo), "rev-list", "--objects", "HEAD"], check=True,
+                           capture_output=True, text=True).stdout
+    assert "old.txt" not in plain, "the forged graph must hide the file from an unhardened git"
+    _, blobs = history_blobs(repo, required=True)
+    assert any(name == "old.txt" for _, name, _ in blobs)

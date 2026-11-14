@@ -1,7 +1,10 @@
 #!/usr/bin/env python3
-"""僅管理有本工具標籤的暫用 PostgreSQL 容器與本機橋接網路。
+"""僅管理有本工具標籤的暫用 PostgreSQL 容器與本機橋接網路。連接埠只發布到 127.0.0.1 供本機測試連線；這個橋接網路
+不是 Docker 的 internal 網路，容器仍可對外連線（internal 網路會讓發布的連接埠失效）。隔離評估另用無網路的容器。
 
-Own only a labeled disposable PostgreSQL container and local bridge network."""
+Own only a labeled disposable PostgreSQL container and local bridge network. The port is published to 127.0.0.1
+only, for local tests. The bridge is not a Docker internal network, so the container keeps outbound access (an
+internal network would disable the published port); the isolated evaluation uses network-less containers instead."""
 import argparse
 import json
 import os

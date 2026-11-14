@@ -25,7 +25,7 @@ host 端的 worker 與操作者使用同一個 uid。supervisor 只把白名單�
 - `security/policy.json` 的 `gate_contracts` 指定 gate kind 與必要 case ID。AUTH 必須恰好涵蓋唯一集合；數量、findings 與逐案例結果須一致。schema 3 拒絕舊版（schema 1、2）證據及不同 run ID 的混用。G2 另須有候選儲存庫 本身的 HEAD 歷史（`history_required`）；沒有 `.git`、沒有 commit，或位於外層儲存庫 之中的子目錄都不能取得 ALLOW。
 - 掃描／subject 共用 `security_harness/inputs.py`。只在 儲存庫根目錄排除生成目錄；Python／pytest 快取為明列例外，已追蹤的保留生成路徑會拒絕。候選容器使用相同清冊的 fixture Python 子集，未納入來源不會掛載。
 - Gitleaks 使用重新命名的快照，映射回原始檔名；原始 `.git` 等名字不能觸發工具的隱含略過，候選 inline allow 與 ignore file 不能自行抑制可信掃描。壓縮檔除了展開成員，也掃描容器本身的可讀字串（註解、檔名、extra 欄位、gzip 標頭）；zip 中不屬於任何列出成員的位元組、帶資料的目錄項目，以及 tar 結尾之後的非零資料一律阻擋。成員以外的位元組須逐一對應已知結構：zip 註解須為文字、extra 欄位只接受有長度上限的已知紀錄、結尾紀錄後不得有資料；gzip 只接受單一成員，不接受標頭 extra 欄位，檔名與註解須為可讀 ASCII。
-- 對候選儲存庫 的 git 呼叫一律經 `security_harness/candidate_git.py`：以命令列 `-c` 停用 fsmonitor、hooks 與任何 transport，清除繼承的 `GIT_*` 環境變數，不讀取系統／全域設定，並以明確的 `--git-dir` 指向候選自己的 `.git` 目錄（gitfile 或 symlink 拒絕）。候選的 `.git/config` 是資料，不能讓 host 執行程式。
+- 對候選儲存庫 的 git 呼叫一律經 `security_harness/candidate_git.py`：以命令列 `-c` 停用 fsmonitor、hooks、任何 transport 與 commit-graph（其中記錄的父 commit 不與 commit 物件核對，偽造後可讓歷史掃描漏掉舊提交），清除繼承的 `GIT_*` 環境變數，不讀取系統／全域設定，並以明確的 `--git-dir` 指向候選自己的 `.git` 目錄（gitfile 或 symlink 拒絕）。候選的 `.git/config` 是資料，不能讓 host 執行程式。
 - Audit envelope 在設定解析之前寫出，subject／policy 尚不可得時保留 null。錯誤只記錄階段與例外型別。報告採原子替換，初始 RUNNING 報告一律 BLOCK；沒有成功完成的證據不得放行。
 - `artifacts/latest.txt` 僅索引 security run；其他入口各有 `<operation>-latest.txt`。本機 artifact 未簽章；CI 另以獨立工作簽署上傳 ZIP，保存 7 天，仍不是長期不可竄改證據庫。
 
@@ -129,7 +129,7 @@ Gate contracts specify kind and exact unique AUTH case IDs, consistent counts/fi
 
 Scanning and subject hashing share inputs.py. Generated directories are excluded only at root; Python/pytest caches are explicit exceptions, and tracked reserved generated paths are rejected. Candidate mounts contain only inventoried fixture Python. Gitleaks scans renamed snapshots mapped back to original names: .git names, inline allow comments, and candidate ignore files cannot silently skip trusted scanning. Archive container strings/metadata and expanded members are scanned; unlisted ZIP bytes, data-bearing directory entries, and nonzero trailing TAR bytes block. Every byte outside members must map to a known structure: text ZIP comments, length-capped known extra records, nothing after the end record, and single-member gzip without a header extra field and with printable-ASCII name/comment.
 
-Candidate Git calls use candidate_git.py, disabling fsmonitor/hooks/transports with -c, clearing inherited GIT_*, ignoring system/global config, and explicitly selecting a real candidate .git directory. Gitfiles/symlinks are rejected. Candidate configuration is data, never host execution authority.
+Candidate Git calls use candidate_git.py, disabling fsmonitor/hooks/transports and the commit-graph with -c (its recorded parents are not checked against the commit objects, so a forged one would hide earlier commits from the history scan), clearing inherited GIT_*, ignoring system/global config, and explicitly selecting a real candidate .git directory. Gitfiles/symlinks are rejected. Candidate configuration is data, never host execution authority.
 
 An audit envelope exists before settings parsing, with null subject/policy when unavailable. Errors retain phase/type only. Atomic initial RUNNING reports stay BLOCK. artifacts/latest.txt indexes security only; other operations have separate indexes. Local artifacts are unsigned; CI separately signs the uploaded ZIP and retains it seven days, not a permanent immutable archive.
 

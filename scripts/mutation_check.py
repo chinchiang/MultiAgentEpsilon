@@ -31,7 +31,7 @@ TARGETS = {
     'security_harness/authorization.py': (
         ('same',), ('tests/test_response_comparison.py',)),
     'security_harness/isolation.py': (
-        ('verify_container',), ('tests/test_isolation.py', '-m', 'not integration')),
+        ('verify_container', 'stop_candidate'), ('tests/test_isolation.py', '-m', 'not integration')),
     'security_harness/scope.py': (
         ('valid_remote_hosts', 'validate_model_roe', 'valid_deadline_policy', 'call_seconds', 'run_seconds'),
         ('tests/test_scope.py', 'tests/test_model_hardening.py::test_model_roe_rejects_malformed_destination_allowlists',

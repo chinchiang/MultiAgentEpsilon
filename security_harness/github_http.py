@@ -54,6 +54,7 @@ class GitHub:
         self.token = token
         self.calls = 0
         self.publish_reserved_used = False
+        self.revoke_reserved_used = False
         self.deadline = time.monotonic() + API_SECONDS
         self.opener = urllib.request.build_opener(NoRedirect())
 
@@ -65,7 +66,13 @@ class GitHub:
         # reserved after verification spends the budget, so a failure can still replace an earlier green.
         reserved = (method == "POST" and not self.publish_reserved_used
                     and re.fullmatch(r"https://api\.github\.com/repos/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+/check-runs", url))
-        if reserved:
+        # 撤銷安裝權杖也保留一次：驗證耗盡期限後仍要能收回權杖，否則它會活滿一小時。 / One installation-token
+        # revocation is reserved too: after verification spends the deadline the token must still be revocable,
+        # or it lives out its full hour.
+        if (not reserved and method == "DELETE" and not self.revoke_reserved_used
+                and url == "https://api.github.com/installation/token"):
+            self.revoke_reserved_used = reserved = True
+        elif reserved:
             self.publish_reserved_used = True
         else:
             self.calls += 1

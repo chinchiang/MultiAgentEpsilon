@@ -59,3 +59,31 @@ def test_regular_reports_and_symlinks_keep_their_behaviour(tmp_path):
     data, error = SecurityContainers(tmp_path, run_id).load()
     assert data is None and error == 'OSError'
     assert model_life.read_report(tmp_path, run_id)['code'] == 'EVIDENCE_INVALID'
+
+
+def raised(function):
+    try:
+        function()
+    except Exception as exc:
+        return type(exc).__name__
+    return None
+
+
+def test_run_owner_marker_read_does_not_block_on_a_fifo(tmp_path):
+    # 監督程序沒有資源上限；同 uid 程序放一個 FIFO 就能讓它永遠卡在讀取。 / The supervisor has no resource limits, so a
+    # FIFO planted by a same-uid process would hang it in the read forever.
+    from security_harness import supervision
+    work = tmp_path / 'run'
+    (work / 'groups').mkdir(parents=True)
+    os.mkfifo(work / 'owner.json')
+    assert call_without_blocking(work / 'owner.json',
+                                 lambda: raised(lambda: supervision.register_group(work, os.getpid()))) == 'ValueError'
+
+
+def test_process_registration_read_does_not_block_on_a_fifo(tmp_path):
+    from security_harness import supervision
+    work = tmp_path / 'run'
+    (work / 'groups').mkdir(parents=True)
+    os.mkfifo(work / 'groups' / '4242.json')
+    assert call_without_blocking(work / 'groups' / '4242.json',
+                                 lambda: raised(lambda: supervision.stop_registered(work))) == 'ValueError'

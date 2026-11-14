@@ -244,6 +244,7 @@ MultiAgentEpsilon/
 │   ├── test_dependencies.py
 │   ├── test_evidence_readback.py
 │   ├── test_expect_block.py
+│   ├── test_github_http.py
 │   ├── test_github_readonly.py
 │   ├── test_github_trust.py
 │   ├── test_gitleaks.py

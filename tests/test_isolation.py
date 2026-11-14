@@ -268,3 +268,72 @@ def test_only_a_bridge_deadline_is_retried(monkeypatch, error):
 def test_evaluation_deadline_fits_twice_inside_the_worker_deadline():
     roe = json.loads((ROOT / "security/roe.json").read_text())
     assert 2 * isolation.EVALUATION_SECONDS < roe["max_seconds"]
+
+
+class Sessions:
+    """假的 oracle 連線：每次查詢回傳下一輪的候選連線清單。 / A fake oracle connection: each query returns the next
+    round of candidate sessions."""
+
+    def __init__(self, rounds):
+        self.rounds, self.queries, self.commits = list(rounds), [], 0
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *args):
+        pass
+
+    def execute(self, query, parameters):
+        self.queries.append((query, parameters))
+        rows = self.rounds.pop(0) if len(self.rounds) > 1 else self.rounds[0]
+        return type("Result", (), {"fetchall": lambda self: rows})()
+
+    def commit(self):
+        self.commits += 1
+
+
+def stop_with(rounds, **kwargs):
+    from security_harness.isolation import stop_candidate
+    conn, order = Sessions(rounds), []
+    result = stop_candidate(lambda: order.append("kill"), "dsn", "epsilon_0123456789abcdef",
+                            connect=lambda dsn, schema: order.append((dsn, schema)) or conn, **kwargs)
+    return result, conn, order
+
+
+def test_stopping_the_candidate_kills_it_before_ending_its_database_sessions():
+    result, conn, order = stop_with([[]])
+    assert result is False and order == ["kill", ("dsn", "epsilon_0123456789abcdef")]
+    assert len(conn.queries) == 1 and conn.queries[0][1] == ("epsilon_app",)
+    assert "pg_terminate_backend(pid)" in conn.queries[0][0] and "usename = %s" in conn.queries[0][0]
+
+
+@pytest.mark.parametrize("state,busy", [("idle", False), ("active", True), ("idle in transaction", True),
+                                        ("fastpath function call", True), (None, True)])
+def test_a_statement_still_running_at_the_stop_is_reported(state, busy):
+    result, conn, _ = stop_with([[{"pid": 7, "state": state, "ended": True}], []])
+    assert result is busy
+    # 每輪都結束交易，否則下一輪讀到的是同一份連線狀態快照。 / Every round ends its transaction, or the next one
+    # would read the same snapshot of session state.
+    assert len(conn.queries) == 2 and conn.commits == 2
+
+
+def test_busy_is_remembered_after_the_sessions_are_gone():
+    result, _, _ = stop_with([[{"pid": 7, "state": "active", "ended": True}],
+                              [{"pid": 7, "state": "idle", "ended": True}], []])
+    assert result is True
+
+
+def test_sessions_that_never_end_block_the_evaluation():
+    conn = Sessions([[{"pid": 7, "state": "active", "ended": False}]])
+    from security_harness.isolation import stop_candidate
+    with pytest.raises(RuntimeError, match="^candidate database sessions did not end$"):
+        stop_candidate(lambda: None, "dsn", "epsilon_0123456789abcdef", connect=lambda dsn, schema: conn,
+                       rounds=3, pause=0)
+    assert len(conn.queries) == 3 and conn.commits == 3
+
+
+def test_the_session_wait_is_bounded_to_about_five_seconds():
+    from security_harness import isolation
+    assert isolation.SESSION_END_ROUNDS == 100
+    defaults = isolation.stop_candidate.__defaults__
+    assert defaults == (isolation.connect, 100, 0.05)

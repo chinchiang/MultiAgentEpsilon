@@ -24,7 +24,7 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import NamedTuple
 
-from .results import write_json
+from .results import read_regular, write_json
 
 SOURCE_ROOT = Path(__file__).resolve().parents[1]
 
@@ -143,13 +143,23 @@ def terminate_group(pid):
         time.sleep(0.02)
 
 
+MARKER_LIMIT = 64 * 1024
+
+
+def read_marker(path):
+    """擁有者標記與子程序登記檔位於同 uid 可寫的目錄；只讀有上限的一般檔案，FIFO 或裝置不會讓監督程序卡住。 / Owner
+    markers and process registrations live in a directory any same-uid process can write: read only a bounded
+    regular file, so a FIFO or device cannot hang the supervisor."""
+    return json.loads(read_regular(path, MARKER_LIMIT))
+
+
 def gated_command(command):
     # 擁有者在登記前死亡時，閘門讀到 EOF 即退出。 / The gate exits on EOF if the owner dies before registration.
     return [sys.executable, '-I', str(SOURCE_ROOT / 'scripts/model_process.py'), *command]
 
 
 def register_group(work, pid, role='child'):
-    marker = json.loads((work / 'owner.json').read_text())
+    marker = read_marker(work / 'owner.json')
     if marker['uid'] != os.getuid():
         raise ValueError('invalid run owner')
     if os.getsid(pid) != pid or os.getpgid(pid) != pid:
@@ -163,7 +173,7 @@ def stop_registered(work):
     def stop(path):
         if path.is_symlink():
             raise ValueError('invalid process registration')
-        group = json.loads(path.read_text())
+        group = read_marker(path)
         pid = group['pid']
         if type(pid) is not int or pid <= 1 or group['uid'] != os.getuid() or path.name != f'{pid}.json':
             raise ValueError('invalid process identity')
@@ -180,7 +190,7 @@ def stop_registered(work):
     for path in sorted((work / 'groups').glob('*.json')):
         if path.is_symlink():
             raise ValueError('invalid process registration')
-        if json.loads(path.read_text()).get('role') == 'worker':
+        if read_marker(path).get('role') == 'worker':
             stop(path)
     for path in sorted((work / 'groups').glob('*.json')):
         stop(path)
@@ -369,7 +379,7 @@ Remove the run's own temporary directory and run inventory. Neither may be a sym
     if work.is_symlink() or temporary.is_symlink():
         raise ValueError('invalid run directory')
     if work.exists():
-        marker = json.loads((work / 'owner.json').read_text())
+        marker = read_marker(work / 'owner.json')
         if marker['run_id'] != run_id or marker['uid'] != os.getuid():
             raise ValueError('run ownership mismatch')
     if temporary.exists():
@@ -494,7 +504,7 @@ Reap the runs whose owner died, dispatching on the owner marker's operation. Ret
             if work.is_symlink():
                 raise ValueError('invalid run directory')
             try:
-                marker = json.loads((work / 'owner.json').read_text())
+                marker = read_marker(work / 'owner.json')
             except FileNotFoundError:
                 # 另一 janitor 已移除，或初始化尚未發布擁有者標記； / Another janitor removed it, or initialization has not published
                 # 該標記之前不會建立外部資源。 / ownership yet. No external resources exist before that marker.
