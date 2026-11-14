@@ -21,6 +21,13 @@ def docker_environment():
             ('DOCKER_HOST', 'DOCKER_CONTEXT', 'DOCKER_TLS', 'DOCKER_TLS_VERIFY', 'DOCKER_CERT_PATH')}
 
 
+class DeadlineExceeded(TimeoutError):
+    """有限額子程序超過期限；與其他 TimeoutError 區分，呼叫端才能把它當成基礎設施逾時處理。
+
+A bounded child process ran past its deadline. Distinct from other TimeoutErrors, so callers can treat it as an
+    infrastructure timeout."""
+
+
 def bounded_output(command, payload, *, timeout=5, limit=131072, env=None):
     """即使候選偽造 bridge 輸出，仍限制時間與標準輸出大小。
 
@@ -42,7 +49,7 @@ Bound time and stdout even if candidate processes forge the bridge output."""
                     remaining = deadline - time.monotonic()
                     events = selector.select(max(0, remaining))
                     if remaining <= 0 or not events:
-                        raise TimeoutError('container HTTP deadline exceeded')
+                        raise DeadlineExceeded('container HTTP deadline exceeded')
                     for key, _ in events:
                         if key.fileobj is process.stdin:
                             written = os.write(process.stdin.fileno(), pending[:4096])
@@ -60,13 +67,22 @@ Bound time and stdout even if candidate processes forge the bridge output."""
                                 raise ValueError('container HTTP envelope too large')
             remaining = deadline - time.monotonic()
             if remaining <= 0:
-                raise TimeoutError('container HTTP deadline exceeded')
-            if process.wait(timeout=remaining) != 0:
+                raise DeadlineExceeded('container HTTP deadline exceeded')
+            try:
+                code = process.wait(timeout=remaining)
+            except subprocess.TimeoutExpired:
+                raise DeadlineExceeded('container HTTP deadline exceeded') from None
+            if code != 0:
                 raise RuntimeError('container HTTP request failed')
             return bytes(data)
         finally:
             if process.poll() is None:
                 process.kill()
-            process.wait(timeout=5)
+            try:
+                process.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                # 收不回的子程序不能蓋掉原本的例外；Popen 結束時仍會等待它。 / A child that cannot be reaped must not
+                # replace the original exception; leaving the Popen block still waits for it.
+                pass
 
 

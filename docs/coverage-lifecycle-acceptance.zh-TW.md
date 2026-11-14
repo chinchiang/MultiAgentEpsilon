@@ -23,7 +23,7 @@
 | 外層管線執行期限 | 600 秒；AUTH 另有 120 秒期限 |
 | Worker 與其子程序 | 每程序資料記憶體 512 MiB、虛擬位址 8 GiB、CPU soft/hard 120/125 秒、單一輸出檔 64 MiB、256 descriptors、禁用 core dump |
 | 候選／資料庫容器 | 各 1 CPU、512 MiB、128 PIDs；既有唯讀 root 與無網路限制 |
-| HTTP 通道 | 16 KiB request、64 KiB body、128 KiB envelope、5 秒 host bridge deadline；候選 tmpfs 16 MiB |
+| HTTP 通道 | 16 KiB request、64 KiB body、128 KiB envelope；每個請求的 host bridge 期限 8 秒（容器內 socket 逾時 3 秒），整輪評估 45 秒；橋接請求超過期限時，清理後以新的容器與 schema 整輪重跑一次（不重試單一請求），隔離證據的 `bridge_attempts` 記錄次數；仍逾時則 AUTH 記為 `TIMEOUT` 並 BLOCK，理由為 `AUTH: TIMEOUT`；候選 tmpfs 16 MiB |
 
 較大的虛擬位址上限供 Gitleaks 的 WebAssembly 引擎保留位址；不等於允許每程序寫入 8 GiB 資料。過小的 RLIMIT_AS 會讓掃描器無法啟動，因此另以 RLIMIT_DATA 約束資料記憶體。來源清冊、展開量及 scanner report 另有獨立上限。
 
@@ -91,7 +91,7 @@ Coverage separately records selected files/bytes, scanned leaves/bytes, expanded
 | Pipeline / AUTH deadline | 600 / 120 seconds |
 | Per-process worker limits | 512 MiB data, 8 GiB virtual address, CPU soft/hard 120/125 s, 64 MiB output file, 256 descriptors, no core dumps |
 | Each candidate/database container | 1 CPU, 512 MiB, 128 PIDs, networkless; read-only candidate root |
-| HTTP | 16 KiB request, 64 KiB body, 128 KiB envelope, 5-second host bridge deadline, 16 MiB candidate tmpfs |
+| HTTP | 16 KiB request, 64 KiB body, 128 KiB envelope; an 8-second host bridge deadline per request (the in-container socket timeout is 3 seconds) and 45 seconds per evaluation; when a bridge request runs past its deadline the whole evaluation is repeated once after cleanup, in new containers on a new schema (a single request is never retried), and `bridge_attempts` in the isolation evidence records the count; a second timeout records AUTH as `TIMEOUT` and blocks with the reason `AUTH: TIMEOUT`; 16 MiB candidate tmpfs |
 
 The larger address-space reservation supports Gitleaks' WebAssembly engine; it is not permission to write 8 GiB of data. RLIMIT_DATA separately constrains data memory. Inventory, expansion, and scanner reports have their own caps. Termination/cleanup has a bounded grace period of approximately 36 seconds. Cleanup errors or Docker timeouts block and retain owner markers for recovery.
 
