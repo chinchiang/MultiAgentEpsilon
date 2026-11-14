@@ -55,7 +55,7 @@ host 端的 worker 與操作者使用同一個 uid。supervisor 只把白名單�
 
 **步驟：**
 1. **修正 PR 保持最小**：只修正基準缺陷，附上能重現原失敗的本機證據，例如以 CI 相同的非 root 身分，修正前失敗、修正後通過。
-2. **獨立核准對準 head**：由 `security/trust-policy.json` 中的另一位審查者核准修正 PR 的目前 head；核准者不可是 CI 的觸發者。
+2. **獨立核准對準 head**：由 `security/trust-policy.json` 中的另一位審查者核准修正 PR 的目前 head；核准者須具寫入權限，不是 PR 作者、未提交 PR 中任何 commit，也不在分支 activity 的推送者之列。CI 的觸發者不受排除（規則同上方「核准流程」）。
 3. **記錄解除前狀態**：擁有者以具 Administration 讀取權限的權杖執行 `python3 -I scripts/audit_merge_protection.py --pr <編號>`，保存輸出作為恢復時的比對基準。
 4. **最短時間窗**：擁有者暫時停用規則集，只以 merge commit 合併這一個 PR，並指定 head SHA 為已核准的版本；時間窗內不合併其他 PR、不推送 main。
 5. **立即恢復並核對**：恢復規則集後重跑稽核，確認 `errors` 為空、規則集 active、bypass 名單為空，且設定與第 3 步一致。
@@ -155,7 +155,7 @@ Ordinary baseline updates are judged by the old baseline. If **the old baseline 
 
 **Steps:**
 1. **Keep the fix minimal**: fix only the baseline defect, with local evidence reproducing the original failure (for example, failing before and passing after the fix as the same non-root user CI uses).
-2. **Exact-head independent approval**: another reviewer from `security/trust-policy.json` approves the current head; the approver must not be the run's actor.
+2. **Exact-head independent approval**: another reviewer from `security/trust-policy.json` approves the current head; the approver must have write access and must not be the PR author, a committer of any PR commit or a pusher in the branch activity. The run's actor is not excluded (the same rule as the approval flow above).
 3. **Snapshot before lifting**: the owner runs `python3 -I scripts/audit_merge_protection.py --pr <number>` with a token holding Administration read and keeps the output for comparison.
 4. **Shortest window**: the owner temporarily disables the ruleset and merges only this PR, as a merge commit pinned to the approved head SHA; no other merges or main pushes in the window.
 5. **Restore and verify immediately**: after restoring, rerun the audit and confirm `errors` is empty, the ruleset is active, the bypass list is empty, and settings match step 3.
