@@ -91,7 +91,7 @@ python3 -I scripts/dev_db.py start
 python3 -I scripts/dev_db.py stop
 ```
 
-隔離回歸會執行缺陷版、修正版，以及在候選匯入時嘗試寫入唯讀來源／入口、讀取 evaluator／Docker socket／權杖、建立 IP 出向連線的探測。必要結果為：完整 48 案例、缺陷版恰好政策 `seeded_defect_case_ids` 的 9 個 findings／BLOCK、修正版 0 findings／ALLOW。另有錯誤密碼登入、404 洩漏、匯出夾帶跨租戶資料、其他資料列被非法修改、admin 寫入條件越過租戶邊界、過期工作階段、跨租戶刪除、寫入端點較弱的工作階段檢查，回應後才排程的跨租戶寫入，以及拒絕讀取時以回應標頭外洩資料共十種變體，必須產生指定 AUTH findings；評估前也會核對兩個容器的網路、唯讀根目錄、權限、記憶體、程序數、使用者與映像；socket 改指向 host 測試端點必須失敗且端點不得收到連線。
+隔離回歸會執行缺陷版、修正版，以及在候選匯入時嘗試寫入唯讀來源／入口、讀取 evaluator／Docker socket／權杖、建立 IP 出向連線的探測。必要結果為：完整 50 案例、缺陷版恰好政策 `seeded_defect_case_ids` 的 9 個 findings／BLOCK、修正版 0 findings／ALLOW。另有錯誤密碼登入、404 洩漏、匯出夾帶跨租戶資料、其他資料列被非法修改、admin 寫入條件越過租戶邊界、過期工作階段、跨租戶刪除、寫入端點較弱的工作階段檢查，回應後才排程的跨租戶寫入，以及拒絕讀取時以回應標頭外洩資料共十種變體，必須產生指定 AUTH findings；評估前也會核對兩個容器的網路、唯讀根目錄、權限、記憶體、程序數、使用者與映像；socket 改指向 host 測試端點必須失敗且端點不得收到連線。
 
 候選 lock digest 必須等於已驗證 runtime lock digest；尚不支援任意候選依賴映像建置。受保護變更使用禁用 rename 折疊的 diff，同時判斷刪除與新增路徑。結果 schema 3 使用版本化逐檔 manifest，不能沿用 schema 2 的 gate 證據。
 
@@ -187,7 +187,7 @@ python3 -I scripts/dev_db.py start
 python3 -I scripts/dev_db.py stop
 ```
 
-Isolation regressions attempt writes to read-only source/entrypoint, reads of evaluator/Docker socket/tokens, and IP egress. Required results: exact 48 cases; fixed zero findings/ALLOW; seeded exact nine policy IDs/BLOCK. Ten additional real-container variants cover wrong-password login, 404 disclosure, cross-tenant export, hidden unrelated-row mutation, admin cross-tenant writes, expired sessions, cross-tenant deletion, a weaker write-endpoint session check, a cross-tenant write scheduled after the response, and a denied read that leaks the row through a response header. Both containers' network, read-only root, privileges, memory, process, user and image settings are verified before evaluation. Redirecting the HTTP socket to a host endpoint must fail without contacting that endpoint.
+Isolation regressions attempt writes to read-only source/entrypoint, reads of evaluator/Docker socket/tokens, and IP egress. Required results: exact 50 cases; fixed zero findings/ALLOW; seeded exact nine policy IDs/BLOCK. Ten additional real-container variants cover wrong-password login, 404 disclosure, cross-tenant export, hidden unrelated-row mutation, admin cross-tenant writes, expired sessions, cross-tenant deletion, a weaker write-endpoint session check, a cross-tenant write scheduled after the response, and a denied read that leaks the row through a response header. Both containers' network, read-only root, privileges, memory, process, user and image settings are verified before evaluation. Redirecting the HTTP socket to a host endpoint must fail without contacting that endpoint.
 
 Candidate lock must match verified runtime lock; arbitrary candidate dependency images are unsupported. Protected diffs disable rename collapsing and check both old/new paths. Schema 3 uses versioned per-file manifests. See [remote gaps](remote-merge-protection.zh-TW.md#en).
 

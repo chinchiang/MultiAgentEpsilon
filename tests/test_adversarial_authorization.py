@@ -118,7 +118,27 @@ MUTATIONS.update({
         "DELETE FROM items WHERE id=%s AND ((tenant=%s AND owner=%s) OR %s='admin') RETURNING *"),
 })
 
+MUTATIONS.update({
+    # PATCH 接受 tenant 欄位，擁有者可把自己的項目搬到別的租戶。 / PATCH accepts a tenant field, so an owner can move
+    # an item into another tenant.
+    'tenant_mass_assignment': [(
+        '    value: str = Field(min_length=1, max_length=128, pattern=NO_NUL)\n',
+        '    value: str = Field(min_length=1, max_length=128, pattern=NO_NUL)\n'
+        '    tenant: str | None = None\n'), (
+        "UPDATE items SET value=%s WHERE id=%s AND tenant=%s AND (owner=%s OR %s='admin') RETURNING *\", (body.value, item_id,",
+        "UPDATE items SET value=%s, tenant=COALESCE(%s, tenant) WHERE id=%s AND tenant=%s AND (owner=%s OR %s='admin') "
+        "RETURNING *\", (body.value, body.tenant, item_id,")],
+    # 匿名可呼叫的 /health 多回傳所有租戶的項目。 / The anonymous /health also returns every tenant's items.
+    'health_leaks_items': (
+        '        return {"ready": count == 4, "synthetic_fixture": True, "fixture_id": schema}',
+        '        with connect(dsn, schema) as conn:\n'
+        '            items = conn.execute("SELECT * FROM items ORDER BY id").fetchall()\n'
+        '        return {"ready": count == 4, "synthetic_fixture": True, "fixture_id": schema, "items": items}'),
+})
+
 EXPECTED = {
+    'tenant_mass_assignment': {'tenant field cannot be reassigned'},
+    'health_leaks_items': {'health exposes only readiness'},
     'variant_gated_backdoor': seeded_defects(POLICY['gate_contracts']['AUTH']),
     'expired_session_accepted': {'expired session read denied', 'expired session logout denied',
                                  'expired session delete denied', 'expired session write denied',

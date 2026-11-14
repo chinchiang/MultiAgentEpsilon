@@ -169,6 +169,10 @@ so no candidate write can arrive after the last comparison."""
     check("anonymous denied", "get", "/items/1", 401, {"detail": "authentication required"})
     check("forged bearer denied", "get", "/items/1", 401, {"detail": "authentication required"},
           headers={"Authorization": "Bearer invalid"})
+    # /health 不需身分，所以也屬於契約：只能回報就緒狀態，不得夾帶其他資料。 / /health needs no identity, so it is
+    # part of the contract too: it reports readiness and nothing else.
+    check("health exposes only readiness", "get", "/health", 200,
+          {"ready": True, "synthetic_fixture": True, "fixture_id": schema})
     check("owner reads own data", "get", "/items/1", 200, seeded_items[0], headers=headers["alice"])
     updated = {**seeded_items[0], "value": "owner-updated"}
     expected = expect(lambda state: state["items"].__setitem__(0, updated))
@@ -194,6 +198,10 @@ so no candidate write can arrive after the last comparison."""
           {"detail": [{"type": "extra_forbidden", "loc": ["body", "owner"],
                        "msg": "Extra inputs are not permitted", "input": "bob"}]},
           headers=headers["alice"], json={"value": "x", "owner": "bob"})
+    check("tenant field cannot be reassigned", "patch", "/items/1", 422,
+          {"detail": [{"type": "extra_forbidden", "loc": ["body", "tenant"],
+                       "msg": "Extra inputs are not permitted", "input": "t2"}]},
+          headers=headers["alice"], json={"value": "x", "tenant": "t2"})
     before = observe()
     expected = deepcopy(before)
     alice_hash = hashlib.sha256(headers["alice"]["Authorization"][7:].encode()).hexdigest()
