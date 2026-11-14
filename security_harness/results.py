@@ -177,11 +177,21 @@ def decide(records: list[dict], policy: dict, subject: str, policy_digest: str,
                      and record["policy_digest"] == policy_digest
                      and record["kind"] == policy["gate_contracts"][gate]["kind"]
                      and record["execution"] in ("COMPLETED", "ERROR", "TIMEOUT", "CANCELLED", "NOT_RUN")
-                     and type(record["coverage_count"]) is int and record["coverage_count"] > 0
+                     and type(record["coverage_count"]) is int and record["coverage_count"] >= 0
                      and type(record["findings"]) is int and record["findings"] >= 0)
             if not valid:
                 raise ValueError("invalid contract")
-            if policy['gate_contracts'][gate].get('coverage_required'):
+            when = datetime.fromisoformat(record["created_at"])
+            age = (now - when).total_seconds()
+            if not 0 <= age <= policy["max_evidence_age_seconds"]:
+                raise ValueError("stale or future evidence")
+            completed = record["execution"] == "COMPLETED"
+            # 未完成的紀錄沒有可驗證的涵蓋內容；綁定與時效仍須正確，理由則直接列出執行狀態。 / A record that did
+            # not complete has no coverage to validate; its binding and freshness must still hold, and the reason names
+            # its execution state.
+            if completed and record["coverage_count"] == 0:
+                raise ValueError("completed without coverage")
+            if completed and policy['gate_contracts'][gate].get('coverage_required'):
                 coverage = record['evidence']['coverage']
                 counts = ('selected_files', 'selected_bytes', 'scanned_leaves', 'scanned_bytes',
                           'expanded_bytes', 'archives', 'history_blobs', 'unsupported_files')
@@ -197,19 +207,15 @@ def decide(records: list[dict], policy: dict, subject: str, policy_digest: str,
                 if (policy['gate_contracts'][gate].get('history_required') and
                         not re.fullmatch('[0-9a-f]{40}|[0-9a-f]{64}', str(coverage.get('history_head')))):
                     raise ValueError('history coverage missing')
-            if policy["gate_contracts"][gate].get("sca_required"):
+            if completed and policy["gate_contracts"][gate].get("sca_required"):
                 from .dependencies import validate_evidence as validate_dependencies
                 validate_dependencies(record["sca"], record["packages"], record["coverage_count"],
                                       record["findings"], now, policy["max_evidence_age_seconds"])
-            if record["kind"] == "test":
+            if completed and record["kind"] == "test":
                 validate_cases(record["cases"], policy["gate_contracts"][gate])
                 if (record["coverage_count"] != len(record["cases"]) or
                         record["findings"] != sum(not c["passed"] for c in record["cases"])):
                     raise ValueError("case summary mismatch")
-            when = datetime.fromisoformat(record["created_at"])
-            age = (now - when).total_seconds()
-            if not 0 <= age <= policy["max_evidence_age_seconds"]:
-                raise ValueError("stale or future evidence")
         except (KeyError, ValueError, TypeError, AttributeError):
             reasons.append(f"{gate}: invalid, missing, stale or mismatched evidence")
             continue

@@ -120,3 +120,68 @@ def test_secret_scan_summary_must_match_its_finding_list(listed, count):
     rows[1]['evidence']['findings'] = listed
     rows[1]['findings'] = count
     assert judge(rows) == 'BLOCK'
+
+
+def reasons(rows):
+    return decide(rows, POLICY, "subject", "policy", NOW, run_id="run")["reasons"]
+
+
+def unfinished(execution, index=-1):
+    rows = records()
+    rows[index].update(execution=execution, coverage_count=0, findings=0)
+    rows[index].pop("cases", None)
+    return rows
+
+
+@pytest.mark.parametrize("execution", ["ERROR", "TIMEOUT", "CANCELLED", "NOT_RUN"])
+def test_unfinished_gate_blocks_and_names_its_execution_state(execution):
+    # 基礎設施逾時或錯誤不得與證據不符共用同一句理由。 / An infrastructure timeout or error must not share the
+    # reason given to mismatched evidence.
+    result = decide(unfinished(execution), POLICY, "subject", "policy", NOW, run_id="run")
+    assert result["decision"] == "BLOCK"
+    assert result["reasons"] == [f"AUTH: {execution}"]
+
+
+@pytest.mark.parametrize("index,gate", [(0, POLICY["required_gates"][0]), (1, POLICY["required_gates"][1])])
+def test_unfinished_scan_gate_needs_no_coverage_evidence_to_name_its_state(index, gate):
+    rows = unfinished("ERROR", index)
+    rows[index].pop("evidence", None)
+    rows[index].pop("sca", None)
+    assert reasons(rows) == [f"{gate}: ERROR"]
+
+
+@pytest.mark.parametrize("field,value", [
+    ("run_id", "another-run"), ("subject_digest", "wrong"), ("policy_digest", "proposed-policy"),
+    ("schema_version", True), ("coverage_count", -1), ("coverage_count", False), ("findings", -1),
+    ("kind", "scan"), ("subject_digest_format", "legacy"),
+    pytest.param("created_at", (NOW - timedelta(hours=2)).isoformat(), id="expired"),
+    pytest.param("created_at", (NOW + timedelta(seconds=1)).isoformat(), id="future"),
+])
+def test_unfinished_gate_with_wrong_binding_is_still_invalid_evidence(field, value):
+    rows = unfinished("TIMEOUT")
+    rows[-1][field] = value
+    assert reasons(rows) == ["AUTH: invalid, missing, stale or mismatched evidence"]
+
+
+def test_completed_gate_without_coverage_is_invalid_evidence():
+    rows = records()
+    rows[-1].update(coverage_count=0, cases=[])
+    assert reasons(rows) == ["AUTH: invalid, missing, stale or mismatched evidence"]
+    rows = records()
+    rows[1]["coverage_count"] = 0
+    assert reasons(rows) == [f"{POLICY['required_gates'][1]}: invalid, missing, stale or mismatched evidence"]
+
+
+def test_unfinished_gate_with_findings_reports_both():
+    rows = unfinished("ERROR")
+    rows[-1]["findings"] = 1
+    assert reasons(rows) == ["AUTH: ERROR", "AUTH: confirmed findings"]
+
+
+def test_evidence_age_boundaries_are_inclusive_for_unfinished_gates():
+    limit = POLICY["max_evidence_age_seconds"]
+    rows = unfinished("TIMEOUT")
+    rows[-1]["created_at"] = (NOW - timedelta(seconds=limit)).isoformat()
+    assert reasons(rows) == ["AUTH: TIMEOUT"]
+    rows[-1]["created_at"] = NOW.isoformat()
+    assert reasons(rows) == ["AUTH: TIMEOUT"]

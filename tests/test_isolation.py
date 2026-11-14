@@ -1,4 +1,5 @@
 import shutil
+import subprocess
 import json
 import hashlib
 import socket
@@ -217,3 +218,53 @@ def test_runtime_image_lock_refuses_a_changed_test_tool_set():
     without_pytest = "\n".join(l for l in source.split("\n") if not l.startswith("pytest=="))
     with pytest.raises(ValueError, match="test-only"):
         runtime_requirements(without_pytest)
+
+
+def retried(monkeypatch, outcomes):
+    """以預先安排的結果取代單輪評估，回傳呼叫紀錄。 / Replace the single evaluation with scripted outcomes; return the calls."""
+    calls = []
+
+    def once(candidate, variant, run_id):
+        calls.append((candidate, variant, run_id))
+        outcome = outcomes[len(calls) - 1]
+        if isinstance(outcome, BaseException):
+            raise outcome
+        return outcome
+
+    monkeypatch.setattr(isolation, "_run_once", once)
+    return calls
+
+
+def test_bridge_deadline_repeats_the_whole_evaluation_once(monkeypatch):
+    calls = retried(monkeypatch, [isolation.DeadlineExceeded("late"), {"cases": ["second"], "isolation": {"network": "none"}}])
+    result = isolation.run_isolated(ROOT, "fixed", "a" * 32)
+    assert calls == [(ROOT, "fixed", "a" * 32)] * 2
+    assert result == {"cases": ["second"], "isolation": {"network": "none", "bridge_attempts": 2}}
+
+
+def test_first_evaluation_that_finishes_is_not_repeated(monkeypatch):
+    calls = retried(monkeypatch, [{"cases": [], "isolation": {}}])
+    assert isolation.run_isolated(ROOT)["isolation"] == {"bridge_attempts": 1}
+    assert calls == [(ROOT, "fixed", None)]
+
+
+def test_second_bridge_deadline_is_not_retried_again(monkeypatch):
+    calls = retried(monkeypatch, [isolation.DeadlineExceeded("first"), isolation.DeadlineExceeded("second")])
+    with pytest.raises(isolation.DeadlineExceeded, match="^second$"):
+        isolation.run_isolated(ROOT)
+    assert len(calls) == 2
+
+
+@pytest.mark.parametrize("error", [RuntimeError("isolated resource cleanup failed"), ValueError("mismatch"),
+                                   TimeoutError("other timeout"), subprocess.TimeoutExpired(["docker"], 1)])
+def test_only_a_bridge_deadline_is_retried(monkeypatch, error):
+    # 清理失敗、契約不符與其他逾時都不重跑。 / Cleanup failures, contract mismatches and other timeouts are not repeated.
+    calls = retried(monkeypatch, [error, {"cases": [], "isolation": {}}])
+    with pytest.raises(type(error)):
+        isolation.run_isolated(ROOT)
+    assert len(calls) == 1
+
+
+def test_evaluation_deadline_fits_twice_inside_the_worker_deadline():
+    roe = json.loads((ROOT / "security/roe.json").read_text())
+    assert 2 * isolation.EVALUATION_SECONDS < roe["max_seconds"]

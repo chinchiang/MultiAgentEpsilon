@@ -375,3 +375,24 @@ def test_isolation_worker_never_runs_when_registration_fails(tmp_path, monkeypat
         assert not marker.exists()
     finally:
         shutil.rmtree(supervision.temporary_directory(run_id), ignore_errors=True)
+
+
+def test_bridge_deadline_in_the_authorization_worker_is_recorded_as_a_timeout(tmp_path, monkeypatch):
+    # 橋接逾時是基礎設施逾時，不是一般錯誤，也不是證據不符。 / A bridge deadline is an infrastructure timeout, not a
+    # generic error and not mismatched evidence.
+    monkeypatch.setattr(run_security, "ROOT", fixture_root(tmp_path))
+    audit = AuditRun(tmp_path, "security")
+    run_security.plan(audit, tmp_path, "fixed")
+    monkeypatch.setattr(run_security, "verify", lambda *a: ["synthetic"])
+    monkeypatch.setattr(run_security, "dependency_scan", lambda *a: {"findings": [], "sbom": {}})
+    monkeypatch.setattr(run_security, "scan", lambda *a, **k: {"targets": 1, "findings": []})
+    monkeypatch.setattr(isolation, "cleanup_run", lambda *a: None)
+    failure = json.dumps({"error_type": "DeadlineExceeded", "failed_checks": []})
+    with patch.object(run_security, "run_isolation_worker", return_value=subprocess.CompletedProcess([], 1, failure, "")):
+        assert run_security.main(audit) == 1
+    data = report(tmp_path)
+    record = data["records"][-1]
+    assert (record["gate"], record["execution"], record["coverage_count"]) == ("AUTH", "TIMEOUT", 0)
+    assert record["worker_failure"] == {"error_type": "DeadlineExceeded", "failed_checks": []}
+    assert data["decision"] == "BLOCK" and "AUTH: TIMEOUT" in data["reasons"]
+    assert not any("AUTH: invalid" in reason for reason in data["reasons"])

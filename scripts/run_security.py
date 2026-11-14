@@ -208,8 +208,12 @@ def main(audit, defer_final=False):
                           mode="bounded container HTTP bridge; independent PostgreSQL oracle",
                           isolation=worker["isolation"])
             except Exception as exc:
-                audit.add("AUTH", "TIMEOUT" if isinstance(exc, subprocess.TimeoutExpired) else "ERROR",
-                          "test", 0, 0, type(exc).__name__, **getattr(exc, "evidence", {}))
+                # worker 整體逾時，或橋接請求在整輪重跑後仍超過期限，都記為 TIMEOUT。 / A worker timeout, or a bridge
+                # request still past its deadline after the whole-run retry, is recorded as TIMEOUT.
+                evidence = getattr(exc, "evidence", {})
+                timed_out = (isinstance(exc, subprocess.TimeoutExpired)
+                             or evidence.get("worker_failure", {}).get("error_type") == "DeadlineExceeded")
+                audit.add("AUTH", "TIMEOUT" if timed_out else "ERROR", "test", 0, 0, type(exc).__name__, **evidence)
         audit.stage("decision")
         audit.data.update(decide(audit.data["records"], policy, audit.data["subject_digest"],
                                 audit.data["policy_digest"], run_id=audit.data["run_id"]))

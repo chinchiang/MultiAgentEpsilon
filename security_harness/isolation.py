@@ -21,7 +21,7 @@ from .fixture_database import connect, seed
 from .inputs import input_files
 from .supervision import valid_run_id
 from .container_http import BoundedClient, docker_environment
-from .processes import docker_command
+from .processes import DeadlineExceeded, docker_command
 from .results import digest_file, read_regular
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -101,6 +101,10 @@ mounts lists (type, source, destination, writable); tmpfs maps destination to op
             "verified": sorted(checks)}
 
 
+# 一輪評估的橋接期限（正常約 10 秒）；兩輪加上建置仍在 RoE 的 worker 期限內，超過則由外層逾時阻擋。 / Bridge deadline
+# of one evaluation (normally about 10 seconds); two evaluations plus setup still fit the RoE worker deadline, and the
+# outer timeout blocks anything longer.
+EVALUATION_SECONDS = 45
 CLEANUP_ATTEMPTS = 8
 CLEANUP_INTERVAL = 0.5
 # 連續兩次空清單之間的等待；被終止的 docker CLI 送出的建立請求仍可能在 daemon 端完成。 / The wait between two
@@ -133,6 +137,23 @@ Remove this run's containers until two listings CLEANUP_SETTLE seconds apart are
 
 
 def run_isolated(candidate: Path, variant="fixed", run_id=None) -> dict:
+    """評估一次；只有橋接請求超過期限時，清理後以新的容器與 schema 整輪重跑一次。
+
+Evaluate once. Only when a bridge request runs past its deadline is the whole evaluation repeated once, after
+    cleanup, in new containers on a new schema. A single request is never retried: after a timeout the request may
+    still take effect inside the container. Failed cases, other errors and cleanup failures are never retried."""
+    for attempt in (1, 2):
+        try:
+            result = _run_once(candidate, variant, run_id)
+        except DeadlineExceeded:
+            if attempt == 2:
+                raise
+            continue
+        result["isolation"]["bridge_attempts"] = attempt
+        return result
+
+
+def _run_once(candidate: Path, variant, run_id) -> dict:
     if variant not in ("fixed", "vulnerable"):
         raise ValueError("invalid fixture variant")
     runtime = json.loads((ROOT / ".state/runtime-image.json").read_text())
@@ -254,6 +275,7 @@ def run_isolated(candidate: Path, variant="fixed", run_id=None) -> dict:
                 raise RuntimeError("isolated HTTP service unavailable")
             # 靜置後、最終快照前終止候選（SIGKILL），最終比對之後不會再有候選寫入。 / Kill the candidate after
             # the settle period and before the final snapshot, so no candidate write can follow the last comparison.
+            client.deadline = time.monotonic() + EVALUATION_SECONDS
             cases = evaluate(client, dsn, schema, passwords, connect, stop=lambda: docker("kill", names[1]))
             evidence = {**app_isolation,
                         "database": db_isolation,
