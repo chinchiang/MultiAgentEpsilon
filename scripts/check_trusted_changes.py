@@ -16,10 +16,10 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 if __name__ == "__main__":
     sys.path.insert(0, str(ROOT))
-from security_harness import candidate_git, guard_evidence, trust_scope
+from security_harness import candidate_git, guard_evidence
 from security_harness.github_readonly import GitHubReader, ReadOnlyGitHub
 from security_harness.github_http import Denied
-from security_harness.github_trust import GitHubTrust, approved_review as approved_review
+from security_harness.github_trust import GitHubTrust, approved_review as approved_review, load_trust_policy
 
 
 def protected_changes(names):
@@ -29,15 +29,12 @@ def protected_changes(names):
 
 
 def live_approval(number, head, base, refusals=None):
-    policy = json.loads((ROOT / "security/trust-policy.json").read_text())
     # 此 guard 只實作獨立審查；政策若要求其他模式必須拒絕。 / This guard only implements independent review;
     # refuse a policy that asks for anything else.
-    if policy.get("schema_version") != 1 or policy.get("require_independent_author") is not True:
-        raise ValueError("unsupported trust policy")
-    scope = trust_scope.load(ROOT)
-    reader = GitHubReader(ReadOnlyGitHub(), scope.repository)
-    return GitHubTrust(reader).baseline_approval(number, head, base, policy["baseline_reviewers"],
-                                                 os.environ.get("GITHUB_RUN_ID"), refusals, scope.base_branch)
+    policy = load_trust_policy(ROOT, require_independent_author=True)
+    reader = GitHubReader(ReadOnlyGitHub(), policy.scope.repository)
+    return GitHubTrust(reader).baseline_approval(number, head, base, policy.baseline_reviewers,
+                                                 os.environ.get("GITHUB_RUN_ID"), refusals, policy.scope.base_branch)
 
 
 def main():

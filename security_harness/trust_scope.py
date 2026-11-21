@@ -19,6 +19,11 @@ class TrustScope(NamedTuple):
     required_check: str
 
 
+class TrustPolicy(NamedTuple):
+    scope: TrustScope
+    baseline_reviewers: list
+
+
 def load(root):
     """儲存庫取自可信基準的 trust-policy.json，其餘取自 workflow 契約。 / The repository comes from the trusted
     baseline's trust-policy.json; the rest comes from the workflow contract."""
@@ -26,3 +31,17 @@ def load(root):
     if not isinstance(repository, str) or not REPOSITORY.fullmatch(repository):
         raise ValueError("invalid trusted repository")
     return TrustScope(repository, BASE_BRANCH, WORKFLOW_PATH, REQUIRED_CHECK)
+
+
+def load_policy(root, *, require_independent_author=False):
+    """讀入可信基準的 trust-policy.json，一併載入信任範圍與基準審查者名單。 / Load the trusted baseline's
+    trust-policy.json, returning both the trust scope and the baseline reviewers."""
+    policy = json.loads((Path(root) / "security/trust-policy.json").read_text())
+    if require_independent_author and (policy.get("schema_version") != 1
+                                       or policy.get("require_independent_author") is not True):
+        raise ValueError("unsupported trust policy")
+    return TrustPolicy(load(root), list(policy["baseline_reviewers"]))
+
+
+load_trust_scope = load
+load_trust_policy = load_policy
