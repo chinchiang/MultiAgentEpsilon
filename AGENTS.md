@@ -20,7 +20,7 @@
 
 ## 產出位置
 
-- `improve-codebase-architecture` 的 HTML 架構報告存放在專案根目錄的 `scratch/architecture-review-<timestamp>.html`。
+- `/improve-codebase-architecture` 的 HTML 架構報告存放在專案根目錄的 `scratch/architecture-review-<timestamp>.html`。
 - `/handoff` 的交接檔存放在 `scratch/handoff-<timestamp>.md`。
 - 每次使用新檔名，完成後提供實際檔案連結。此位置覆寫技能預設的作業系統暫存目錄（`/tmp` 關機即清除）；`scratch/` 不納入版本管理。
 
@@ -31,6 +31,20 @@
 - 每項說明行動與預期結果；適用時提供實際命令。
 - 等待使用者選擇才執行後續工作，接受單一數字作為選擇。
 - 破壞性、需特權、涉及安全敏感內容或不可逆的操作，須先取得明確核准。
+
+## 代理人技能（Agent skills）
+
+### 議題追蹤器（Issue tracker）
+
+議題與規格追蹤於本儲存庫的 GitHub Issues（使用 `gh` CLI）。見 [`docs/agents/issue-tracker.md`](docs/agents/issue-tracker.md#zh-tw)。
+
+### 檢傷分類標籤（Triage labels）
+
+使用五個預設檢傷分類角色標籤（`needs-triage`、`needs-info`、`ready-for-agent`、`ready-for-human`、`wontfix`）。見 [`docs/agents/triage-labels.md`](docs/agents/triage-labels.md#zh-tw)。
+
+### 領域文件（Domain docs）
+
+單一語境（single-context）配置，使用根目錄 `GLOSSARY.md` 與 `docs/adr/`。見 [`docs/agents/domain.md`](docs/agents/domain.md#zh-tw)。
 
 <a id="en"></a>
 
@@ -47,6 +61,20 @@ Agent pointers:
 - Review: when reviewing a diff, apply the judgement rules in [CODING_STANDARDS.md](CODING_STANDARDS.md#en).
 - Tests: before running tests, ruff or documentation checks, read the [README "Run the pilot"](README.md#run-the-pilot) section.
 
-Save each `improve-codebase-architecture` report to `scratch/architecture-review-<timestamp>.html` and each `/handoff` file to `scratch/handoff-<timestamp>.md` under the repository root, with a new name every time, and provide the file link. This overrides the skills' temporary-directory default (`/tmp` is cleared on shutdown); `scratch/` is not version-controlled.
+Save each `/improve-codebase-architecture` report to `scratch/architecture-review-<timestamp>.html` and each `/handoff` file to `scratch/handoff-<timestamp>.md` under the repository root, with a new name every time, and provide the file link. This overrides the skills' temporary-directory default (`/tmp` is cleared on shutdown); `scratch/` is not version-controlled.
 
 After each task, distinguish completed work, verification results and remaining issues or risks. Offer 3–5 numbered next steps in value order, mark the first `[Recommended]`, and include `0` to finish. Explain actions and expected outcomes, including commands where applicable. Accept a single number and wait before executing a next step. Obtain explicit approval for destructive, privileged, security-sensitive or irreversible operations.
+
+## Agent skills
+
+### Issue tracker
+
+Issues and specs are tracked in GitHub Issues for this repository (via the `gh` CLI). See [`docs/agents/issue-tracker.md`](docs/agents/issue-tracker.md#en).
+
+### Triage labels
+
+Uses the five default canonical triage labels (`needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-human`, `wontfix`). See [`docs/agents/triage-labels.md`](docs/agents/triage-labels.md#en).
+
+### Domain docs
+
+Single-context layout (`GLOSSARY.md` and `docs/adr/` at the repository root). See [`docs/agents/domain.md`](docs/agents/domain.md#en).

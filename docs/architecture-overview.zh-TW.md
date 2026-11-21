@@ -104,6 +104,10 @@ MultiAgentEpsilon/
 │       ├── epsilon-publisher@.timer
 │       └── github-app-permissions.json
 ├── docs/
+│   ├── agents/
+│   │   ├── domain.md
+│   │   ├── issue-tracker.md
+│   │   └── triage-labels.md
 │   ├── diagrams/
 │   │   ├── architecture-overview.mmd
 │   │   ├── architecture-overview.svg
@@ -299,7 +303,8 @@ MultiAgentEpsilon/
 ├── pyproject.toml
 ├── requirements-test.lock
 ├── requirements.in
-└── requirements.lock
+├── requirements.lock
+└── skills-lock.json
 ```
 <!-- repository-tree:end -->
 
