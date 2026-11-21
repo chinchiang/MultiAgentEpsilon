@@ -337,3 +337,52 @@ def test_the_session_wait_is_bounded_to_about_five_seconds():
     assert isolation.SESSION_END_ROUNDS == 100
     defaults = isolation.stop_candidate.__defaults__
     assert defaults == (isolation.connect, 100, 0.05)
+
+
+def test_fixture_database_encapsulates_role_snapshot_restore_and_session_sql():
+    from security_harness import fixture_database
+
+    class FakeCursor:
+        def __init__(self, log):
+            self.log = log
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+        def executemany(self, query, params):
+            self.log.append((query, list(params)))
+
+        def fetchall(self):
+            return []
+
+    class FakeConn:
+        def __init__(self):
+            self.log = []
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+        def execute(self, query, params=None):
+            self.log.append((str(query), params))
+            return FakeCursor(self.log)
+
+        def cursor(self):
+            return FakeCursor(self.log)
+
+    conn = FakeConn()
+    db = fixture_database.FixtureDatabase("dsn", "epsilon_0123456789abcdef", {"alice": "pw"},
+                                          connect=lambda dsn, schema: conn)
+    password = db.provision_candidate_role()
+    assert len(password) == 48
+    assert any("CREATE ROLE epsilon_app LOGIN PASSWORD" in q for q, _ in conn.log)
+    state = db.snapshot()
+    assert set(state) == {"users", "items", "sessions"}
+    db.restore({"users": [], "items": fixture_database.seeded_items(), "sessions": []})
+    db.insert_session({"token_hash": "h", "user_id": "alice", "expires_at": "2026-01-01T00:00:00Z"})
+    assert conn.log[-1] == ("INSERT INTO sessions VALUES (%s,%s,%s)", ("h", "alice", "2026-01-01T00:00:00Z"))

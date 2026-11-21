@@ -16,7 +16,6 @@ if __name__ == "__main__":
 from security_harness import candidate_git
 from security_harness.audit import AuditRun
 from security_harness.supervision import PlanMismatch
-from security_harness.limits import WORKER_RLIMITS
 from security_harness.results import (decide, required_gate_kinds, subject_digest, validate_cases, validate_policy,
                                       write_json)
 from security_harness.preflight import verify
@@ -35,51 +34,15 @@ def argument_parser():
     return parser
 
 
-def sha256(data):
-    return hashlib.sha256(data).hexdigest()
-
-
 def run_isolation_worker(command, timeout, run_id=None):
-    """在獨立 session 執行 isolation worker；有 supervisor 時先登記行程群組再放行，逾時時終止整個群組。
+    """在獨立 session 執行 isolation worker；有 supervisor 時先登記程序群組再放行，逾時時終止整個群組。
 
-Run the isolation worker in its own session. Under a supervisor its process group is
+    Run the isolation worker in its own session. Under a supervisor its process group is
     registered before the worker may run, so a supervisor timeout or cancel stops it too. On
     timeout the whole group is terminated, including its docker CLI children, before the
     timeout is re-raised."""
-    from security_harness import supervision
-    work = supervision.run_directory(ROOT, run_id) if run_id is not None else None
-    supervised = work is not None and (work / "owner.json").exists()
-    # 閘門在讀到 G 之前不執行 worker；擁有者在登記前死亡時讀到 EOF 即退出。 / The gate does not run the worker
-    # before it reads G; it exits on EOF if the owner dies before registration.
-    process = subprocess.Popen(supervision.gated_command(command), stdin=subprocess.PIPE, stdout=subprocess.PIPE,
-                               stderr=subprocess.PIPE, text=True, cwd=ROOT, start_new_session=True)
-    try:
-        if supervised:
-            supervision.register_group(work, process.pid)
-        process.stdin.write("G")
-        process.stdin.flush()  # communicate() 會關閉 stdin。 / communicate() closes stdin.
-    except BaseException:
-        try:
-            supervision.terminate_group(process.pid)
-        finally:
-            process.kill()
-            process.communicate(timeout=5)
-        raise
-    try:
-        stdout, stderr = process.communicate(timeout=timeout)
-    except subprocess.TimeoutExpired:
-        # 尚未 wait 的子程序 PID 不會被重用，可直接以它為群組 ID。 / An unreaped child's PID cannot be reused, so it is
-        # safe to use as the group ID.
-        try:
-            supervision.terminate_group(process.pid)
-        finally:
-            process.kill()
-            try:
-                process.communicate(timeout=5)
-            except subprocess.TimeoutExpired:
-                pass  # 不讓收尾無限等待；原本的逾時照常拋出。 / Never wait forever; the original timeout is re-raised.
-        raise
-    return subprocess.CompletedProcess(command, process.returncode, stdout, stderr)
+    from security_harness.supervision import run_gated_subprocess
+    return run_gated_subprocess(command, timeout, root=ROOT, run_id=run_id)
 
 
 class AuthorizationWorkerFailed(RuntimeError):
@@ -118,18 +81,8 @@ def plan(audit, candidate, variant):
 The supervisor's plan, decided before the worker is released: the candidate,
     variant, RoE, policy, evaluator digest and limits.
     """
-    # 候選內容不在計畫內：supervisor 沒有 rlimit，不可代 worker 走訪不可信目錄樹；worker 計算 subject 摘要並於結尾
-    # 重新比對。 / The candidate's content is not in the plan: the supervisor has no rlimits and must not walk an
-    # untrusted tree for the worker. The worker computes the subject digest and checks it again at the end.
-    evaluator = subject_digest(ROOT)
-    roe_bytes = (ROOT / "security/roe.json").read_bytes()
-    roe = validate_roe(json.loads(roe_bytes))
-    policy_bytes = (ROOT / "security/policy.json").read_bytes()
-    audit.data.update(variant=variant, candidate=str(Path(candidate).resolve()), roe_sha256=sha256(roe_bytes),
-                      policy_digest=sha256(policy_bytes), evaluator_digest=evaluator,
-                      resource_limits={"total_seconds": roe["max_total_seconds"], **WORKER_RLIMITS})
-    audit.save()
-    return roe
+    from security_harness.lifecycle import plan_security
+    return plan_security(ROOT, audit, candidate, variant)
 
 
 def planned_configuration(audit):
@@ -144,7 +97,8 @@ Check the evaluator digest, then read the RoE and policy once and check them
     # replaced after planning is never the one parsed.
     roe_bytes = (ROOT / "security/roe.json").read_bytes()
     policy_bytes = (ROOT / "security/policy.json").read_bytes()
-    if sha256(roe_bytes) != audit.data["roe_sha256"] or sha256(policy_bytes) != audit.data["policy_digest"]:
+    if (hashlib.sha256(roe_bytes).hexdigest() != audit.data["roe_sha256"]
+            or hashlib.sha256(policy_bytes).hexdigest() != audit.data["policy_digest"]):
         raise PlanMismatch("configuration differs from the plan")
     return roe_bytes, policy_bytes
 
@@ -227,29 +181,21 @@ def main(audit, defer_final=False):
                                      "no full ASVS verification", "no real LLM calls"]
     except (Exception, KeyboardInterrupt, SystemExit) as exc:
         audit.fail(exc)
-    pending_code = 0 if audit.data['decision'] == 'ALLOW' else 1
-    if defer_final:
-        audit.data['pending_decision'] = audit.data['decision']
-        audit.data['pending_execution'] = audit.data['execution']
-        audit.data.update(decision='BLOCK', execution='AWAITING_CLEANUP')
-    code = audit.finish(required_gate_kinds(ROOT))
+    code = audit.finish(required_gate_kinds(ROOT), defer_final=defer_final)
     print(f"{audit.data['decision']}: {audit.output / 'report.json'}")
-    return pending_code if defer_final else code
+    return code
 
 
 def supervised_main():
     if sys.argv[1:] in (["--help"], ["-h"]):
         argument_parser().parse_args()
-    from security_harness.lifecycle import SECURITY_IMMUTABLE, supervise
-    from security_harness.supervision import plan_digest
+    from security_harness.lifecycle import supervise, worker_command
     audit = AuditRun(ROOT, "security")
     try:
         audit.stage("arguments")
         args = argument_parser().parse_args()
         roe = plan(audit, args.candidate, args.variant)
-        code = supervise(ROOT, audit,
-            [sys.executable, "-I", str(ROOT / "scripts/security_worker.py"), audit.data["run_id"],
-             plan_digest(audit.data, SECURITY_IMMUTABLE)], roe["max_total_seconds"])
+        code = supervise(ROOT, audit, worker_command(ROOT, audit), roe["max_total_seconds"])
     except (Exception, KeyboardInterrupt, SystemExit) as exc:
         audit.fail(exc)
         code = audit.finish(required_gate_kinds(ROOT))

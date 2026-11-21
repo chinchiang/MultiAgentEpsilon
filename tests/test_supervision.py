@@ -291,3 +291,64 @@ def test_janitor_recovery_that_cannot_clean_up_is_reported_and_retried(tmp_path)
     assert sweep_runs(tmp_path, {'fake-role': lambda root, run, owner: recover(root, run, owner, healthy)}) == (
         [run_id], [])
     assert inventory_removed(tmp_path, run_id)
+
+
+def test_gated_group_protocol_is_centralized_in_supervision(tmp_path):
+    from security_harness.supervision import (gated_command, prepare_run, release_async_group, remove_run,
+                                              run_gated_subprocess, terminate_async_group)
+    run_id = str(uuid.uuid4())
+    work = prepare_run(tmp_path, run_id, 'fake-role')
+    try:
+        done = run_gated_subprocess([sys.executable, '-c', 'import os; print(os.getpid())'], 10,
+                                    root=tmp_path, run_id=run_id, role='child')
+        sync_pid = int(done.stdout.strip())
+        assert json.loads((work / 'groups' / f'{sync_pid}.json').read_text())['role'] == 'child'
+
+        async def run_async_child():
+            process = await asyncio.create_subprocess_exec(
+                *gated_command([sys.executable, '-c', 'import os; print(os.getpid())']),
+                stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE, start_new_session=True)
+            try:
+                await release_async_group(work, process, role='async-child')
+                output = await process.stdout.read()
+                assert await process.wait() == 0
+                return int(output.decode().strip())
+            finally:
+                await terminate_async_group(process)
+
+        async_pid = asyncio.run(run_async_child())
+        assert json.loads((work / 'groups' / f'{async_pid}.json').read_text())['role'] == 'async-child'
+    finally:
+        remove_run(tmp_path, run_id)
+
+
+def test_terminate_async_group_kills_the_leader_when_group_cleanup_fails(monkeypatch):
+    import security_harness.supervision as supervision
+
+    def failing_cleanup(pid):
+        raise TimeoutError('process group cleanup incomplete')
+
+    async def scenario():
+        process = await asyncio.create_subprocess_exec(
+            sys.executable, '-c', 'import time; time.sleep(60)', stdin=asyncio.subprocess.PIPE, start_new_session=True)
+        monkeypatch.setattr(supervision, 'terminate_group', failing_cleanup)
+        with pytest.raises(TimeoutError):
+            await asyncio.wait_for(supervision.terminate_async_group(process), 10)
+        return process.returncode
+
+    assert asyncio.run(scenario()) is not None
+
+
+def test_terminate_async_group_sends_no_signal_for_a_reaped_process_with_an_empty_group(monkeypatch):
+    import security_harness.supervision as supervision
+    signalled = []
+    monkeypatch.setattr(supervision.os, 'killpg', lambda pid, signum: signalled.append(pid))
+
+    async def scenario():
+        process = await asyncio.create_subprocess_exec(
+            sys.executable, '-c', 'pass', stdin=asyncio.subprocess.PIPE, start_new_session=True)
+        await process.wait()
+        await supervision.terminate_async_group(process)
+
+    asyncio.run(scenario())
+    assert signalled == []

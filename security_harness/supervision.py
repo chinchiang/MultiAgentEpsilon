@@ -9,6 +9,7 @@ here: under the cleanup lock and with the signal handlers still installed, it re
 writes a blocking checkpoint before removing the run inventory, and writes the final evidence from the supervision
 outcome; a janitor reaps a dead owner's run through the same protocol. Every child starts from one base environment
 and each role adds only the names it needs; the evidence format stays with each role."""
+import asyncio
 import fcntl
 import hashlib
 import json
@@ -153,8 +154,15 @@ def read_marker(path):
     return json.loads(read_regular(path, MARKER_LIMIT))
 
 
-def gated_command(command):
+GATE_RELEASE = b'G'
+
+
+def gated_command(command, gated=True):
     # 擁有者在登記前死亡時，閘門讀到 EOF 即退出。 / The gate exits on EOF if the owner dies before registration.
+    # gated 必須與 release_async_group 的 gated 一致：不加閘門的命令不能被送 G。 / gated must match release_async_group's:
+    # a command without the gate must not be sent G.
+    if not gated:
+        return list(command)
     return [sys.executable, '-I', str(SOURCE_ROOT / 'scripts/model_process.py'), *command]
 
 
@@ -166,6 +174,91 @@ def register_group(work, pid, role='child'):
         raise ValueError('supervised child requires a dedicated session')
     persist(work / 'groups' / f'{pid}.json', {
         'pid': pid, 'start': identity(pid), 'boot': marker['boot'], 'uid': marker['uid'], 'role': role})
+
+
+def release_gated_group(work, process, role='child', *, gated=True, close_stdin=True):
+    """若有執行清冊，先於清冊內持久登記程序群組，再經 stdin 閘門放行。
+
+    Durably register the process group in the run inventory when present, then release
+    the gate over stdin.
+    """
+    if work is not None:
+        register_group(work, process.pid, role=role)
+    if process.stdin is not None:
+        if gated:
+            process.stdin.write(GATE_RELEASE.decode() if getattr(process, 'text_mode', False) else GATE_RELEASE)
+        if close_stdin:
+            process.stdin.close()
+        elif hasattr(process.stdin, 'flush'):
+            process.stdin.flush()
+
+
+async def release_async_group(work, process, role='child', *, gated=True):
+    """若有執行清冊，先於清冊內持久登記非同步程序群組，再送出閘門握手並關閉 stdin；gated 須與 gated_command 一致。
+
+    Durably register an async process group in the run inventory when present, send the
+    gate byte and close stdin; gated must match the value given to gated_command.
+    """
+    release_gated_group(work, process, role=role, gated=gated, close_stdin=False)
+    await process.stdin.drain()
+    process.stdin.close()
+
+
+async def terminate_async_group(process):
+    """終止非同步子程序的專用程序群組，並等待回收；清理失敗時仍補殺首領並限時等待，不會永遠卡住。
+
+    Terminate an async process's dedicated process group and wait to reap it. If group cleanup fails, still kill the
+    leader and wait with a bound, so this never hangs forever.
+    """
+    if process.stdin is not None:
+        process.stdin.close()
+    try:
+        # asyncio 程序結束即被回收，其編號可能已被他人取得；群組已空就不送訊號。 / An asyncio process is reaped as soon as it
+        # exits and its PID may belong to someone else; with an empty group no signal is sent.
+        if process.returncode is None or group_alive(process.pid):
+            terminate_group(process.pid)
+    except ProcessLookupError:
+        pass
+    finally:
+        if process.returncode is None:
+            try:
+                process.kill()
+            except ProcessLookupError:
+                pass
+        try:
+            await asyncio.wait_for(process.wait(), 5)
+        except asyncio.TimeoutError:
+            pass  # 不讓收尾無限等待；原本的例外照常拋出。 / Never wait forever; any original exception is re-raised.
+
+
+def run_gated_subprocess(command, timeout, *, root=SOURCE_ROOT, run_id=None, role='child'):
+    """在獨立 session 經閘門啟動子程序；若有執行清冊則先持久登記群組再放行，逾時或異常時終止整個程序群組並回收。
+
+Start a gated subprocess in its own session, durably registering its process group in
+    the run inventory when present, and terminating the whole group on timeout or failure.
+    """
+    work = run_directory(root, run_id) if run_id is not None else None
+    if work is not None and not (work / 'owner.json').exists():
+        work = None
+    process = subprocess.Popen(gated_command(command), stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                               stderr=subprocess.PIPE, text=True, cwd=root, start_new_session=True)
+    try:
+        release_gated_group(work, process, role=role, close_stdin=False)
+        stdout, stderr = process.communicate(timeout=timeout)
+    except BaseException:
+        # 不預先關閉 stdin：communicate() 會自行 flush 並關閉，先關會拋 ValueError 蓋掉原例外並洩漏 stdout／stderr
+        # 管線。 / Do not close stdin first: communicate() flushes and closes it itself, and closing it earlier raises
+        # ValueError that masks the original exception and leaks the stdout/stderr pipes.
+        try:
+            terminate_group(process.pid)
+        finally:
+            process.kill()
+            try:
+                process.communicate(timeout=5)
+            except subprocess.TimeoutExpired:
+                pass  # 不讓收尾無限等待；原本的例外照常拋出。 / Never wait forever; the original exception is re-raised.
+        raise
+    return subprocess.CompletedProcess(command, process.returncode, stdout, stderr)
 
 
 def stop_registered(work):
@@ -269,9 +362,7 @@ Start the worker through the gate, release it only after durable registration, w
                 gated_command(command), cwd=self.root, start_new_session=True, stdin=subprocess.PIPE,
                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
                 env={**env, 'TMPDIR': str(temporary_directory(self.run_id))})
-            register_group(self.work, self.process.pid, role='worker')
-            self.process.stdin.write(b'G')
-            self.process.stdin.close()
+            release_gated_group(self.work, self.process, role='worker')
             while self.process.poll() is None:
                 if self.cancelled:
                     self.first_stop = CANCELLED

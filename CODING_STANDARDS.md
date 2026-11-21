@@ -41,7 +41,7 @@
 ## 測試
 
 - 測試走模組的介面與真實程序，觀察可見的行為。
-- 替身只放在外部邊界：GitHub 用 [`tests/fake_github.py`](tests/fake_github.py)，docker CLI 用 `tests/test_lifecycle.py` 的 `FakeDocker`。要製造失敗時，優先用真實狀態，例如 symlink 或被持有的鎖。
+- 替身只放在外部邊界：GitHub 用 [`tests/fake_github.py`](tests/fake_github.py)，docker CLI 用 `tests/test_lifecycle.py` 的 `FakeDocker`，PostgreSQL 連線（注入 `connect`）在離線測試中用測試內的小型替身，只記錄 SQL 與參數，例如 `tests/test_isolation.py` 的 `FakeConn`、`tests/test_ruleset_template.py` 的 `_RecordingConnection`；真實資料庫行為仍由整合測試驗證。要製造失敗時，優先用真實狀態，例如 symlink 或被持有的鎖。
 - 新行為的測試在變更前必須是紅燈；審查時要求附上它在舊程式上失敗的證據。
 
 <a id="en"></a>
@@ -85,5 +85,5 @@ This file covers only what those tools cannot judge; where they conflict, the to
 ## Tests
 
 - Tests go through the module's interface and real processes, and observe visible behaviour.
-- Test doubles sit at external seams only: [`tests/fake_github.py`](tests/fake_github.py) for GitHub, and `FakeDocker` in `tests/test_lifecycle.py` for the docker CLI. To cause a failure, prefer real state such as a symlink or a held lock.
+- Test doubles sit at external seams only: [`tests/fake_github.py`](tests/fake_github.py) for GitHub, and `FakeDocker` in `tests/test_lifecycle.py` for the docker CLI. A PostgreSQL connection (the injected `connect`) is also an external seam: offline tests use a small in-test double that only records SQL and parameters, such as `FakeConn` in `tests/test_isolation.py` and `_RecordingConnection` in `tests/test_ruleset_template.py`; real database behaviour stays covered by the integration tests. To cause a failure, prefer real state such as a symlink or a held lock.
 - A test for new behaviour is red before the change; when reviewing, ask for evidence that it fails on the old code.

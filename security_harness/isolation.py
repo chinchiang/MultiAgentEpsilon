@@ -14,10 +14,9 @@ import time
 from pathlib import Path
 
 import psycopg
-from psycopg import sql
 
 from .authorization import evaluate
-from .fixture_database import connect, seed
+from .fixture_database import CANDIDATE_ROLE as CANDIDATE_ROLE, FixtureDatabase, connect
 from .inputs import input_files
 from .supervision import valid_run_id
 from .container_http import BoundedClient, docker_environment
@@ -136,7 +135,6 @@ Remove this run's containers until two listings CLEANUP_SETTLE seconds apart are
     raise RuntimeError("isolated containers remain after cleanup")
 
 
-CANDIDATE_ROLE = "epsilon_app"
 # 每 0.05 秒查一次，最多 100 次（約 5 秒）。 / One query every 0.05 seconds, at most 100 times (about 5 seconds).
 SESSION_END_ROUNDS = 100
 
@@ -255,15 +253,9 @@ def _run_once(candidate: Path, variant, run_id) -> dict:
                     time.sleep(0.25)
             else:
                 raise RuntimeError("isolated database unavailable")
-            schema, passwords = seed(dsn)
-            app_password = secrets.token_hex(24)
-            with connect(dsn, schema) as conn:
-                conn.execute(sql.SQL("CREATE ROLE epsilon_app LOGIN PASSWORD {}").format(sql.Literal(app_password)))
-                conn.execute("REVOKE ALL ON SCHEMA public FROM PUBLIC")
-                conn.execute(sql.SQL("GRANT USAGE ON SCHEMA {} TO epsilon_app").format(sql.Identifier(schema)))
-                conn.execute("GRANT SELECT ON users TO epsilon_app")
-                conn.execute("GRANT SELECT, UPDATE, DELETE ON items TO epsilon_app")
-                conn.execute("GRANT SELECT, INSERT, DELETE ON sessions TO epsilon_app")
+            db = FixtureDatabase.create(dsn, connect=connect)
+            schema = db.schema
+            app_password = db.provision_candidate_role()
             settings = work / "fixture.json"
             fixture = {"dsn": f"postgresql://epsilon_app:{app_password}@/epsilon_fixture?host=/run/epsilon-db",
                        "schema": schema}
@@ -304,7 +296,7 @@ def _run_once(candidate: Path, variant, run_id) -> dict:
             # candidate after the settle period and end its database sessions before the final snapshot, so no
             # candidate write can follow the last comparison.
             client.deadline = time.monotonic() + EVALUATION_SECONDS
-            cases = evaluate(client, dsn, schema, passwords, connect,
+            cases = evaluate(client, db,
                              stop=lambda: stop_candidate(lambda: docker("kill", names[1]), dsn, schema))
             evidence = {**app_isolation,
                         "database": db_isolation,
