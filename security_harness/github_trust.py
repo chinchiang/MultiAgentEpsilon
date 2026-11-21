@@ -6,6 +6,8 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 
 from .github_http import Denied, need
+from .trust_scope import (TrustPolicy as TrustPolicy, TrustScope as TrustScope,
+                          load_trust_policy as load_trust_policy, load_trust_scope as load_trust_scope)
 from .workflow_contract import BASE_BRANCH
 
 # 共用 App 身分不能單獨證明 check 來源。 / The shared App identity alone does not prove a check's source.
@@ -183,6 +185,10 @@ class ReviewEvidence:
     commit_identities: set
     push: HeadPush
 
+    def decide(self, pr, reviewers):
+        """依已蒐集的審查證據套用共同審查規則。 / Apply the shared review rule to the collected review evidence."""
+        return review_decision(pr, self.reviews, self.permissions, reviewers, self.commit_identities, self.push)
+
 
 class RunBaseEvidence:
     """單次命令內重用的來源證據，不是跨請求原子快照。 / Source evidence reused within one command, not an atomic snapshot."""
@@ -265,8 +271,7 @@ Read the head's push time and pushers; refuse a fork, a shared head, a ruleset t
         push = self.head_push(number, pr, base_branch)
         reviews = self._reader.items(f'pulls/{number}/reviews')
         permissions = self._permissions(reviews)
-        pulls = self._related_pulls(pr)
-        validate_run_base(run, pr, pulls, base_branch, run_base_history(self._reader, pr, pulls))
+        self.run_base(pr, base_branch).validate(run)
         return ReviewEvidence(reviews, permissions, self._commit_identities(number, pr['head']['sha']), push)
 
     def review_ids(self, number, pr, reviewers, excluded, base_branch):
@@ -275,6 +280,13 @@ Read the head's push time and pushers; refuse a fork, a shared head, a ruleset t
         push = self.head_push(number, pr, base_branch)
         reviews = self._reader.items(f"pulls/{number}/reviews")
         return review_decision(pr, reviews, self._permissions(reviews), reviewers, excluded, push)
+
+    def reverify_publication(self, number, fresh_pr, run, reviewers, proof, base_branch=BASE_BRANCH):
+        """發布綠燈前重讀來源與審查，確認 PR、run 與核准未變。 / Reverify the run base and review approvals on the
+        fresh pull request right before publishing green."""
+        self.run_base(fresh_pr, base_branch).validate(run)
+        need(self.review_ids(number, fresh_pr, reviewers, set(proof["excluded_identities"]),
+                             base_branch) == proof["review_ids"], "REVIEW_CHANGED")
 
     def baseline_approval(self, number, head, base, reviewers, run_id=None, refusals=None, base_branch=BASE_BRANCH):
         pr = self._reader.get(f"pulls/{number}")
@@ -289,3 +301,12 @@ Read the head's push time and pushers; refuse a fork, a shared head, a ruleset t
             run = self._reader.get(f"actions/runs/{run_id}")
             self.run_base(pr, base_branch).validate(run)
         return approved_review(pr, reviews, head, base, reviewers, self._permissions(reviews), excluded, push, refusals)
+
+
+def ruleset_protections(branch, rulesets):
+    """只依賴分支與規則集的保護項目；稽核與排程監看經由共同信任模組共用。 / Branch and ruleset protections shared
+    by the audit and the scheduled monitor through the common trust module."""
+    # mutation_check 直接對 scripts/audit_merge_protection.py 的 ruleset_protections 施作 AST 突變並執行監看測試。 /
+    # mutation_check mutates ruleset_protections in scripts/audit_merge_protection.py and runs the monitor tests.
+    from scripts.audit_merge_protection import ruleset_protections as _ruleset_protections
+    return _ruleset_protections(branch, rulesets)

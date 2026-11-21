@@ -398,6 +398,15 @@ Use a pinned verifier for cryptography, then bind its verified SLSA statement
     raise Denied("ATTESTATION_RUN_MISMATCH")
 
 
+def validate_collected_bundle(settings, gate_policy, pr, run, runs, jobs, files, evidence, subject, now):
+    """以 ReviewEvidence 進入共同 bundle 驗證並記錄提交身分，免除呼叫端手動拆解欄位。 / Validate a collected
+    bundle with ReviewEvidence and record commit identities without manually unpacking its fields at the call site."""
+    proof = validate_bundle(settings, gate_policy, pr, run, runs, jobs, files, evidence.reviews,
+                            evidence.permissions, subject, now, evidence.push, evidence.commit_identities)
+    proof["excluded_identities"] = sorted(evidence.commit_identities)
+    return proof
+
+
 def collect(client, settings, number, run_id, gate_policy, blob_cache=None):
     repo = settings["repository"]
     reader = GitHubReader(client, repo)
@@ -423,11 +432,8 @@ def collect(client, settings, number, run_id, gate_policy, blob_cache=None):
     verify_artifact_attestation(reader, settings, run, raw)
     evidence = GitHubTrust(reader).publication_review(number, pr, run, settings["base_branch"])
     subject = remote_subject(reader, head, blob_cache)
-    proof = validate_bundle(settings, gate_policy, pr, run, runs, jobs, unpack_evidence(raw), evidence.reviews,
-                            evidence.permissions, subject, datetime.now(timezone.utc), evidence.push,
-                            evidence.commit_identities)
-    proof["excluded_identities"] = sorted(evidence.commit_identities)
-    return proof
+    return validate_collected_bundle(settings, gate_policy, pr, run, runs, jobs, unpack_evidence(raw), evidence,
+                                     subject, datetime.now(timezone.utc))
 
 
 def discover_run(reader, settings, pr):
@@ -476,11 +482,9 @@ Publish one completed check only when the verified outcome changes.
         run = reader.get(f"actions/runs/{run_id}")
         need(run["run_attempt"] == proof["run_attempt"] and run["status"] == "completed"
              and run["conclusion"] == "success" and run["head_sha"] == head, "RUN_CHANGED")
-        trust = GitHubTrust(reader)
-        trust.run_base(fresh, settings["base_branch"]).validate(run)
         reject_newer_runs(run, head_runs(reader, settings, head), head)
-        need(trust.review_ids(number, fresh, settings["reviewers"], set(proof["excluded_identities"]),
-                              settings["base_branch"]) == proof["review_ids"], "REVIEW_CHANGED")
+        GitHubTrust(reader).reverify_publication(number, fresh, run, settings["reviewers"], proof,
+                                                 settings["base_branch"])
         conclusion, code = "success", "VERIFIED"
     except Denied as exc:
         if str(exc) in THROTTLED:

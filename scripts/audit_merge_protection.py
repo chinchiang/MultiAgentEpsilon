@@ -4,7 +4,6 @@
 Read-only configuration audit; never substitutes admin observations for developer probes."""
 import argparse
 import base64
-import json
 import sys
 from pathlib import Path
 
@@ -13,7 +12,7 @@ if __name__ == "__main__":
     sys.path.insert(0, str(ROOT))
 from security_harness.github_readonly import GitHubReader, ReadOnlyGitHub
 from security_harness.results import write_json
-from security_harness.github_trust import GITHUB_ACTIONS_APP_ID as ACTIONS_APP_ID
+from security_harness.github_trust import GITHUB_ACTIONS_APP_ID as ACTIONS_APP_ID, load_trust_policy
 from security_harness.workflow_contract import REQUIRED_CHECK
 
 
@@ -118,8 +117,8 @@ def main():
     args = parser.parse_args()
     evidence = {'decision': 'BLOCK', 'acceptance_complete': False, 'errors': []}
     try:
-        trust = json.loads((ROOT/'security/trust-policy.json').read_text())
-        repo = trust['repository']
+        policy = load_trust_policy(ROOT)
+        repo = policy.scope.repository
         reader = GitHubReader(ReadOnlyGitHub(), repo)
         branch = reader.get('branches/main')
         rules = [reader.get('rulesets/'+str(r['id'])) for r in reader.items('rulesets?includes_parents=true')]
@@ -130,7 +129,7 @@ def main():
             codeowners = base64.b64decode(owners_file['content']).decode('utf-8')
         except Exception:
             codeowners = None
-        evidence.update(inspect_configuration(branch, rules, pr, collaborators, trust['baseline_reviewers'],
+        evidence.update(inspect_configuration(branch, rules, pr, collaborators, policy.baseline_reviewers,
                                               codeowners, args.publisher_app_id))
         evidence.update(repository=repo, main_sha=branch['commit']['sha'], candidate_sha=pr['head']['sha'],
                         pr_state=pr['state'], pr_draft=pr['draft'])

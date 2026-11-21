@@ -30,62 +30,62 @@ class Opener:
 
 
 def spent(monkeypatch, *, by):
-    client = GitHub('token')
-    client.opener = Opener()
+    transport = GitHub('token')
+    transport.opener = Opener()
     if by == 'deadline':
-        client.deadline = github_http.time.monotonic() - 1
+        transport.deadline = github_http.time.monotonic() - 1
     else:
-        client.calls = github_http.API_CALL_BUDGET
-    return client
+        transport.calls = github_http.API_CALL_BUDGET
+    return transport
 
 
 @pytest.mark.parametrize('by', ['deadline', 'calls'])
 def test_spent_budget_refuses_ordinary_calls(monkeypatch, by):
-    client = spent(monkeypatch, by=by)
+    transport = spent(monkeypatch, by=by)
     for method, url in (('GET', 'https://api.github.com/repos/owner/repo'),
                         ('DELETE', 'https://api.github.com/repos/owner/repo/git/refs/heads/x'),
                         ('POST', 'https://api.github.com/repos/owner/repo/issues')):
         with pytest.raises(Denied, match='^API_BUDGET$'):
-            client.raw(url, method, {} if method == 'POST' else None)
-    assert client.opener.calls == []
+            transport.raw(url, method, {} if method == 'POST' else None)
+    assert transport.opener.calls == []
 
 
 @pytest.mark.parametrize('by', ['deadline', 'calls'])
 def test_one_result_publication_survives_a_spent_budget(monkeypatch, by):
-    client = spent(monkeypatch, by=by)
-    client.raw(CHECK_RUNS, 'POST', {})
-    assert client.opener.calls == [('POST', CHECK_RUNS, 20)]
+    transport = spent(monkeypatch, by=by)
+    transport.raw(CHECK_RUNS, 'POST', {})
+    assert transport.opener.calls == [('POST', CHECK_RUNS, 20)]
     with pytest.raises(Denied, match='^API_BUDGET$'):
-        client.raw(CHECK_RUNS, 'POST', {})
+        transport.raw(CHECK_RUNS, 'POST', {})
 
 
 @pytest.mark.parametrize('by', ['deadline', 'calls'])
 def test_one_token_revocation_survives_a_spent_budget(monkeypatch, by):
     # 驗證若耗盡 240 秒，撤銷呼叫原本會被拒絕，安裝權杖就活滿一小時。 / When verification used up the 240 seconds
     # the revocation used to be refused, leaving the installation token alive for its full hour.
-    client = spent(monkeypatch, by=by)
-    client.raw(REVOKE, 'DELETE')
-    assert client.opener.calls == [('DELETE', REVOKE, 20)]
+    transport = spent(monkeypatch, by=by)
+    transport.raw(REVOKE, 'DELETE')
+    assert transport.opener.calls == [('DELETE', REVOKE, 20)]
     with pytest.raises(Denied, match='^API_BUDGET$'):
-        client.raw(REVOKE, 'DELETE')
-    assert len(client.opener.calls) == 1
+        transport.raw(REVOKE, 'DELETE')
+    assert len(transport.opener.calls) == 1
 
 
 def test_the_reserved_revocation_is_separate_from_the_reserved_publication(monkeypatch):
-    client = spent(monkeypatch, by='deadline')
-    client.raw(CHECK_RUNS, 'POST', {})
-    client.raw(REVOKE, 'DELETE')
-    assert [call[0] for call in client.opener.calls] == ['POST', 'DELETE']
+    transport = spent(monkeypatch, by='deadline')
+    transport.raw(CHECK_RUNS, 'POST', {})
+    transport.raw(REVOKE, 'DELETE')
+    assert [call[0] for call in transport.opener.calls] == ['POST', 'DELETE']
 
 
 def test_reserved_calls_do_not_consume_the_ordinary_budget():
-    client = GitHub('token')
-    client.opener = Opener()
-    client.raw(CHECK_RUNS, 'POST', {})
-    client.raw(REVOKE, 'DELETE')
-    assert client.calls == 0
-    client.raw('https://api.github.com/repos/owner/repo')
-    assert client.calls == 1
+    transport = GitHub('token')
+    transport.opener = Opener()
+    transport.raw(CHECK_RUNS, 'POST', {})
+    transport.raw(REVOKE, 'DELETE')
+    assert transport.calls == 0
+    transport.raw('https://api.github.com/repos/owner/repo')
+    assert transport.calls == 1
 
 
 @pytest.mark.parametrize('method,url', [
@@ -93,6 +93,6 @@ def test_reserved_calls_do_not_consume_the_ordinary_budget():
     ('DELETE', 'https://api.github.com/installation/token/extra'),
     ('DELETE', 'https://api.github.com/app/installations/1/access_tokens')])
 def test_only_the_exact_revocation_call_is_reserved(method, url):
-    client = spent(None, by='deadline')
+    transport = spent(None, by='deadline')
     with pytest.raises(Denied, match='^API_BUDGET$'):
-        client.raw(url, method, {} if method == 'POST' else None)
+        transport.raw(url, method, {} if method == 'POST' else None)

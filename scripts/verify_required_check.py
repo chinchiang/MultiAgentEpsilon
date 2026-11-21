@@ -27,8 +27,8 @@ if __name__ == "__main__":
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from security_harness.github_readonly import GitHubReader, ReadOnlyGitHub
 from security_harness.github_http import Denied, need
-from security_harness import trust_scope, workflow_contract
-from security_harness.github_trust import GITHUB_ACTIONS_APP_ID, GitHubTrust, trusted_run
+from security_harness import workflow_contract
+from security_harness.github_trust import GITHUB_ACTIONS_APP_ID, GitHubTrust, load_trust_scope, trusted_run
 
 REQUIRED_CHECK = workflow_contract.REQUIRED_CHECK
 ACTIONS_APP_ID = GITHUB_ACTIONS_APP_ID
@@ -83,7 +83,7 @@ def verify(reader, number):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    trusted = trust_scope.load(Path(__file__).resolve().parents[1]).repository
+    trusted = load_trust_scope(Path(__file__).resolve().parents[1]).repository
     parser.add_argument("--repo", default=trusted, help="預設為信任政策中的儲存庫 / defaults to the trust-policy repository")
     parser.add_argument("--pr", type=int, required=True, help="要核對的 PR 編號 / pull request number to verify")
     args = parser.parse_args()

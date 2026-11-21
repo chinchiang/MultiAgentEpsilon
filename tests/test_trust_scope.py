@@ -11,7 +11,8 @@ import pytest
 from scripts import verify_required_check as verifier
 from security_harness import trust_scope, workflow_contract
 from security_harness.github_http import Denied
-from security_harness.github_trust import GitHubTrust, trusted_run
+from security_harness.github_trust import (GitHubTrust, HeadPush, ReviewEvidence, load_trust_policy, load_trust_scope,
+                                           parse_time, ruleset_protections, trusted_run)
 
 ROOT = Path(__file__).resolve().parents[1]
 HEAD = "b" * 40
@@ -61,3 +62,19 @@ def test_base_branch_name_is_defined_only_in_the_workflow_contract():
     holders = sorted(str(p.relative_to(ROOT)) for folder in ('security_harness', 'scripts')
                      for p in (ROOT / folder).rglob('*.py') if literal.search(p.read_text(encoding='utf-8')))
     assert holders == ['security_harness/workflow_contract.py']
+
+
+def test_trust_policy_and_ruleset_seam_centralized():
+    policy = load_trust_policy(ROOT, require_independent_author=True)
+    raw = json.loads((ROOT / 'security/trust-policy.json').read_text())
+    assert policy.scope == load_trust_scope(ROOT)
+    assert policy.baseline_reviewers == raw['baseline_reviewers']
+    push = HeadPush(parse_time('2026-11-08T01:00:00Z'), frozenset({'pusher'}))
+    evidence = ReviewEvidence(
+        [{'id': 9, 'state': 'APPROVED', 'commit_id': HEAD, 'submitted_at': '2026-11-08T01:05:00Z',
+          'user': {'login': 'reviewer'}}],
+        {'reviewer': 'write'}, {'author'}, push)
+    pr = {'draft': False, 'user': {'login': 'author'}, 'head': {'sha': HEAD}}
+    assert evidence.decide(pr, ['reviewer']) == [9]
+    protections, active, _, _ = ruleset_protections({'protected': False}, [])
+    assert not protections['main_protected'] and active == []

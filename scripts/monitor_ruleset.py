@@ -11,8 +11,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 if __name__ == "__main__":
     sys.path.insert(0, str(ROOT))
-from scripts.audit_merge_protection import ruleset_protections
 from security_harness.github_readonly import GitHubReader, ReadOnlyGitHub
+from security_harness.github_trust import load_trust_scope, ruleset_protections
 from security_harness.results import write_json
 
 
@@ -53,7 +53,7 @@ def main(argv=None, reader=None):
                         help='監看證據路徑 / monitor evidence path')
     args = parser.parse_args(argv)
     if reader is None:
-        repository = json.loads((ROOT / 'security/trust-policy.json').read_text())['repository']
+        repository = load_trust_scope(ROOT).repository
         reader = GitHubReader(ReadOnlyGitHub(), repository)
     evidence = monitor(reader)
     write_json(args.output, evidence)

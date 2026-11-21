@@ -8,6 +8,8 @@ import json
 import pytest
 
 from scripts import monitor_ruleset
+from security_harness.github_readonly import GitHubReader
+from tests.fake_github import FakeGitHub
 
 BRANCH = {'protected': True, 'commit': {'sha': 'a' * 40}}
 
@@ -44,25 +46,15 @@ def live_on_20261114():
     return ruleset
 
 
-class Reader:
-    repository = 'owner/repo'
-
-    def __init__(self, rulesets, branch=BRANCH, fail=None):
-        self.rulesets, self.branch, self.fail, self.paths = rulesets, branch, fail, []
-
-    def get(self, path):
-        self.paths.append(path)
-        if self.fail == path:
-            raise RuntimeError('unreadable')
-        if path == 'branches/main':
-            return self.branch
-        return next(r for r in self.rulesets if path == f"rulesets/{r['id']}")
-
-    def items(self, path):
-        self.paths.append(path)
-        if self.fail == path:
-            raise RuntimeError('unreadable')
-        return [{'id': r['id']} for r in self.rulesets]
+def make_reader(rulesets, branch=BRANCH, fail=None):
+    github = FakeGitHub('owner/repo')
+    github.add('branches/main', branch)
+    github.add('rulesets?includes_parents=true', [{'id': r['id']} for r in rulesets])
+    for ruleset in rulesets:
+        github.add(f"rulesets/{ruleset['id']}", ruleset)
+    if fail is not None:
+        github.add(fail, RuntimeError('unreadable'))
+    return GitHubReader(github, 'owner/repo'), github
 
 
 def test_the_template_ruleset_is_ok():
@@ -132,16 +124,20 @@ def test_a_hidden_bypass_list_never_hides_other_drift_or_a_visible_bypass():
 
 
 def test_monitor_reads_only_the_branch_and_the_rulesets(tmp_path, capsys):
-    reader = Reader([template()])
+    reader, github = make_reader([template()])
     assert monitor_ruleset.main(['--output', str(tmp_path / 'out.json')], reader) == 0
-    assert reader.paths == ['branches/main', 'rulesets?includes_parents=true', 'rulesets/24512048']
+    assert [(m, p, q.get('includes_parents')) for m, p, q in github.requests] == [
+        ('GET', '/repos/owner/repo/branches/main', None),
+        ('GET', '/repos/owner/repo/rulesets', 'true'),
+        ('GET', '/repos/owner/repo/rulesets/24512048', None)]
     written = json.loads((tmp_path / 'out.json').read_text())
     assert written == json.loads(capsys.readouterr().out)
     assert (written['decision'], written['repository'], written['main_sha']) == ('OK', 'owner/repo', 'a' * 40)
 
 
 def test_drift_exits_nonzero_and_names_the_protection(tmp_path, capsys):
-    assert monitor_ruleset.main(['--output', str(tmp_path / 'out.json')], Reader([live_on_20261114()])) == 1
+    reader, _ = make_reader([live_on_20261114()])
+    assert monitor_ruleset.main(['--output', str(tmp_path / 'out.json')], reader) == 1
     assert json.loads((tmp_path / 'out.json').read_text())['failed'] == ['merge_commit_only']
     assert '::warning::' not in capsys.readouterr().out
 
@@ -149,13 +145,15 @@ def test_drift_exits_nonzero_and_names_the_protection(tmp_path, capsys):
 def test_unknown_bypass_exits_zero_with_a_warning(tmp_path, capsys):
     hidden = template()
     del hidden['bypass_actors']
-    assert monitor_ruleset.main(['--output', str(tmp_path / 'out.json')], Reader([hidden])) == 0
+    reader, _ = make_reader([hidden])
+    assert monitor_ruleset.main(['--output', str(tmp_path / 'out.json')], reader) == 0
     assert '::warning::no_bypass is unknown' in capsys.readouterr().out
 
 
 @pytest.mark.parametrize('path', ['branches/main', 'rulesets?includes_parents=true', 'rulesets/24512048'])
 def test_an_unreadable_branch_or_ruleset_is_an_error_not_a_pass(tmp_path, path):
-    assert monitor_ruleset.main(['--output', str(tmp_path / 'out.json')], Reader([template()], fail=path)) == 1
+    reader, _ = make_reader([template()], fail=path)
+    assert monitor_ruleset.main(['--output', str(tmp_path / 'out.json')], reader) == 1
     written = json.loads((tmp_path / 'out.json').read_text())
     assert written == {'decision': 'ERROR', 'failed': [], 'unknown': [], 'errors': ['RuntimeError']}
 
