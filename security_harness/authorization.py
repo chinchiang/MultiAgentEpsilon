@@ -9,6 +9,9 @@ import re
 import secrets
 import time
 
+from .fixture_database import (FixtureDatabase, TABLES as TABLES, connect as default_connect,
+                               restore as restore, seeded_items, snapshot as snapshot)
+
 # 最後一個案例後的靜置時間，用來攔截延遲寫入。 / Quiet period after the last case, so delayed writes are observed.
 SETTLE_SECONDS = 1.0
 DRIFT_CASE = "no delayed or out-of-band state changes"
@@ -17,13 +20,6 @@ DRIFT_CASE = "no delayed or out-of-band state changes"
 RESPONSE_HEADERS = {b"date", b"server", b"content-type"}
 DATE_HEADER = re.compile(rb"(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun), \d{2} "
                          rb"(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec) \d{4} \d{2}:\d{2}:\d{2} GMT")
-
-
-TABLES = {
-    "users": ("id", "tenant", "role", "salt", "password_hash"),
-    "items": ("id", "tenant", "owner", "value"),
-    "sessions": ("token_hash", "user_id", "expires_at"),
-}
 
 
 def response_body(response):
@@ -73,49 +69,29 @@ Recursive JSON equality that also compares types, so 1, 1.0 and True differ."""
     return actual == expected
 
 
-def snapshot(dsn, schema, connect):
-    with connect(dsn, schema) as conn:
-        conn.execute("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ")
-        return {table: conn.execute(f"SELECT * FROM {table} ORDER BY {columns[0]}").fetchall()
-                for table, columns in TABLES.items()}
-
-
-def restore(dsn, schema, connect, state):
-    """案例失敗後只還原本次合成 schema，避免連鎖失敗。
-
-Restore only this run's synthetic schema after a failed case, avoiding cascades."""
-    with connect(dsn, schema) as conn:
-        for table in reversed(TABLES):
-            conn.execute(f"DELETE FROM {table}")
-        for table, columns in TABLES.items():
-            with conn.cursor() as cursor:
-                cursor.executemany(f"INSERT INTO {table} ({','.join(columns)}) VALUES "
-                                   f"({','.join(['%s'] * len(columns))})",
-                                   [tuple(row[c] for c in columns) for row in state[table]])
-
-
-def evaluate(client, dsn, schema, passwords, connect, settle=SETTLE_SECONDS, stop=None):
+def evaluate(client, dsn, schema=None, passwords=None, connect=default_connect, settle=SETTLE_SECONDS, stop=None):
     """stop 在靜置後停止候選（含它在資料庫端的連線），再做最終快照；之後候選不可能再寫入。stop 回傳真值時，
     代表停止當下仍有工作在進行，計為延遲副作用。
 
 When given, stop() halts the candidate (its database sessions included) after the settle period and before the
 final snapshot, so no candidate write can arrive after the last comparison. A true result means work was still in
 flight when it was stopped and counts as a delayed side effect."""
+    db = dsn if isinstance(dsn, FixtureDatabase) else FixtureDatabase(dsn, schema, passwords, connect)
+    schema, passwords = db.schema, db.passwords
     cases = []
-    initial = snapshot(dsn, schema, connect)
-    seeded_items = [{"id": i, "tenant": tenant, "owner": name, "value": name + "-private"}
-                    for i, tenant, name in ((1, "t1", "alice"), (2, "t1", "bob"), (3, "t2", "carol"))]
-    if initial["items"] != seeded_items or initial["sessions"]:
+    initial = db.snapshot()
+    initial_items = seeded_items()
+    if initial["items"] != initial_items or initial["sessions"]:
         raise ValueError("candidate modified seed before evaluation")
     # oracle 自行維護預期狀態；案例之間的任何變動都是延遲或帶外副作用。 / The oracle owns the expected state;
     # any change between cases is a delayed or out-of-band side effect.
     model = {"state": initial, "drift": False}
 
     def observe():
-        current = snapshot(dsn, schema, connect)
+        current = db.snapshot()
         if current != model["state"]:
             model["drift"] = True
-            restore(dsn, schema, connect, model["state"])
+            db.restore(model["state"])
         return deepcopy(model["state"])
 
     def check(name, method, path, status, body, *, expected=None, allow=None, **kwargs):
@@ -126,14 +102,14 @@ flight when it was stopped and counts as a delayed side effect."""
             body_matches = same(actual_body, body)
         except ValueError:
             body_matches = False
-        after = snapshot(dsn, schema, connect)
+        after = db.snapshot()
         target = expected or before
         passed = response.status_code == status and body_matches and headers_match(response, allow) and after == target
         cases.append({"case": name, "passed": passed})
         if passed:
             model["state"] = target
         else:
-            restore(dsn, schema, connect, before)
+            db.restore(before)
 
     def expect(change):
         """以 oracle 模型為基礎產生預期狀態，不吸收候選造成的漂移。 / Build expectations from the oracle model, never from candidate drift."""
@@ -156,7 +132,7 @@ flight when it was stopped and counts as a delayed side effect."""
         if (set(body) != {"access_token"} or not isinstance(token, str) or not 1 <= len(token) <= 256
                 or not headers_match(response)):
             raise ValueError("invalid login response")
-        after = snapshot(dsn, schema, connect)
+        after = db.snapshot()
         token_hash = hashlib.sha256(token.encode()).hexdigest()
         new = [row for row in after["sessions"] if row not in before["sessions"]]
         expected = deepcopy(before)
@@ -175,8 +151,8 @@ flight when it was stopped and counts as a delayed side effect."""
     # part of the contract too: it reports readiness and nothing else.
     check("health exposes only readiness", "get", "/health", 200,
           {"ready": True, "synthetic_fixture": True, "fixture_id": schema})
-    check("owner reads own data", "get", "/items/1", 200, seeded_items[0], headers=headers["alice"])
-    updated = {**seeded_items[0], "value": "owner-updated"}
+    check("owner reads own data", "get", "/items/1", 200, initial_items[0], headers=headers["alice"])
+    updated = {**initial_items[0], "value": "owner-updated"}
     expected = expect(lambda state: state["items"].__setitem__(0, updated))
     check("owner updates own data", "patch", "/items/1", 200, updated, expected=expected,
           headers=headers["alice"], json={"value": "owner-updated"})
@@ -188,9 +164,9 @@ flight when it was stopped and counts as a delayed side effect."""
     check("same-tenant admin delegation allowed", "get", "/items/1", 200, updated, headers=headers["admin"])
     check("admin cross-tenant denied", "get", "/items/3", 404, {"detail": "item not found"}, headers=headers["admin"])
     check("member export denied", "get", "/admin/export", 403, {"detail": "admin required"}, headers=headers["alice"])
-    check("admin export tenant-scoped", "get", "/admin/export", 200, [updated, seeded_items[1]], headers=headers["admin"])
+    check("admin export tenant-scoped", "get", "/admin/export", 200, [updated, initial_items[1]], headers=headers["admin"])
     # 管理員委派也是寫入權限：同租戶須成功，跨租戶須阻擋。 / Admin delegation is a write privilege too: it must work in-tenant and stop at the tenant boundary.
-    admin_updated = {**seeded_items[1], "value": "admin-updated"}
+    admin_updated = {**initial_items[1], "value": "admin-updated"}
     expected = expect(lambda state: state["items"].__setitem__(1, admin_updated))
     check("same-tenant admin write allowed", "patch", "/items/2", 200, admin_updated, expected=expected,
           headers=headers["admin"], json={"value": "admin-updated"})
@@ -209,7 +185,7 @@ flight when it was stopped and counts as a delayed side effect."""
     alice_hash = hashlib.sha256(headers["alice"]["Authorization"][7:].encode()).hexdigest()
     expected["sessions"] = [s for s in before["sessions"] if s["token_hash"] != alice_hash]
     response = client.post("/logout", headers=headers["alice"])
-    after_logout = snapshot(dsn, schema, connect)
+    after_logout = db.snapshot()
     denied = client.get("/items/1", headers=headers["alice"])
     try:
         denied_matches = same(response_body(denied), {"detail": "authentication required"})
@@ -218,11 +194,11 @@ flight when it was stopped and counts as a delayed side effect."""
     logged_out = (response.status_code == 204 and not response.content and headers_match(response)
                   and after_logout == expected and denied.status_code == 401 and denied_matches
                   and headers_match(denied)
-                  and snapshot(dsn, schema, connect) == expected)
+                  and db.snapshot() == expected)
     cases.append({"case": "logout revokes session", "passed": logged_out})
     model["state"] = expected
     if not logged_out:
-        restore(dsn, schema, connect, expected)
+        db.restore(expected)
     denied_body = {"detail": "authentication required"}
     # 撤銷後的權杖對每個需要身分的端點都必須失效。 / A revoked token must fail on every authenticated endpoint.
     check("logged-out session write denied", "patch", "/items/1", 401, denied_body,
@@ -234,8 +210,7 @@ flight when it was stopped and counts as a delayed side effect."""
     expired_row = {"token_hash": hashlib.sha256(expired.encode()).hexdigest(), "user_id": "bob",
                    "expires_at": datetime.now(timezone.utc).replace(microsecond=0) - timedelta(minutes=1)}
     observe()
-    with connect(dsn, schema) as conn:
-        conn.execute("INSERT INTO sessions VALUES (%s,%s,%s)", tuple(expired_row.values()))
+    db.insert_session(expired_row)
     model["state"] = expect(lambda state: state.__setitem__(
         "sessions", sorted(state["sessions"] + [expired_row], key=lambda row: row["token_hash"])))
     expired_headers = {"Authorization": "Bearer " + expired}
@@ -316,12 +291,12 @@ Development only: the same oracle over real loopback HTTP; trusted CI uses isola
     import threading
     import httpx
     import uvicorn
-    from fixture_app.app import create_app, connect, seed, cleanup
-    schema, passwords = seed(dsn)
+    from fixture_app.app import create_app, connect
+    db = FixtureDatabase.create(dsn, connect=connect)
     listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     try:
         listener.bind(("127.0.0.1", 0))
-        server = uvicorn.Server(uvicorn.Config(create_app(dsn, schema, variant=variant), log_level="error",
+        server = uvicorn.Server(uvicorn.Config(create_app(dsn, db.schema, variant=variant), log_level="error",
                                                access_log=False, lifespan="off"))
         thread = threading.Thread(target=server.run, kwargs={"sockets": [listener]}, daemon=True)
         thread.start()
@@ -333,10 +308,10 @@ Development only: the same oracle over real loopback HTTP; trusted CI uses isola
                 time.sleep(0.02)
             base = "http://127.0.0.1:%d" % listener.getsockname()[1]
             with httpx.Client(base_url=base, timeout=10, trust_env=False, follow_redirects=False) as client:
-                return evaluate(client, dsn, schema, passwords, connect)
+                return evaluate(client, db)
         finally:
             server.should_exit = True
             thread.join(timeout=10)
     finally:
         listener.close()
-        cleanup(dsn, schema)
+        db.cleanup()

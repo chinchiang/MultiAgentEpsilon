@@ -5,7 +5,10 @@ import json
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
-from .results import EVIDENCE_VERSION, SUBJECT_FORMAT, result, write_json, write_text_atomic
+from .results import EVIDENCE_VERSION, SUBJECT_FORMAT, read_regular, result, write_json, write_text_atomic
+
+# security 證據的大小上限；正常報告遠小於此。 / Size limit for security evidence; a normal report is far smaller.
+REPORT_LIMIT = 8 * 1024 * 1024
 
 
 class AuditRun:
@@ -20,14 +23,22 @@ class AuditRun:
         self.save()
 
     @classmethod
+    def from_evidence(cls, output: Path, data: dict):
+        """以既有輸出目錄與證據資料建立實例，供接續執行與回收收尾共用。 / Build an instance from an existing output
+        directory and evidence dictionary, shared by worker resumption and recovery closing."""
+        audit = cls.__new__(cls)
+        audit.output = Path(output)
+        audit.data = data
+        return audit
+
+    @classmethod
     def resume(cls, root: Path, run_id: str):
         """接續 supervisor 已建立的執行，不重新產生 run ID。 / Continue a run the supervisor created, keeping its run ID."""
-        audit = cls.__new__(cls)
-        audit.output = Path(root) / "artifacts" / run_id
-        audit.data = json.loads((audit.output / "report.json").read_text())
-        if audit.data.get("run_id") != run_id:
+        output = Path(root) / "artifacts" / run_id
+        data = json.loads(read_regular(output / "report.json", REPORT_LIMIT))
+        if not isinstance(data, dict) or data.get("run_id") != run_id:
             raise ValueError("resumed run identity mismatch")
-        return audit
+        return cls.from_evidence(output, data)
 
     def save(self):
         write_json(self.output / "report.json", self.data)
@@ -48,17 +59,25 @@ class AuditRun:
         self.data.update(execution="ERROR", decision="BLOCK", reasons=["run failed; see redacted errors"])
         self.save()
 
-    def finish(self, required=(), *, update_pointer=True):
+    def finish(self, required=(), *, update_pointer=True, defer_final=False):
+        if defer_final:
+            self.data["pending_decision"] = self.data["decision"]
+            self.data["pending_execution"] = self.data["execution"]
+            self.data.update(decision="BLOCK", execution="AWAITING_CLEANUP")
         seen = {r["gate"] for r in self.data["records"]}
         for gate, kind in required:
             if gate not in seen:
                 self.add(gate, "NOT_RUN", kind, 0, 0, "run interrupted before gate completion")
                 # 缺少必要 gate 時不可保留先前的 ALLOW。 / A missing required gate can never keep an earlier ALLOW.
                 self.data.update(decision="BLOCK", reasons=[*self.data.get("reasons", []), f"{gate}: not run"])
+                if defer_final:
+                    self.data["pending_decision"] = "BLOCK"
         if self.data["execution"] == "RUNNING":
             self.data["execution"] = "COMPLETED"
         self.save()
         if update_pointer:
             pointer = "latest.txt" if self.data["operation"] == "security" else self.data["operation"] + "-latest.txt"
             write_text_atomic(self.output.parent / pointer, self.data["run_id"] + "\n")
+        if defer_final:
+            return 0 if self.data.get("pending_decision") == "ALLOW" else 1
         return 0 if self.data["decision"] == "ALLOW" else 1

@@ -66,3 +66,39 @@ def test_oracle_and_candidate_seed_the_same_synthetic_data():
     # exactly, or the oracle and the application would see different data.
     names = ('seed', 'password_hash')
     assert functions('security_harness/fixture_database.py', *names) == functions('fixture_app/app.py', *names)
+
+
+class _RecordingConnection:
+    def __init__(self, records):
+        self.records = records
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *args):
+        pass
+
+    def execute(self, query, params=None):
+        self.records.append((query if isinstance(query, str) else query.as_string(None), params))
+
+
+def test_seed_items_constant_matches_the_seed_literal(monkeypatch):
+    # seed 必須與候選應用逐字相同，所以資料寫在函式內；常數供 oracle 使用，兩者不得分歧。 / seed must stay verbatim
+    # identical to the candidate app's, so its data is a literal; the constant serves the oracle and must not diverge.
+    from security_harness import fixture_database as oracle
+    records = []
+    monkeypatch.setattr(oracle, "connect", lambda *args: _RecordingConnection(records))
+    oracle.seed("synthetic")
+    inserted = [params for query, params in records if query.startswith("INSERT INTO items")]
+    assert inserted == list(oracle.SEED_ITEMS)
+
+
+def test_fixture_database_create_uses_the_injected_connection(monkeypatch):
+    from security_harness import fixture_database as oracle
+    default, injected = [], []
+    monkeypatch.setattr(oracle, "connect", lambda *args: _RecordingConnection(default))
+    db = oracle.FixtureDatabase.create("synthetic", connect=lambda *args: _RecordingConnection(injected))
+    assert injected and not default and db.schema.startswith("epsilon_")
+    assert [p for q, p in injected if q.startswith("INSERT INTO items")] == list(oracle.SEED_ITEMS)
+    db = oracle.FixtureDatabase.create("synthetic")  # 未注入時採用模組目前的 connect。 / uses the module's current connect.
+    assert default and db.connect is oracle.connect

@@ -533,3 +533,26 @@ def test_generated_run_identities_remain_valid():
     import uuid
     from security_harness.supervision import valid_run_id
     assert valid_run_id(str(uuid.uuid4())) and valid_run_id(secrets.token_hex(16))
+
+
+def test_audit_resume_refuses_symlink_and_finish_defers_cleanup_handoff(tmp_path, monkeypatch):
+    from security_harness import limits
+    from security_harness.lifecycle import resume_worker, worker_command
+    audit = AuditRun(tmp_path, 'security')
+    run_id = audit.data['run_id']
+    cmd = worker_command(tmp_path, audit)
+    assert cmd[-2] == run_id and len(cmd[-1]) == 64
+    monkeypatch.setattr(limits, 'apply_rlimits', lambda *a: None)
+    resumed = resume_worker(tmp_path, run_id, cmd[-1])
+    assert resumed.data['run_id'] == run_id
+    resumed.data.update(decision='ALLOW', reasons=[])
+    assert resumed.finish(defer_final=True) == 0
+    assert (resumed.data['decision'], resumed.data['execution']) == ('BLOCK', 'AWAITING_CLEANUP')
+    assert (resumed.data['pending_decision'], resumed.data['pending_execution']) == ('ALLOW', 'RUNNING')
+    report = audit.output / 'report.json'
+    target = tmp_path / 'other.json'
+    target.write_bytes(report.read_bytes())
+    report.unlink()
+    report.symlink_to(target)
+    with pytest.raises(OSError):
+        AuditRun.resume(tmp_path, run_id)

@@ -6,8 +6,11 @@ import copy
 import hashlib
 import json
 import os
+import sys
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 from . import supervision
+from .audit import REPORT_LIMIT as REPORT_LIMIT
 from .results import EVIDENCE_VERSION, SUBJECT_FORMAT, decide, read_regular, required_gate_kinds
 from .supervision import PlanMismatch, child_environment, plan_changed, plan_digest
 
@@ -15,10 +18,6 @@ from .supervision import PlanMismatch, child_environment, plan_changed, plan_dig
 ORPHAN_CONTAINER_AGE = timedelta(minutes=10)
 # RoE 允許的最長整體期限。 / The longest total deadline the RoE allows.
 MAX_TOTAL_SECONDS = 600
-
-
-# security 證據的大小上限；正常報告遠小於此。 / Size limit for security evidence; a normal report is far smaller.
-REPORT_LIMIT = 8 * 1024 * 1024
 
 
 def remove_run_containers(run_id):
@@ -64,6 +63,48 @@ def matches_plan(report, digest):
     """worker 讀回的報告是否仍是命令列摘要所指的計畫。 / Whether the report the worker read back is still the plan
     its command-line digest names."""
     return plan_digest(report, SECURITY_IMMUTABLE) == digest
+
+
+def plan_security(root, audit, candidate, variant):
+    """寫入並保存 supervisor 在放行 worker 前決定的安全計畫欄位，回傳驗證後的 RoE。 / Record and persist the
+    security plan fields the supervisor decides before releasing the worker, returning the validated RoE."""
+    from .limits import WORKER_RLIMITS
+    from .results import subject_digest
+    from .scope import validate_roe
+    # 候選內容不在計畫內：supervisor 沒有 rlimit，不可代 worker 走訪不可信目錄樹；worker 計算 subject 摘要並於結尾
+    # 重新比對。 / The candidate's content is not in the plan: the supervisor has no rlimits and must not walk an
+    # untrusted tree for the worker. The worker computes the subject digest and checks it again at the end.
+    root = Path(root)
+    evaluator = subject_digest(root)
+    roe_bytes = (root / 'security/roe.json').read_bytes()
+    roe = validate_roe(json.loads(roe_bytes))
+    policy_bytes = (root / 'security/policy.json').read_bytes()
+    audit.data.update(variant=variant, candidate=str(Path(candidate).resolve()),
+                      roe_sha256=hashlib.sha256(roe_bytes).hexdigest(),
+                      policy_digest=hashlib.sha256(policy_bytes).hexdigest(), evaluator_digest=evaluator,
+                      resource_limits={'total_seconds': roe['max_total_seconds'], **WORKER_RLIMITS})
+    audit.save()
+    return roe
+
+
+def worker_command(root, audit):
+    """建立綁定計畫摘要的 security worker 命令。 / Build the security worker command bound to the plan digest."""
+    return [sys.executable, '-I', str(Path(root) / 'scripts/security_worker.py'), audit.data['run_id'],
+            plan_digest(audit.data, SECURITY_IMMUTABLE)]
+
+
+def resume_worker(root, run_id, digest):
+    """驗證執行清冊、套用 worker 資源限額、讀回報告並核對計畫摘要。 / Validate the run inventory, apply worker
+    resource limits, read back the report and verify the plan digest."""
+    from .audit import AuditRun
+    from .limits import WORKER_RLIMITS, apply_rlimits
+    supervision.run_directory(root, run_id)  # 先驗證，再解析證據路徑。 / validate before resolving evidence paths
+    apply_rlimits(WORKER_RLIMITS)
+    audit = AuditRun.resume(root, run_id)
+    if not matches_plan(audit.data, digest):
+        # 計畫已不可信：不在這份報告上寫任何東西。 / The plan is no longer trusted: write nothing to this report.
+        raise SystemExit(2)
+    return audit
 
 
 # security worker 另需 docker 設定；不需權杖、供應商金鑰或 libpq 設定。 / The security worker also needs the docker
@@ -234,9 +275,7 @@ A security run whose owner died: its containers are removed the same way, its ev
         if evidence is None:
             return None
         from .audit import AuditRun
-        audit = AuditRun.__new__(AuditRun)
-        audit.output = self.report_path().parent
-        audit.data = copy.deepcopy(evidence)
+        audit = AuditRun.from_evidence(self.report_path().parent, copy.deepcopy(evidence))
         closed(audit.data, outcome)
         audit.data.update(execution='CANCELLED', decision='BLOCK', reasons=['orphaned supervisor reaped'])
         block_unless_cleaned(audit.data, outcome)
