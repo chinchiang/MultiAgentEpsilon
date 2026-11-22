@@ -2,8 +2,10 @@ name: Ruleset monitor
 
 on:
   schedule:
-    # 每天比對線上 main 規則集與稽核要求；被改弱時此 workflow 失敗並通知擁有者。 / Compare the live main ruleset with
-    # the audit requirements daily; a weakened ruleset fails this workflow and notifies the owner.
+    # 每天比對線上 main 規則集與稽核要求；被改弱或讀不到時此 workflow 失敗，並由 notify job 開一個 issue。GitHub 的排程
+    # 失敗通知只寄給最後修改這一行的人，不能當成示警。 / Compare the live main ruleset with the audit requirements daily;
+    # a weakened or unreadable ruleset fails this workflow and the notify job opens an issue. GitHub mails a failed
+    # schedule only to whoever last edited this line, so that is not an alert.
     - cron: '47 1 * * *'
   workflow_dispatch:
 
@@ -43,3 +45,37 @@ jobs:
           name: ruleset-monitor-${{ github.run_id }}-${{ github.run_attempt }}
           path: artifacts/ruleset-monitor.json
           retention-days: 30
+
+  notify:
+    # 監看失敗時開一個 issue，讓警報不依賴任何人的通知設定。只有這個 job 能寫 issue；它不 checkout、不跑任何 action，
+    # 只用 runner 內建的 gh。 / On a failed monitor, open an issue so the alarm depends on nobody's notification
+    # settings. Only this job may write issues; it checks nothing out and runs no action, only the runner's own gh.
+    name: ruleset-monitor-alert
+    needs: monitor
+    if: ${{ always() && needs.monitor.result == 'failure' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 3
+    permissions:
+      issues: write
+    steps:
+      - name: Open one alert issue unless one is already open
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          title='Ruleset monitor failed: main protection drift or read error'
+          # 只把 Actions 自己開的 issue 當成既有警報，外人先開同標題 issue 壓不掉示警；已有時不重複開。 / Only an
+          # issue Actions opened counts as an existing alarm, so a same-titled issue from anyone else cannot
+          # suppress it; while one is open, no duplicate is opened.
+          open=$(gh issue list --state open --search "author:app/github-actions in:title \"$title\"" --json title \
+            --jq "map(select(.title == \"$title\")) | length")
+          if [ "$open" -eq 0 ]; then
+            gh issue create --title "$title" --body "The scheduled ruleset monitor failed: the live main ruleset is weaker than the audit requires, or it could not be read.
+
+          Run: $RUN_URL
+
+          The run's evidence artifact lists each protection that does not hold. Close this issue after the ruleset is fixed and a monitor run passes.
+
+          排程的規則集監看失敗：線上 main 規則集弱於稽核要求，或無法讀取。各項未成立的保護列在該次執行的證據檔中。修正規則集且監看通過後，請關閉此 issue。"
+          fi

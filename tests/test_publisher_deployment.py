@@ -171,3 +171,12 @@ def test_publisher_guide_states_the_template_identifiers_and_reviewers():
     reviewers = template["reviewers"]
     assert f"（範本為 {'、'.join(reviewers)}）" in guide
     assert f"baseline_reviewers ({', '.join(reviewers)})" in guide
+
+
+def test_publisher_template_pins_the_same_verifier_as_the_tool_lock():
+    # 驗證器雜湊在發布程式範本與工具鎖定檔各寫一份；只改一處會讓發布程式以 ATTESTATION_VERIFIER_DIGEST 停擺。 / The
+    # verifier hash is written in both the publisher template and the tool lock; changing only one would stop the
+    # publisher with ATTESTATION_VERIFIER_DIGEST.
+    template = json.loads((ROOT / "security/trusted-publisher.example.json").read_text(encoding="utf-8"))
+    lock = json.loads((ROOT / "security/tools.lock.json").read_text(encoding="utf-8"))
+    assert template["attestation_verifier_sha256"] == lock["github_cli"]["binary_sha256"]
