@@ -57,7 +57,7 @@ TARGETS = {
     # the publisher; only tests that never call git are selected, since the worker forbids subprocesses.
     'security_harness/github_trust.py': (
         ('validate_review', 'review_decision', 'approved_review', 'pr_commit_identities', 'validate_run_base',
-         'trusted_run', 'GitHubTrust.head_push', 'GitHubTrust.review_ids', 'GitHubTrust.baseline_approval',
+         'closed_before', 'base_relevant', 'RunBaseEvidence.validate', 'trusted_run', 'GitHubTrust.head_push', 'GitHubTrust.review_ids', 'GitHubTrust.baseline_approval',
          'GitHubTrust.reverify_publication'),
         ('tests/test_github_trust.py', 'tests/test_trusted_publisher.py', 'tests/test_trust_scope.py',
          'tests/test_trusted_changes.py::test_baseline_approval_binds_independent_reviewer_and_current_head',
