@@ -12,27 +12,18 @@ from dataclasses import asdict
 
 from .benchmark import (ORACLE_PATH, CWES, OUTPUT_BUDGETS, PROVIDERS, load_cases, case_digest, review_request,
                         request_digest, validate_review, bounded_text, parse_review)
-from .lifecycle import REPORT_LIMIT, read_inputs
+from .lifecycle import INPUT_NAMES, REPORT_LIMIT, file_digest, read_inputs, snapshot_inputs, validate_reservations
 from ..scope import call_seconds, run_seconds, valid_deadline_policy
 from ..results import read_regular
 from .gateway import digest, ModelError, Limits
 from .transport import strict_json
 
 
-def file_digest(path):
-    return hashlib.sha256(path.read_bytes()).hexdigest()
-
-
 def signature(review):
     return review['verdict'], tuple(sorted((f['cwe'], f['line']) for f in review['findings']))
 
 
-# v3 報告封存的評分輸入。 / The scoring inputs a v3 report archives.
-INPUT_NAMES = ('catalog.json', 'oracle.json', 'model-roe.json')
-
-
 def current_inputs():
-    from .benchmark_runner import snapshot_inputs
     return snapshot_inputs()
 
 
@@ -97,17 +88,7 @@ def validate_collection(report, expected_plan=None, inputs=None):
     if (report['limits'] != expected_limits or
             type(report.get('total_timeout_seconds')) is not int or report['total_timeout_seconds'] != total):
         raise ValueError('review limits mismatch')
-    for call in calls:
-        if (type(call.get('reserved')) is not bool or type(call.get('reserved_output_tokens')) is not int or
-                call['reserved_output_tokens'] != (output_tokens if call['reserved'] else 0) or
-                (not call['reserved'] and (call.get('status') != 'ERROR' or
-                    call.get('code') not in ('ROUTING_DENIED', 'INPUT_LIMIT', 'BUDGET_EXHAUSTED')))):
-            raise ValueError('invalid call reservation')
-    if (type(report.get('reserved_calls')) is not int or
-            type(report.get('reserved_output_tokens')) is not int or
-            report['reserved_calls'] != sum(c['reserved'] for c in calls) or
-            report['reserved_output_tokens'] != sum(c['reserved_output_tokens'] for c in calls)):
-        raise ValueError('reservation accounting mismatch')
+    validate_reservations(report, output_tokens)
     if expected_plan is not None and plan != expected_plan:
         raise ValueError('worker changed the review plan')
     rounds = report.get('rounds', 1)

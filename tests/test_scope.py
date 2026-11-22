@@ -58,11 +58,11 @@ def test_model_roe_must_list_every_live_provider():
 
 def test_live_review_cli_refuses_without_a_valid_model_roe(tmp_path, monkeypatch):
     import scripts.model_review as review
-    import scripts.model_smoke as smoke
-    monkeypatch.setattr(smoke, "ROOT", tmp_path)  # 此處沒有 security/model-roe.json。 / no security/model-roe.json there
+    from security_harness.llm import config
+    monkeypatch.setattr(config, "ROOT", tmp_path)  # 此處沒有 security/model-roe.json。 / no security/model-roe.json there
     monkeypatch.setattr("sys.argv", ["model_review", "--provider", "gemini", "--live", "--case", "B01"])
     created = []
-    monkeypatch.setattr(review, "initial_report", lambda *args: created.append(args))
+    monkeypatch.setattr(review, "plan_review", lambda *args, **kwargs: created.append(args))
     with pytest.raises(SystemExit) as exit_info:
         review.main()
     # 在任何報告、預算預留或供應商呼叫前產生 argparse 錯誤。 / argparse error before any report, budget reservation or provider call exists.

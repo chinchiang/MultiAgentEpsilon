@@ -6,13 +6,13 @@ import fcntl
 import json
 import math
 import os
-import signal
+import sys
 from urllib.parse import urlsplit
 
 import httpx
 
 from ..scope import MODEL_CALL_CEILING
-from ..supervision import child_environment
+from ..supervision import child_environment, gated_command, release_async_group, terminate_async_group
 from .gateway import ModelError
 
 RESPONSE_BYTES = 131072
@@ -226,13 +226,11 @@ Use the configured AWS credential chain. No shell or interactive login.
             os.lseek(fd, 0, os.SEEK_SET)
             fcntl.fcntl(fd, getattr(fcntl, 'F_ADD_SEALS', 1033), 0x000F)
             input_path = f"file:///proc/self/fd/{fd}"
-            command = [self.executable, "bedrock-runtime", "converse", "--region", region,
+            command = gated_command([
+                self.executable, "bedrock-runtime", "converse", "--region", region,
                 "--cli-input-json", input_path, "--output", "json", "--no-cli-pager",
                 "--cli-connect-timeout", str(min(10, self.timeout_seconds)),
-                "--cli-read-timeout", str(self.timeout_seconds)]
-            if self.run_directory is not None:
-                from ..supervision import gated_command, register_group
-                command = gated_command(command)
+                "--cli-read-timeout", str(self.timeout_seconds)], gated=self.run_directory is not None)
             process = await asyncio.create_subprocess_exec(*command,
                 stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE, env=env, start_new_session=True,
@@ -240,11 +238,7 @@ Use the configured AWS credential chain. No shell or interactive login.
         finally:
             os.close(fd)
         try:
-            if self.run_directory is not None:
-                register_group(self.run_directory, process.pid)
-                process.stdin.write(b'G')
-            await process.stdin.drain()
-            process.stdin.close()
+            await release_async_group(self.run_directory, process, gated=self.run_directory is not None)
             async def read_stdout():
                 body = bytearray()
                 while chunk := await process.stdout.read(4096):
@@ -267,8 +261,12 @@ Use the configured AWS credential chain. No shell or interactive login.
                 raise cli_failure(diagnostic)
             return strict_json(body)
         finally:
+            # 清理失敗不得蓋掉原本的例外：閘道會把 TimeoutError 記成逾時。已登記的群組仍由監督程序收尾時終止。 / A cleanup
+            # failure must not replace the original error, because the gateway records TimeoutError as a deadline.
+            # Registered groups are still stopped when the supervisor finalizes.
+            in_flight = sys.exc_info()[0] is not None
             try:
-                os.killpg(process.pid, signal.SIGKILL)
-            except ProcessLookupError:
-                pass
-            await process.wait()
+                await terminate_async_group(process)
+            except Exception as exc:
+                if not in_flight:
+                    raise ModelError('PROVIDER_FAILURE') from exc
