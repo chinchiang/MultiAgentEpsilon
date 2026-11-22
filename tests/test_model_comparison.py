@@ -66,3 +66,45 @@ def test_every_pooled_rate_carries_its_interval(tmp_path):
                                                 'false_negative_rate_valid', 'positive_miss_rate_all'}
         coverage = metrics['intervals_95']['coverage']
         assert coverage['n'] == metrics['planned'] and coverage['low'] <= metrics['coverage'] <= coverage['high']
+
+
+@pytest.mark.parametrize("successes,observations,repeats,expected", [
+    # 單輪：與一般 Wilson 區間相同。 / One round: the plain Wilson interval.
+    (5, 10, 1, {'low': 0.2366, 'high': 0.7634, 'n': 10, 'effective_n': 10.0}),
+    # 同樣的比率重複 4 輪：樣本仍是 10 個案例，區間不變窄。 / The same rate over four rounds: still ten cases, so the
+    # interval is no narrower.
+    (20, 40, 4, {'low': 0.2366, 'high': 0.7634, 'n': 40, 'effective_n': 10.0}),
+    (0, 40, 4, {'low': 0.0, 'high': 0.2775, 'n': 40, 'effective_n': 10.0}),
+    # 部分輪次沒有有效分類時，樣本數可以不是整數。 / With rounds missing a valid classification the size may be fractional.
+    (3, 6, 4, {'low': 0.076, 'high': 0.924, 'n': 6, 'effective_n': 1.5}),
+])
+def test_interval_counts_distinct_cases_not_repeated_rounds(successes, observations, repeats, expected):
+    """重複觀測不是獨立樣本：區間以觀測數除以輪數為樣本數，重複輪次不會讓區間變窄。
+
+    Repeated observations are not independent samples: the interval uses the observations divided by the rounds, so
+    repeating rounds never narrows it."""
+    from security_harness.llm.comparison import case_interval, wilson
+    assert case_interval(successes, observations, repeats) == expected
+    naive = wilson(successes, observations)
+    assert expected['high'] - expected['low'] >= naive['high'] - naive['low']
+    assert case_interval(0, 0, repeats) is None
+
+
+def test_pooled_intervals_of_repeated_cases_use_the_case_count(tmp_path):
+    """同一組案例跨兩份報告各跑一輪：n 是觀測數，區間以案例數計算。
+
+    The same cases run once in each of two reports: n is the observations and the interval counts the cases."""
+    from security_harness.llm.comparison import wilson
+    _, a = collected(tmp_path / 'a', case_ids=['B01', 'B02'])
+    _, b = collected(tmp_path / 'b', case_ids=['B01', 'B02'])
+    result = compare([a, b])
+    assert result['case_rounds'] == {'B01': 2, 'B02': 2}
+    assert 'intervals count distinct cases' in result['limitations']
+    for metrics in result['provider_metrics'].values():
+        coverage = metrics['intervals_95']['coverage']
+        assert (coverage['n'], coverage['effective_n']) == (metrics['planned'], metrics['planned'] / 2) == (4, 2.0)
+        cases = wilson(metrics['classified'] / 2, 2)
+        assert (coverage['low'], coverage['high']) == (cases['low'], cases['high'])
+        observations = wilson(metrics['classified'], 4)
+        assert coverage['high'] - coverage['low'] > observations['high'] - observations['low']
+

@@ -61,7 +61,17 @@ def test_isolated_cli_ignores_candidate_cwd_and_pythonpath(tmp_path, script):
 
 DIGEST_BOUND = ['scripts/__init__.py', 'security_harness/__init__.py', 'security_harness/inputs.py',
                 'security_harness/limits.py', 'security_harness/candidate_git.py', 'security_harness/llm/config.py',
-                'scripts/model_review.py', 'scripts/model_compare.py', 'requirements.lock', 'security/model-roe.json']
+                'scripts/model_review.py', 'scripts/model_compare.py', 'requirements.lock', 'security/model-roe.json',
+                # 模型套件直接或間接匯入的共用模組，含函式內延後匯入的。 / Shared modules the model package imports
+                # directly or transitively, including those imported inside a function.
+                'security_harness/scope.py', 'security_harness/supervision.py', 'security_harness/results.py',
+                'security_harness/dependencies.py', 'security_harness/preflight.py',
+                'security_harness/llm/benchmark_score.py', 'scripts/model_worker.py']
+# 模型評測從不匯入的模組：改動它們不得讓既有報告變成無法比較。 / Modules the model benchmark never imports: changing
+# them must not make existing reports incomparable.
+DIGEST_UNBOUND = ['security_harness/authorization.py', 'security_harness/github_trust.py',
+                  'security_harness/trusted_publisher.py', 'security_harness/isolation.py',
+                  'security_harness/secrets.py', 'security_harness/workflow_contract.py']
 
 
 def digest_tree(tmp_path, monkeypatch):
@@ -134,3 +144,51 @@ def test_every_cli_argument_has_bilingual_help():
                 if not (re.search('[一-鿿]', text) and re.search('[A-Za-z]{3,}', text)):
                     missing.append(f'{path.name}:{node.lineno}')
     assert missing == []
+
+
+@pytest.mark.parametrize('unrelated', DIGEST_UNBOUND)
+def test_model_digest_ignores_harness_modules_the_benchmark_never_imports(tmp_path, monkeypatch, unrelated):
+    """與模型評測無關的 security_harness 模組不在實作摘要內，改動它們不影響跨報告比較。
+
+    Harness modules unrelated to the model benchmark are outside the implementation digest, so changing them leaves
+    reports comparable."""
+    config = digest_tree(tmp_path, monkeypatch)
+    before = config.implementation_digest()
+    target = tmp_path / unrelated
+    target.write_bytes(target.read_bytes() + b'\n# synthetic revision marker\n')
+    assert config.implementation_digest() == before
+
+
+def test_model_digest_follows_a_newly_imported_shared_module(tmp_path, monkeypatch):
+    """摘要範圍由匯入關係決定：模型套件新匯入一個共用模組（即使寫在函式內），該模組就進入摘要。
+
+    The digest scope follows the imports: once the model package imports another shared module, even inside a
+    function, that module is bound."""
+    config = digest_tree(tmp_path, monkeypatch)
+    module = tmp_path / 'security_harness/workflow_contract.py'
+    assert module not in config.implementation_files()
+    gateway = tmp_path / 'security_harness/llm/gateway.py'
+    gateway.write_bytes(gateway.read_bytes() + b'\n\ndef late():\n    from .. import workflow_contract\n'
+                        b'    return workflow_contract\n')
+    assert module in config.implementation_files()
+    before = config.implementation_digest()
+    module.write_bytes(module.read_bytes() + b'\n# synthetic revision marker\n')
+    assert config.implementation_digest() != before
+
+
+def test_model_digest_scope_matches_what_the_benchmark_loads_at_run_time():
+    """靜態匯入範圍不得小於實際載入的模組：在乾淨的直譯器匯入模型入口後，已載入的本專案模組都在摘要範圍內。
+
+    The static scope is never smaller than what really loads: after a clean interpreter imports the model entry
+    points, every loaded project module is inside the digest scope."""
+    code = ("import sys, json\n"
+            "from scripts import model_review, model_compare, model_smoke, model_worker, model_process\n"
+            "from security_harness.llm import config, comparison, benchmark_runner, lifecycle\n"
+            "loaded = {m.__file__ for n, m in sys.modules.items() if n.split('.')[0] in ('scripts', 'security_harness')"
+            " and getattr(m, '__file__', None)}\n"
+            "bound = {str(p) for p in config.implementation_files()}\n"
+            "print(json.dumps(sorted(loaded - bound)))\n")
+    result = subprocess.run([sys.executable, '-c', code], cwd=ROOT, capture_output=True, text=True, timeout=30)
+    assert result.returncode == 0, result.stderr
+    assert json.loads(result.stdout) == []
+
