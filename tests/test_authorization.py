@@ -15,7 +15,7 @@ def test_identical_oracle_rejects_vulnerable_and_accepts_fixed():
     vulnerable = run_authorization(dsn, "vulnerable")
     fixed = run_authorization(dsn, "fixed")
     contract = json.loads((Path(__file__).resolve().parents[1] / "security/policy.json").read_text())["gate_contracts"]["AUTH"]
-    assert len(vulnerable) == len(fixed) == len(contract["case_ids"]) == 50
+    assert len(vulnerable) == len(fixed) == len(contract["case_ids"]) == 54
     failed = {x["case"] for x in vulnerable if not x["passed"]}
     assert failed == set(contract["seeded_defect_case_ids"]) == {
         "bob: unauthorized read denied without data",
@@ -123,3 +123,16 @@ def test_new_contract_cases_fit_the_roe_and_are_not_seeded_defects():
     added = {"health exposes only readiness", "tenant field cannot be reassigned"}
     assert added <= set(contract["case_ids"])
     assert not added & set(contract["seeded_defect_case_ids"])
+
+
+def test_identity_and_tenant_cases_are_in_the_contract_and_pass_on_both_variants():
+    """身分與租戶邊界的四個案例屬於契約，且不是指定缺陷：修正版與缺陷版都須通過。
+
+    The four identity and tenant boundary cases are in the contract and are not seeded defects: both variants pass."""
+    root = Path(__file__).resolve().parents[1]
+    contract = json.loads((root / "security/policy.json").read_text())["gate_contracts"]["AUTH"]
+    added = {"another user's password denied without session", "second-tenant owner reads own data",
+             "role header cannot grant admin", "tenant query cannot widen admin export"}
+    assert added <= set(contract["case_ids"])
+    assert not added & set(contract["seeded_defect_case_ids"])
+    assert len(contract["case_ids"]) == 54

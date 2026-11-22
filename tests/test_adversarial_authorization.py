@@ -151,7 +151,39 @@ MUTATIONS.update({
         '            __import__("threading").Thread(target=later, daemon=True).start()\n\n    return app'),
 })
 
+MUTATIONS.update({
+    # 密碼只要與任一使用者的雜湊相符就放行；隨機密碼仍被拒，現有案例看不到。 / A password matching any user's hash is
+    # accepted; random passwords are still refused, so the existing cases cannot see it.
+    'cross_user_password_accepted': (
+        '            if not user or not hmac.compare_digest(actual, user["password_hash"]):',
+        '            hashes = conn.execute("SELECT salt, password_hash FROM users").fetchall()\n'
+        '            if not user or not any(hmac.compare_digest(password_hash(body.password, row["salt"]), '
+        'row["password_hash"]) for row in hashes):'),
+    # 請求標頭自稱的角色覆寫資料庫中的角色。 / A role claimed in a request header overrides the stored role.
+    'role_header_grants_admin': [(
+        '    def principal(authorization: str | None = Header(default=None)):',
+        '    def principal(authorization: str | None = Header(default=None), x_role: str | None = Header(default=None)):'), (
+        '        if not user:\n            raise HTTPException(401, "authentication required")\n        return user',
+        '        if not user:\n            raise HTTPException(401, "authentication required")\n'
+        '        return {**user, "role": x_role or user["role"]}')],
+    # 匯出端點接受查詢參數指定租戶。 / The export endpoint takes the tenant from a query parameter.
+    'tenant_query_widens_export': [(
+        '    def export(user=Depends(principal)):',
+        '    def export(user=Depends(principal), tenant: str | None = None):'), (
+        '(user["tenant"],)).fetchall()',
+        '(tenant or user["tenant"],)).fetchall()')],
+    # 只服務第一個租戶；第二租戶的擁有者讀不到自己的資料。 / Serves only the first tenant, so a second-tenant owner cannot
+    # read their own data.
+    'first_tenant_only': (
+        '        return row and row["tenant"] == user["tenant"] and (',
+        '        return row and row["tenant"] == user["tenant"] == "t1" and ('),
+})
+
 EXPECTED = {
+    'cross_user_password_accepted': {"another user's password denied without session"},
+    'role_header_grants_admin': {'role header cannot grant admin'},
+    'tenant_query_widens_export': {'tenant query cannot widen admin export'},
+    'first_tenant_only': {'second-tenant owner reads own data'},
     'write_outlives_kill': {'no delayed or out-of-band state changes'},
     'tenant_mass_assignment': {'tenant field cannot be reassigned'},
     'health_leaks_items': {'health exposes only readiness'},
@@ -168,9 +200,14 @@ EXPECTED = {
     'denied_read_header_leak': {'bob: unauthorized read denied without data',
                                 'carol: unauthorized read denied without data', 'admin cross-tenant denied'},
     'admin_cross_tenant_delete': {'admin cross-tenant delete denied without side effect'},
-    'wrong_password_accepted': {'wrong password denied without session'},
+    # 不驗密碼的登入，隨機密碼與別人的密碼都會放行。 / A login that checks no password admits a random one and
+    # someone else's alike.
+    'wrong_password_accepted': {'wrong password denied without session',
+                                "another user's password denied without session"},
     'cross_tenant_404_leak': {'admin cross-tenant denied'},
-    'export_nested_cross_tenant_leak': {'admin export tenant-scoped'},
+    # 兩個匯出案例比對同一份內容，夾帶他租戶資料時都會失敗。 / Both export cases compare the same content, so a
+    # nested cross-tenant leak fails each.
+    'export_nested_cross_tenant_leak': {'admin export tenant-scoped', 'tenant query cannot widen admin export'},
     'admin_cross_tenant_write': {'admin cross-tenant write denied without side effect'},
     'denied_write_changes_other_row': {'bob: unauthorized write denied without side effect',
                                      'carol: unauthorized write denied without side effect',
