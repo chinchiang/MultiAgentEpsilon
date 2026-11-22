@@ -22,6 +22,15 @@ def test_scope_expansion_rejected(field, value):
         validate_roe({**ROE, field: value})
 
 
+
+def test_case_cap_boundary_is_inclusive_at_sixty():
+    # 上限隨授權案例擴充調為 60；剛好 60 接受，61 拒絕。 / The cap rose to 60 with the authorization cases: exactly
+    # 60 is accepted and 61 refused.
+    assert validate_roe({**ROE, "max_cases": 60})["max_cases"] == 60
+    assert validate_roe({**ROE, "max_cases": 1})["max_cases"] == 1
+    with pytest.raises(ValueError, match="^RoE\\ exceeds\\ the\\ synthetic\\ loopback\\ pilot's\\ supported\\ scope$"):
+        validate_roe({**ROE, "max_cases": 61})
+
 MODEL_ROE = json.loads((Path(__file__).resolve().parents[1] / "security/model-roe.json").read_text())
 
 
