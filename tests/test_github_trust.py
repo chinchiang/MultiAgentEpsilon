@@ -205,3 +205,20 @@ def test_base_branch_outside_the_branch_name_pattern_is_never_put_in_a_path():
     with pytest.raises(Denied, match='^BASE_BRANCH$'):
         GitHubTrust(GitHubReader(github, 'owner/repo')).review_ids(5, pr, ['reviewer'], set(), 'main?x=1')
     assert not any('/rules/' in path for _, path, _ in github.requests)
+
+
+def test_publication_reverification_refuses_reviews_that_changed_since_collection():
+    # 蒐集證據後、發布綠燈前，核准可能被換成另一筆同樣有效的審查；重查必須以精確拒絕碼擋下。 / Between collecting
+    # evidence and publishing green, the approval may be replaced by another equally valid review; the recheck
+    # must refuse it with its exact code.
+    from security_harness.github_trust import GitHubTrust
+    trust = GitHubTrust(reader=None)
+    seen = []
+    trust.run_base = lambda pr, base: type('Base', (), {'validate': lambda self, run: seen.append(('base', base, run))})()
+    trust.review_ids = lambda number, pr, reviewers, excluded, base: seen.append((number, reviewers, excluded, base)) or [12]
+    proof = {'excluded_identities': ['author'], 'review_ids': [11]}
+    with pytest.raises(Denied, match='^REVIEW_CHANGED$'):
+        trust.reverify_publication(5, {'number': 5}, {'id': 100}, ['reviewer'], proof, 'main')
+    assert seen == [('base', 'main', {'id': 100}), (5, ['reviewer'], {'author'}, 'main')]
+    assert trust.reverify_publication(5, {'number': 5}, {'id': 100}, ['reviewer'],
+                                      {'excluded_identities': ['author'], 'review_ids': [12]}, 'main') is None

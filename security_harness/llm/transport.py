@@ -6,13 +6,12 @@ import fcntl
 import json
 import math
 import os
-import signal
 from urllib.parse import urlsplit
 
 import httpx
 
 from ..scope import MODEL_CALL_CEILING
-from ..supervision import child_environment
+from ..supervision import child_environment, gated_command, release_async_group, terminate_async_group
 from .gateway import ModelError
 
 RESPONSE_BYTES = 131072
@@ -230,9 +229,10 @@ Use the configured AWS credential chain. No shell or interactive login.
                 "--cli-input-json", input_path, "--output", "json", "--no-cli-pager",
                 "--cli-connect-timeout", str(min(10, self.timeout_seconds)),
                 "--cli-read-timeout", str(self.timeout_seconds)]
-            if self.run_directory is not None:
-                from ..supervision import gated_command, register_group
-                command = gated_command(command)
+            # 有執行清冊才加閘門；放行與收尾都交給 supervision 的共用協定。 / Gate only with a run inventory; release and
+            # teardown both go through supervision's shared protocol.
+            gated = self.run_directory is not None
+            command = gated_command(command, gated=gated)
             process = await asyncio.create_subprocess_exec(*command,
                 stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE, env=env, start_new_session=True,
@@ -240,11 +240,7 @@ Use the configured AWS credential chain. No shell or interactive login.
         finally:
             os.close(fd)
         try:
-            if self.run_directory is not None:
-                register_group(self.run_directory, process.pid)
-                process.stdin.write(b'G')
-            await process.stdin.drain()
-            process.stdin.close()
+            await release_async_group(self.run_directory, process, gated=gated)
             async def read_stdout():
                 body = bytearray()
                 while chunk := await process.stdout.read(4096):
@@ -267,8 +263,4 @@ Use the configured AWS credential chain. No shell or interactive login.
                 raise cli_failure(diagnostic)
             return strict_json(body)
         finally:
-            try:
-                os.killpg(process.pid, signal.SIGKILL)
-            except ProcessLookupError:
-                pass
-            await process.wait()
+            await terminate_async_group(process)

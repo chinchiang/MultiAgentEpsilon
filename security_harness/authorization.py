@@ -9,8 +9,7 @@ import re
 import secrets
 import time
 
-from .fixture_database import (FixtureDatabase, TABLES as TABLES, connect as default_connect,
-                               restore as restore, seeded_items, snapshot as snapshot)
+from .fixture_database import FixtureDatabase, connect as default_connect, seeded_items
 
 # 最後一個案例後的靜置時間，用來攔截延遲寫入。 / Quiet period after the last case, so delayed writes are observed.
 SETTLE_SECONDS = 1.0

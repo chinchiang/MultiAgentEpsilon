@@ -41,9 +41,12 @@ TARGETS = {
          'tests/test_model_deadlines.py::test_deadline_policy_boundaries_are_inclusive',
          'tests/test_model_hardening.py::test_model_roe_boundaries_are_inclusive',
          'tests/test_model_hardening.py::test_remote_host_allowlist_size_boundary')),
+    # 子程序閘門協定：先登記程序群組再放行；以假程序測試，worker 禁止真實子程序。 / The subprocess gate protocol:
+    # register the process group, then release it. Tested with fake processes, since the worker forbids real ones.
     'security_harness/supervision.py': (
-        ('child_environment',),
-        ('tests/test_model_lifecycle.py::test_model_worker_receives_only_the_selected_providers_settings',
+        ('child_environment', 'gated_command', 'register_group', 'release_gated_group', 'run_gated_subprocess'),
+        ('tests/test_gate_protocol.py',
+         'tests/test_model_lifecycle.py::test_model_worker_receives_only_the_selected_providers_settings',
          'tests/test_model_hardening.py::test_aws_cli_keeps_its_credential_chain_and_forced_settings_but_no_other_secret')),
     'scripts/run_security.py': (
         ('planned_configuration',),
@@ -54,7 +57,8 @@ TARGETS = {
     # the publisher; only tests that never call git are selected, since the worker forbids subprocesses.
     'security_harness/github_trust.py': (
         ('validate_review', 'review_decision', 'approved_review', 'pr_commit_identities', 'validate_run_base',
-         'trusted_run', 'GitHubTrust.head_push', 'GitHubTrust.review_ids', 'GitHubTrust.baseline_approval'),
+         'trusted_run', 'GitHubTrust.head_push', 'GitHubTrust.review_ids', 'GitHubTrust.baseline_approval',
+         'GitHubTrust.reverify_publication'),
         ('tests/test_github_trust.py', 'tests/test_trusted_publisher.py', 'tests/test_trust_scope.py',
          'tests/test_trusted_changes.py::test_baseline_approval_binds_independent_reviewer_and_current_head',
          'tests/test_trusted_changes.py::test_listed_reviewer_without_write_access_cannot_approve_baseline',
@@ -93,7 +97,17 @@ TARGETS = {
     # self-check and the publisher.
     'security_harness/guard_evidence.py': (('build', 'validate'), ('tests/test_guard_evidence.py',)),
     # guard、verifier 與發布程式共用的信任範圍。 / The trust scope shared by the guard, verifier and publisher.
-    'security_harness/trust_scope.py': (('load',), ('tests/test_trust_scope.py',)),
+    'security_harness/trust_scope.py': (('load', 'load_policy'), ('tests/test_trust_scope.py',)),
+    # supervisor 把 worker 報告關成發布用證據的條件，以及 worker 接續執行前的計畫核對。 / The conditions under which
+    # the supervisor closes a worker's report into published evidence, and the worker's plan check before resuming.
+    'security_harness/lifecycle.py': (('resume_worker', 'SecurityRun.close'), ('tests/test_security_close.py',)),
+    # 延後收尾與缺少必要 gate 時的待定判定。 / The deferred finish and the pending decision when a required gate is missing.
+    'security_harness/audit.py': (('AuditRun.finish',), ('tests/test_security_close.py',)),
+    # 可信端種子與 oracle 快照所用的資料庫連線必須是注入的那一個。 / The trusted seed and oracle snapshots must use
+    # the injected database connection.
+    'security_harness/fixture_database.py': (
+        ('FixtureDatabase.create',),
+        ('tests/test_ruleset_template.py::test_fixture_database_create_uses_the_injected_connection',)),
     'scripts/check_publishable_evidence.py': (('check_guard',), ('tests/test_guard_evidence.py',)),
     # 部署 App 前，審查者合併前執行的必要檢查來源核對。 / The required-check source verification reviewers run before
     # merging, until the App is deployed.
@@ -120,7 +134,7 @@ TARGETS = {
 }
 # 突變總數上限；超過代表目標範圍失控，應拆分而非加長期限。 / Cap on the mutant total; exceeding it means the target set
 # grew out of hand and should be split rather than given a longer deadline.
-MAX_MUTANTS = 800
+MAX_MUTANTS = 900
 # 整批突變的牆鐘期限（秒）；CI job 的 timeout-minutes 須另留安裝與上傳的餘裕。 / Wall-clock deadline for the whole
 # campaign in seconds; the CI job's timeout-minutes must leave room for setup and upload on top.
 CAMPAIGN_SECONDS = 1500
