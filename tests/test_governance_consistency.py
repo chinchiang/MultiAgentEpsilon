@@ -71,3 +71,13 @@ def test_readme_states_the_auth_case_count_of_the_policy_contract():
     assert f"AUTH 有 {count} 個必要案例" in readme
     assert f"| AUTH | {count} synthetic authentication/authorization" in readme
     assert set(re.findall(r"exact unique set of (\d+) cases", readme)) == {str(count)}
+
+
+def test_ruleset_monitor_docs_name_the_issue_alert_instead_of_an_owner_notification():
+    """監看文件（中英）寫出實際的示警方式：失敗時開 issue，而不是宣稱 GitHub 會通知擁有者。
+
+    The monitor docs state the real alert in both languages: a failure opens an issue, not an owner notification."""
+    text = (ROOT / "docs/trusted-execution.zh-TW.md").read_text()
+    assert "GitHub 會通知擁有者" not in text and "GitHub notifies the owner" not in text
+    assert "自動開一個 issue" in text and "opens an issue" in text
+    assert "60 天" in text and "60 days" in text
