@@ -185,10 +185,6 @@ class ReviewEvidence:
     commit_identities: set
     push: HeadPush
 
-    def decide(self, pr, reviewers):
-        """依已蒐集的審查證據套用共同審查規則。 / Apply the shared review rule to the collected review evidence."""
-        return review_decision(pr, self.reviews, self.permissions, reviewers, self.commit_identities, self.push)
-
 
 class RunBaseEvidence:
     """單次命令內重用的來源證據，不是跨請求原子快照。 / Source evidence reused within one command, not an atomic snapshot."""

@@ -248,6 +248,7 @@ MultiAgentEpsilon/
 │   ├── test_dependencies.py
 │   ├── test_evidence_readback.py
 │   ├── test_expect_block.py
+│   ├── test_gate_protocol.py
 │   ├── test_github_http.py
 │   ├── test_github_readonly.py
 │   ├── test_github_trust.py
@@ -284,6 +285,7 @@ MultiAgentEpsilon/
 │   ├── test_scanner_download.py
 │   ├── test_scope.py
 │   ├── test_security_boundaries.py
+│   ├── test_security_close.py
 │   ├── test_security_properties.py
 │   ├── test_supervision.py
 │   ├── test_trust_scope.py

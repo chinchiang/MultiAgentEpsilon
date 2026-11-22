@@ -86,7 +86,6 @@ def test_oracle_queries_fail_fast_when_candidate_holds_a_table_lock():
     import time
     import psycopg
     from security_harness import fixture_database
-    from security_harness.authorization import snapshot
     dsn = database_url()
     schema, _ = fixture_database.seed(dsn)
     try:
@@ -94,7 +93,7 @@ def test_oracle_queries_fail_fast_when_candidate_holds_a_table_lock():
             holder.execute("LOCK TABLE items IN ACCESS EXCLUSIVE MODE")
             started = time.monotonic()
             with pytest.raises(psycopg.errors.LockNotAvailable, match='lock timeout'):
-                snapshot(dsn, schema, fixture_database.connect)
+                fixture_database.snapshot(dsn, schema, fixture_database.connect)
             assert time.monotonic() - started < 10
     finally:
         fixture_database.cleanup(dsn, schema)
