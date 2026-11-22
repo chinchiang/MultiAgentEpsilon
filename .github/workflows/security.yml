@@ -29,7 +29,9 @@ concurrency:
   # PR 以編號分組；其他事件以 commit 分組，連續合併到 main 時各 commit 的證據都會跑完，不互相取消或排擠。 /
   # A PR groups by number; every other event groups by commit, so back-to-back merges to main each finish their
   # evidence instead of cancelling or displacing one another.
-  group: trusted-security-${{ github.event_name }}-${{ github.event.pull_request.number || github.sha }}
+  # 手動評估以 run 分組：同一個 evaluator commit 上評估不同候選時，排隊中的那一次不會被下一次擠掉。 / A manual
+  # evaluation groups by run: evaluating several candidates on one evaluator commit no longer displaces the queued run.
+  group: trusted-security-${{ github.event_name }}-${{ github.event.pull_request.number || (github.event_name == 'workflow_dispatch' && github.run_id) || github.sha }}
   # 只有新推送取消 PR 進行中的評估；改標題或描述（edited）不取消，否則每次編輯都重跑 20 分鐘。 / Only a new push
   # cancels a PR's in-progress evaluation; an edit of the title or body does not, or every edit restarts a 20-minute run.
   cancel-in-progress: ${{ github.event_name == 'pull_request_target' && github.event.action != 'edited' }}
@@ -150,7 +152,7 @@ jobs:
           path: |
             trusted/artifacts/
             audit/
-          retention-days: 7
+          retention-days: 30
           if-no-files-found: error
 
   mutation-tests:
@@ -205,7 +207,7 @@ jobs:
         with:
           name: ${{ github.event_name == 'workflow_dispatch' && 'manual-mutations' || 'trusted-mutations' }}-${{ github.run_id }}-${{ github.run_attempt }}
           path: trusted/artifacts/
-          retention-days: 7
+          retention-days: 30
           if-no-files-found: error
 
   attest-evidence:
