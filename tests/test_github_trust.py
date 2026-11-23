@@ -264,20 +264,63 @@ def test_same_branch_pr_whose_head_moved_can_still_be_the_run_source(twin, histo
 
 
 @pytest.mark.parametrize('created', [RUN_CREATED, None, 'soon'])
-def test_run_without_a_usable_creation_time_excludes_no_same_branch_pr(created):
-    """run 的建立時間讀不到或格式不符時，不能用它排除任何同分支 PR。
+@pytest.mark.parametrize('closed_at', ['2026-11-01T09:59:59Z', '2026-10-20T10:00:00Z', None])
+def test_same_branch_pr_into_another_base_blocks_whenever_it_closed(created, closed_at):
+    """指向其他 base 的同分支 PR 一律拒絕，不看關閉時間：run 的建立時間晚於觸發它的事件，搶在 run 建立前關閉不能證明
+    它不是來源（PR #107 的時間條件可被這樣繞過）。
 
-    A run whose creation time is missing or malformed excludes no same-branch PR."""
+    A same-branch PR into another base always blocks, whatever its close time: a run is created after the event that
+    triggered it, so closing before the run was created proves nothing (this raced the time condition of PR #107)."""
     from security_harness.github_trust import validate_run_base
     run, pr, pulls, histories = run_base_case()
-    twin = moved_twin(base={'ref': 'evil', 'repo': {'id': 10}}, closed_at='2026-11-01T09:59:59Z')
+    twin = moved_twin(base={'ref': 'evil', 'repo': {'id': 10}}, closed_at=closed_at)
+    with pytest.raises(Denied, match='^FOREIGN_BASE_PR$'):
+        validate_run_base({**run, 'created_at': created}, pr, [*pulls, twin], 'main', {**histories, 6: []})
+
+
+@pytest.mark.parametrize('closed_at,read', [
+    # 早 1 秒、早將近 7 天、剛好 7 天：都在延遲上限內，必須讀它的改 base 紀錄。 / One second, almost seven days and
+    # exactly seven days earlier: all within the delay bound, so its retarget history must be read.
+    ('2026-11-01T09:59:59Z', True), ('2026-10-25T10:00:01Z', True), ('2026-10-25T10:00:00Z', True),
+    # 超過 7 天：省略。 / More than seven days: skipped.
+    ('2026-10-25T09:59:59Z', False), ('2026-01-01T00:00:00Z', False),
+    # 沒有關閉時間或格式不符：不能省略。 / No close time or a malformed one: never skipped.
+    (None, True), ('last week', True),
+])
+def test_retarget_history_of_a_moved_same_branch_pr_is_read_within_the_delay_bound(closed_at, read):
+    """base 為 main、head 已移走的同分支 PR：只有早在延遲上限（7 天）之前就關閉才省略它的改 base 紀錄。
+
+    A same-branch PR into main whose head moved: its retarget history is skipped only when it closed earlier than the
+    delay bound (seven days)."""
+    from security_harness.github_trust import SOURCE_DELAY_LIMIT, validate_run_base
+    assert SOURCE_DELAY_LIMIT.total_seconds() == 7 * 24 * 3600
+    run, pr, pulls, histories = run_base_case()
+    twin = moved_twin(closed_at=closed_at)
+    run = {**run, 'created_at': RUN_CREATED}
+    if read:
+        with pytest.raises(Denied, match='^BASE_HISTORY_MISSING$'):
+            validate_run_base(run, pr, [*pulls, twin], 'main', histories)
+        with pytest.raises(Denied, match='^BASE_RETARGETED_UNVERIFIABLE$'):
+            validate_run_base(run, pr, [*pulls, twin], 'main', {**histories, 6: [{'event': 'base_ref_changed'}]})
+        validate_run_base(run, pr, [*pulls, twin], 'main', {**histories, 6: []})
+    else:
+        validate_run_base(run, pr, [*pulls, twin], 'main', histories)
+
+
+@pytest.mark.parametrize('created', [RUN_CREATED, None, 'soon'])
+def test_run_without_a_usable_creation_time_excludes_no_same_branch_pr(created):
+    """run 的建立時間讀不到或格式不符時，不能用它省略任何同分支 PR 的改 base 紀錄。
+
+    A run whose creation time is missing or malformed skips no same-branch PR's retarget history."""
+    from security_harness.github_trust import validate_run_base
+    run, pr, pulls, histories = run_base_case()
+    twin = moved_twin(closed_at='2026-01-01T00:00:00Z')
     run = {**run, 'created_at': created}
     if created == RUN_CREATED:
-        # 確定在 run 建立前關閉：不可能是來源，也不需要它的 timeline。 / Provably closed before the run was created: it
-        # cannot be the source and its timeline is not needed.
+        # 早在延遲上限之前就關閉：不需要它的 timeline。 / Closed earlier than the delay bound: its timeline is not needed.
         validate_run_base(run, pr, [*pulls, twin], 'main', histories)
     else:
-        with pytest.raises(Denied, match='^FOREIGN_BASE_PR$'):
+        with pytest.raises(Denied, match='^BASE_HISTORY_MISSING$'):
             validate_run_base(run, pr, [*pulls, twin], 'main', histories)
 
 
@@ -294,13 +337,14 @@ def test_pr_of_another_branch_or_repository_is_never_a_possible_source(field, va
 
 
 def test_run_base_reads_each_possible_source_timeline_once_and_skips_ruled_out_prs():
-    """timeline 只為可能的來源讀取，同一 PR 在多個 run 之間只讀一次；已排除的 PR 不讀。
+    """timeline 只為必須檢查的 PR 讀取，同一 PR 在多個 run 之間只讀一次；早在延遲上限之前就關閉的 PR 不讀。
 
-    Timelines are read only for possible sources, once per PR across runs; a ruled-out PR is never read."""
+    Timelines are read only for PRs that must be checked, once per PR across runs; a PR that closed earlier than the
+    delay bound is never read."""
     from security_harness.github_trust import GitHubTrust
     github, pr, run = repository()
     live = moved_twin(number=6, closed_at='2026-11-01T10:00:01Z')
-    gone = moved_twin(number=7, base={'ref': 'evil', 'repo': {'id': 10}}, closed_at='2026-11-01T09:59:59Z')
+    gone = moved_twin(number=7, closed_at='2026-10-25T09:59:59Z')
     github.add('pulls?state=all&head=owner:feature', [pr, live, gone])
     github.add('issues/6/timeline', [])
     evidence = GitHubTrust(GitHubReader(github, 'owner/repo')).run_base(pr, 'main')
@@ -308,9 +352,12 @@ def test_run_base_reads_each_possible_source_timeline_once_and_skips_ruled_out_p
     evidence.validate({**run, 'created_at': RUN_CREATED})
     read = [path for _, path, _ in github.requests if path.endswith('/timeline')]
     assert sorted(read) == ['/repos/owner/repo/issues/5/timeline', '/repos/owner/repo/issues/6/timeline']
-    # 較早建立的 run 無法排除 #7；它指向別的 base，所以拒絕。 / An earlier run cannot rule out #7, which targets
-    # another base, so it is refused.
-    github.add('issues/7/timeline', [])
-    with pytest.raises(Denied, match='^FOREIGN_BASE_PR$'):
+    # 較早建立的 run 離 #7 的關閉不到 7 天，必須讀它的 timeline；它曾改 base，所以拒絕。 / An earlier run is within
+    # seven days of #7 closing, so its timeline must be read; it was retargeted, so it is refused.
+    github.add('issues/7/timeline', [{'event': 'base_ref_changed'}])
+    with pytest.raises(Denied, match='^BASE_RETARGETED_UNVERIFIABLE$'):
         evidence.validate({**run, 'created_at': '2026-11-01T09:00:00Z'})
+    read = [path for _, path, _ in github.requests if path.endswith('/timeline')]
+    assert sorted(read) == ['/repos/owner/repo/issues/5/timeline', '/repos/owner/repo/issues/6/timeline',
+                            '/repos/owner/repo/issues/7/timeline']
 

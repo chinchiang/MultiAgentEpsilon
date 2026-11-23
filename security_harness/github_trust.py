@@ -3,7 +3,7 @@
 import re
 import urllib.parse
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from .github_http import Denied, need
 from .trust_scope import (TrustPolicy as TrustPolicy, TrustScope as TrustScope,
@@ -79,26 +79,35 @@ def related_pull_path(prefix, pr):
     return prefix + "/pulls?state=all&head=" + urllib.parse.quote(owner + ":" + pr["head"]["ref"], safe="")
 
 
+# 事件送出到 Actions 建立 run 之間的延遲上限。run 的 created_at 晚於觸發它的 PR 事件（平常幾秒），所以「PR 在 run 建立前
+# 就關閉」不能證明它不是來源；只有早到超過這個上限才省略它的 timeline。這是延遲有上限的假設，不是證明。 / Upper bound
+# on the delay between an event and Actions creating its run. A run's created_at is later than the PR event that
+# triggered it (seconds, normally), so a PR closing before the run was created does not prove it is not the source; its
+# timeline is skipped only when it closed earlier than this bound. This assumes a bounded delay; it is not a proof.
+SOURCE_DELAY_LIMIT = timedelta(days=7)
+
+
+def same_branch(pull, pr):
+    """與此 PR 同一 head 儲存庫與分支。 / The same head repository and branch as this PR."""
+    return head_scope(pull)[1:] == head_scope(pr)[1:]
+
+
 def closed_before(pull, run):
-    """這個 PR 是否確定在 run 建立前就已關閉。只有開啟中的 PR 會觸發 pull_request_target，所以這樣的 PR 不可能是該 run
-    的來源；任一時間讀不到或格式不符都視為「不確定」。 / Whether this PR provably closed before the run was created.
-    Only an open PR triggers pull_request_target, so such a PR cannot be the run's source; a missing or malformed time
-    counts as not proven."""
+    """這個 PR 是否在 run 建立前超過延遲上限就已關閉。任一時間讀不到或格式不符都視為「不是」。 / Whether this PR closed
+    earlier than the delay bound before the run was created. A missing or malformed time counts as no."""
     try:
-        return parse_time(pull["closed_at"]) < parse_time(run["created_at"])
+        return parse_time(run["created_at"]) - parse_time(pull["closed_at"]) > SOURCE_DELAY_LIMIT
     except (KeyError, TypeError, ValueError):
         return False
 
 
 def base_relevant(pull, pr, run):
-    """這個 PR 是否可能是該 run 的來源：與此 PR 同一 head 儲存庫與分支，且 head 相同，或無法證明它在 run 建立前已關閉。
-    只比對目前的 head 不夠：PR 關閉前把分支移到別的 commit，它記錄的 head 就不再是 run 的 commit。 / Whether this PR
-    could be the run's source: the same head repository and branch as this PR, and either the same head or not provably
-    closed before the run was created. Comparing only the current head is not enough: a PR whose branch moved to another
-    commit before it closed no longer records the run's commit as its head."""
-    if head_scope(pull)[1:] != head_scope(pr)[1:]:
-        return False
-    return head_scope(pull) == head_scope(pr) or not closed_before(pull, run)
+    """這個 PR 的改 base 紀錄是否必須讀取：同分支，且 head 相同，或不是早在延遲上限之前就已關閉。只比對目前的 head 不夠：
+    PR 關閉前把分支移到別的 commit，它記錄的 head 就不再是 run 的 commit。 / Whether this PR's retarget history must be
+    read: the same branch, and either the same head or not closed earlier than the delay bound. Comparing only the
+    current head is not enough: a PR whose branch moved to another commit before it closed no longer records the run's
+    commit as its head."""
+    return same_branch(pull, pr) and (head_scope(pull) == head_scope(pr) or not closed_before(pull, run))
 
 
 def validate_run_base(run, pr, pull_requests, base_branch, histories=None):
@@ -109,7 +118,8 @@ Bind a pull_request_target run to this PR's base without trusting run evidence.
     Current PR state cannot prove historical workflow source. Without a signed
     source identity, any base-retargeted PR sharing this exact head/repo/branch is
     refused, including later reruns and retarget-away-and-back. Creation timestamps
-    alone cannot establish which queued event supplied a workflow. A new PR on a
+    alone cannot establish which queued event supplied a workflow, so every
+    same-branch PR must target this base whatever its head or close time. A new PR on a
     new head branch can be evaluated normally. Timelines must be complete API data.
     """
     head = pr["head"]["sha"]
@@ -119,11 +129,15 @@ Bind a pull_request_target run to this PR's base without trusting run evidence.
          and (run.get("head_repository") or {}).get("id") == head_repo, "RUN_HEAD_BRANCH")
     need(isinstance(pull_requests, list) and any(p.get("number") == pr["number"] for p in pull_requests),
          "PR_LISTING_INCOMPLETE")
-    relevant = [p for p in pull_requests if base_relevant(p, pr, run)]
-    need(any(p["number"] == pr["number"] and head_scope(p) == head_scope(pr) for p in relevant),
+    # base 檢查不需要額外讀取，所以對同分支的每個 PR 都做，不看 head 或關閉時間：時間條件可被搶先關閉繞過。 / The base
+    # check costs no extra read, so it covers every same-branch PR whatever its head or close time: a time condition
+    # can be raced by closing first.
+    branch = [p for p in pull_requests if same_branch(p, pr)]
+    need(any(p["number"] == pr["number"] and head_scope(p) == head_scope(pr) for p in branch),
          "PR_LISTING_INCOMPLETE")
     need(all(p["base"]["ref"] == base_branch and p["base"]["repo"]["id"] == pr["base"]["repo"]["id"]
-             for p in relevant), "FOREIGN_BASE_PR")
+             for p in branch), "FOREIGN_BASE_PR")
+    relevant = [p for p in branch if base_relevant(p, pr, run)]
     need(isinstance(histories, dict), "BASE_HISTORY_MISSING")
     for p in relevant:
         events = histories.get(p["number"])
@@ -212,8 +226,9 @@ class RunBaseEvidence:
         self._base_branch, self._history, self._histories = base_branch, history, {}
 
     def validate(self, run):
-        # 哪些 PR 可能是來源取決於 run 的建立時間，所以逐一 run 補讀 timeline，同一 PR 只讀一次。 / Which PRs could be
-        # the source depends on the run's creation time, so timelines are read per run, each PR only once.
+        # 哪些 PR 的改 base 紀錄必須讀取取決於 run 的建立時間，所以逐一 run 補讀 timeline，同一 PR 只讀一次。 / Which
+        # PRs need their retarget history read depends on the run's creation time, so timelines are read per run, each
+        # PR only once.
         for p in self._pulls if isinstance(self._pulls, list) else ():
             if isinstance(p, dict) and p.get("number") not in self._histories and base_relevant(p, self._pr, run):
                 self._histories[p["number"]] = self._history(p["number"])
