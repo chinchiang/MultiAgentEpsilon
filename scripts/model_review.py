@@ -5,30 +5,13 @@ Collect blind synthetic reviews; COMPLETE describes execution, never safety."""
 import argparse
 import json
 import sys
-import uuid
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 if __name__ == "__main__":
     sys.path.insert(0, str(ROOT))
 from security_harness.llm.benchmark import OUTPUT_BUDGETS, PROVIDERS, SUITES, load_cases
-from security_harness.llm.benchmark_runner import initial_report, record, snapshot_inputs
-from security_harness.llm.lifecycle import plan_digest, supervise
-from security_harness.scope import call_seconds
-from scripts.model_smoke import require_model_roe
-
-
-def deadline_warning(report):
-    """付費呼叫前提醒：真實供應商依 RoE 期限政策的逐次期限總和超過整輪上限時，慢回應會留下 INCOMPLETE。
-
-Before paid calls: if the live providers' per-call deadlines under the RoE deadline policy can exceed
-    the run cap, slow replies leave INCOMPLETE."""
-    worst = sum(call_seconds(report['deadline_policy'], p) for p in report['providers'] if not p.startswith('mock-'))
-    total_seconds = report['total_timeout_seconds']
-    if worst <= total_seconds:
-        return None
-    return (f'最壞情況 {worst} 秒超過整輪上限 {total_seconds} 秒；回應較慢時結果會是 INCOMPLETE / '
-            f'worst case {worst}s exceeds the {total_seconds}s run cap; slow replies will leave the run INCOMPLETE')
+from security_harness.llm.lifecycle import plan_review, require_model_roe
 
 
 def main():
@@ -53,21 +36,14 @@ def main():
     if args.live:
         live = sum(not p.startswith('mock-') for p in providers)
         require_model_roe(parser, providers, live * len(cases) * args.rounds)
-    inputs = snapshot_inputs()
     try:
-        report = initial_report(providers, cases, str(uuid.uuid4()), args.output_tokens, args.rounds, inputs)
+        run = plan_review(providers, cases, output_tokens=args.output_tokens, rounds=args.rounds, root=ROOT)
     except ValueError:
         parser.error('use unique providers/cases, at most 16 reviews and at most 8192 reserved output tokens')
-    if args.live:
-        warning = deadline_warning(report)
-        if warning:
-            print(warning, file=sys.stderr)
-    path = ROOT / 'artifacts' / report['run_id'] / 'report.json'
-    record(path, report, inputs)
-    data = supervise(ROOT, report, [sys.executable, '-I', str(ROOT / 'scripts/model_worker.py'),
-                                  str(ROOT), report['run_id'], 'blind-review', plan_digest(report)],
-                     report['total_timeout_seconds'])
-    print(json.dumps({'status': data['status'], 'advisory_only': True, 'evidence': str(path),
+    if args.live and run.deadline_warning:
+        print(run.deadline_warning, file=sys.stderr)
+    data = run.supervise()
+    print(json.dumps({'status': data['status'], 'advisory_only': True, 'evidence': str(run.path),
                       'bias_reduction': 'NOT_ESTABLISHED'}))
     return 0 if data['status'] == 'COMPLETE' else 1
 

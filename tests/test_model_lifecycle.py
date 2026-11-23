@@ -498,3 +498,24 @@ def test_smoke_worker_refuses_to_call_when_the_model_implementation_changed_afte
     asyncio.run(smoke.run_worker(tmp_path, run_id, life.smoke_plan_digest(report)))
     data = json.loads(path.read_text())
     assert data['calls'] == [] and [(c['status'], c['code']) for c in data['checks']] == [('ERROR', 'CONFIGURATION')]
+
+
+def test_deepened_model_run_handle_and_script_import_boundaries(tmp_path):
+    # 深化後的 ModelRun 統一處理 smoke 與盲審的計畫封存、額外輸出副本、同程序 worker、跨模式防護與收尾。 / The deepened
+    # ModelRun handle unifies smoke and blind-review archiving, extra output copies, in-process execution, cross-mode
+    # protection and finalization.
+    import asyncio
+    smoke_run = life.plan_smoke(['mock'], root=tmp_path)
+    smoke_data = smoke_run.collect()
+    assert smoke_data['status'] == 'COMPLETE' and 'canonical_report' not in smoke_data
+    assert (smoke_run.path.parent / 'inputs/model-roe.json').is_file()
+    extra = tmp_path / 'extra.json'
+    extra_run = life.plan_smoke(['mock'], root=tmp_path).record(extra_output=extra)
+    extra_data = extra_run.collect()
+    assert extra_data['canonical_report'] == str(extra_run.path)
+    assert json.loads(extra.read_text(encoding='utf-8'))['status'] == 'COMPLETE'
+    review_run = life.plan_review(['mock-review-a', 'mock-review-b'], ['B01'], root=tmp_path)
+    review_data = review_run.collect()
+    assert review_data['status'] == 'COMPLETE' and review_data['analysis'] is not None
+    assert asyncio.run(life.run_worker(tmp_path, review_run.run_id, review_run.digest, mode='smoke')) == 2
+

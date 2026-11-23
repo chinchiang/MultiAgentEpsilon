@@ -501,6 +501,35 @@ def test_cli_seal_failure_closes_input_without_starting_child(monkeypatch):
     assert set(Path('/proc/self/fd').iterdir()) == before
 
 
+def cleanup_incomplete(monkeypatch):
+    from security_harness import supervision
+
+    def fail(pid):
+        raise TimeoutError('process group cleanup incomplete')
+    monkeypatch.setattr(supervision, 'terminate_group', fail)
+
+
+def test_cli_cleanup_failure_never_masks_the_original_error(tmp_path, monkeypatch):
+    # 清理逾時的 TimeoutError 曾取代原本的 ModelError，閘道便把真正的 RESPONSE_LIMIT 記成逾時。 / A cleanup
+    # TimeoutError used to replace the original ModelError, so the gateway recorded a real RESPONSE_LIMIT as a deadline.
+    cleanup_incomplete(monkeypatch)
+    cli = cli_fixture(tmp_path, "import sys,time\n"
+        f"sys.stdout.write('x' * {RESPONSE_BYTES + 1})\n"
+        "sys.stdout.flush()\n"
+        "time.sleep(60)\n")
+    result, evidence = invoke(BedrockAdapter('synthetic', 'ap-southeast-1', cli))
+    assert result is None and (evidence['status'], evidence['code']) == ('ERROR', 'RESPONSE_LIMIT')
+
+
+def test_cli_cleanup_failure_after_a_valid_reply_is_a_provider_failure_not_a_deadline(tmp_path, monkeypatch):
+    from security_harness import supervision
+    cleanup_incomplete(monkeypatch)
+    monkeypatch.setattr(supervision, 'group_alive', lambda pid: True)  # 首領已回收，但群組仍有成員。 / Leader reaped, group still populated.
+    cli = cli_fixture(tmp_path, f"print({json.dumps(json.dumps(BEDROCK))})\n")
+    result, evidence = invoke(BedrockAdapter('synthetic', 'ap-southeast-1', cli))
+    assert result is None and (evidence['status'], evidence['code']) == ('ERROR', 'PROVIDER_FAILURE')
+
+
 @pytest.mark.parametrize('provider', ['gemini', 'bedrock'])
 def test_review_uses_native_schema_without_weakening_local_evidence_checks(provider):
     import copy

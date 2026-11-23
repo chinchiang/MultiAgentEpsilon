@@ -6,6 +6,7 @@ import fcntl
 import json
 import math
 import os
+import sys
 from urllib.parse import urlsplit
 
 import httpx
@@ -225,14 +226,11 @@ Use the configured AWS credential chain. No shell or interactive login.
             os.lseek(fd, 0, os.SEEK_SET)
             fcntl.fcntl(fd, getattr(fcntl, 'F_ADD_SEALS', 1033), 0x000F)
             input_path = f"file:///proc/self/fd/{fd}"
-            command = [self.executable, "bedrock-runtime", "converse", "--region", region,
+            command = gated_command([
+                self.executable, "bedrock-runtime", "converse", "--region", region,
                 "--cli-input-json", input_path, "--output", "json", "--no-cli-pager",
                 "--cli-connect-timeout", str(min(10, self.timeout_seconds)),
-                "--cli-read-timeout", str(self.timeout_seconds)]
-            # 有執行清冊才加閘門；放行與收尾都交給 supervision 的共用協定。 / Gate only with a run inventory; release and
-            # teardown both go through supervision's shared protocol.
-            gated = self.run_directory is not None
-            command = gated_command(command, gated=gated)
+                "--cli-read-timeout", str(self.timeout_seconds)], gated=self.run_directory is not None)
             process = await asyncio.create_subprocess_exec(*command,
                 stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE, env=env, start_new_session=True,
@@ -240,7 +238,7 @@ Use the configured AWS credential chain. No shell or interactive login.
         finally:
             os.close(fd)
         try:
-            await release_async_group(self.run_directory, process, gated=gated)
+            await release_async_group(self.run_directory, process, gated=self.run_directory is not None)
             async def read_stdout():
                 body = bytearray()
                 while chunk := await process.stdout.read(4096):
@@ -263,4 +261,12 @@ Use the configured AWS credential chain. No shell or interactive login.
                 raise cli_failure(diagnostic)
             return strict_json(body)
         finally:
-            await terminate_async_group(process)
+            # 清理失敗不得蓋掉原本的例外：閘道會把 TimeoutError 記成逾時。已登記的群組仍由監督程序收尾時終止。 / A cleanup
+            # failure must not replace the original error, because the gateway records TimeoutError as a deadline.
+            # Registered groups are still stopped when the supervisor finalizes.
+            in_flight = sys.exc_info()[0] is not None
+            try:
+                await terminate_async_group(process)
+            except Exception as exc:
+                if not in_flight:
+                    raise ModelError('PROVIDER_FAILURE') from exc

@@ -19,7 +19,6 @@ from security_harness.supervision import prepare_run
 
 
 from tests.model_evidence import provider_answer
-from tests import model_support
 
 
 @pytest.fixture(autouse=True)
@@ -65,11 +64,8 @@ def test_provider_diagnostics_are_fixed_categories_and_keep_rejections(mutation,
 
 
 def collect(tmp_path, monkeypatch=None):
-    report = runner.initial_report(['mock-review-a','mock-review-b'], ['B01','B02'], str(uuid.uuid4()), 512, 2)
-    path = tmp_path/'artifacts'/report['run_id']/'report.json'
-    runner.record(path,report);prepare_run(tmp_path,report['run_id'],operation='model-smoke')
-    result = asyncio.run(runner.run_worker(tmp_path,report['run_id'],life.plan_digest(report)))
-    return model_support.finish(tmp_path,report['run_id'],providers=report['providers'],returncode=result,expected_report=report)
+    return life.collect_review(tmp_path, ['mock-review-a', 'mock-review-b'], ['B01', 'B02'],
+                               output_tokens=512, rounds=2)[0]
 
 
 def test_rounds_share_one_budget_and_preserve_opaque_ids(tmp_path):
@@ -212,7 +208,7 @@ def test_supervisor_stop_reasons_are_known_categories(code):
 def test_live_plan_warns_when_worst_case_exceeds_the_run_cap():
     # 最壞情況依 RoE 期限政策逐供應商計算：LM Studio 每次 60 秒，其他 30 秒。 / The worst case follows the RoE deadline
     # policy per provider: 60 seconds per LM Studio call, 30 for the others.
-    from scripts.model_review import deadline_warning
+    from security_harness.llm.lifecycle import deadline_warning
     assert deadline_warning(runner.initial_report(['gemini'], ['B01', 'B02', 'B03'], str(uuid.uuid4()))) is None
     assert deadline_warning(runner.initial_report(['lmstudio'], ['B13', 'B14'], str(uuid.uuid4()))) is None
     message = deadline_warning(runner.initial_report(['gemini', 'glm'], ['B01', 'B02', 'B03', 'B04'], str(uuid.uuid4())))

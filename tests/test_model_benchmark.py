@@ -63,14 +63,7 @@ def test_command_reference_tracks_shell_boundary_without_executing_payload(case_
 
 
 def collected(tmp_path, providers=None, case_ids=None):
-    report = runner.initial_report(providers or ['mock-review-a', 'mock-review-b'],
-                                   case_ids or list(bench.SUITES['injection']), str(uuid.uuid4()))
-    path = tmp_path / 'artifacts' / report['run_id'] / 'report.json'
-    runner.record(path, report)
-    prepare_run(tmp_path, report['run_id'], operation='model-smoke')
-    code = asyncio.run(runner.run_worker(tmp_path, report['run_id'], plan_digest=life.plan_digest(report)))
-    data = model_support.finish(tmp_path, report['run_id'], providers=report['providers'], returncode=code, expected_report=report)
-    return data, path
+    return life.collect_review(tmp_path, providers, case_ids)
 
 
 def test_blinding_projection_and_identical_requests_for_each_provider():
