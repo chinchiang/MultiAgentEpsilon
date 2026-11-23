@@ -14,5 +14,5 @@
   "external_callback": false,
   "llm_calls": false,
   "stop": "終止 harness，再執行 scripts/dev_db.py stop / terminate the harness, then scripts/dev_db.py stop",
-  "retention": "本機證據不納入 Git；CI 保留七天 / local artifacts are ignored; CI artifacts retained for 7 days"
+  "retention": "本機證據不納入 Git；CI 保留 30 天 / local artifacts are ignored; CI artifacts retained for 30 days"
 }

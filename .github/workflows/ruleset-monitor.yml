@@ -47,12 +47,12 @@ jobs:
           retention-days: 30
 
   notify:
-    # 監看失敗時開一個 issue，讓警報不依賴任何人的通知設定。只有這個 job 能寫 issue；它不 checkout、不跑任何 action，
-    # 只用 runner 內建的 gh。 / On a failed monitor, open an issue so the alarm depends on nobody's notification
+    # 監看沒有成功（失敗，或被取消、略過而沒有結果）時開一個 issue，讓警報不依賴任何人的通知設定。只有這個 job 能寫 issue；它不 checkout、不跑任何 action，
+    # 只用 runner 內建的 gh。 / When the monitor did not succeed (it failed, or was cancelled or skipped and left no result), open an issue so the alarm depends on nobody's notification
     # settings. Only this job may write issues; it checks nothing out and runs no action, only the runner's own gh.
     name: ruleset-monitor-alert
     needs: monitor
-    if: ${{ always() && needs.monitor.result == 'failure' }}
+    if: ${{ always() && needs.monitor.result != 'success' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 3
     permissions:

@@ -38,7 +38,8 @@ REPORT_VERSION = 3
 INPUTS = 'inputs'
 INPUT_LIMIT = 65536
 INPUT_NAMES = ('catalog.json', 'oracle.json', 'model-roe.json')
-BLIND_REVIEW_IMMUTABLE = ('plan', 'providers', 'selected_providers', 'case_ids', 'rounds', 'limits',
+BLIND_REVIEW_IMMUTABLE = ('schema_version', 'task', 'plan', 'providers', 'selected_providers', 'case_ids', 'rounds',
+                          'limits',
                           'total_timeout_seconds', 'output_tokens_per_review', 'implementation_sha256',
                           'case_catalog_sha256', 'oracle_sha256', 'model_roe_sha256', 'deadline_policy')
 
@@ -311,6 +312,9 @@ async def run_worker(root, run_id, plan_digest, mode=None):
     # report on disk differs from the supervisor's plan.
     if (report.get('task') == 'blind-review') != (task == 'blind-review') or current_plan_digest(report) != plan_digest:
         return 2
+    # 判定只由這次執行寫入：磁碟上預先放好的 pending_status 不在計畫摘要內，先丟掉。 / Only this run writes the
+    # decision: a pending_status planted on disk is outside the plan digest, so it is dropped first.
+    report.pop('pending_status', None)
     # 限額只取自計畫，不另行重算。 / The limits come from the plan only and are never recomputed.
     gateway = Gateway(Limits(**report['limits']))
     report['calls'] = gateway.evidence

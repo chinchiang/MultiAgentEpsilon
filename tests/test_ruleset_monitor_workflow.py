@@ -54,7 +54,7 @@ def test_a_failed_monitor_opens_one_issue_without_running_third_party_code():
     # failed schedule only to whoever last edited it; the monitor is the only drift alarm, so a failure opens an issue.
     notify = job('notify')
     assert re.search(r'^    needs: monitor$', notify, re.M)
-    assert re.search(r"^    if: \$\{\{ always\(\) && needs\.monitor\.result == 'failure' \}\}$", notify, re.M)
+    assert re.search(r"^    if: \$\{\{ always\(\) && needs\.monitor\.result != 'success' \}\}$", notify, re.M)
     assert re.search(r'^    timeout-minutes: \d+$', notify, re.M)
     # 不 checkout、不跑任何 action：持有寫入權限的 job 只執行 runner 內建的 gh。 / No checkout and no action: the job
     # holding a write permission runs only the runner's own gh.
