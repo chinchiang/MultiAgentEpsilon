@@ -62,7 +62,7 @@ PR 使用 `.github/workflows/security.yml` 的 `pull_request_target`：evaluator
 
 完整回歸、缺陷反例、候選評估與 `check_publishable_evidence.py` 通過後，CI 上傳 evaluator-owned 證據。獨立簽署工作在全新 runner 上只接收 ZIP 摘要，不 checkout 候選、不接觸模型或部署憑證。評估工作失敗時仍保留證據並清理，簽署工作不執行。
 
-`main` push 使用提交本身的 evaluator；手動執行使用所選 workflow ref，檢查名稱為 `manual-security-evaluation`。手動成功不等於正式必要檢查。專用 App 上線前，合併仍須以 `verify_required_check.py` 核對檢查來源、PR head 分支及完整 base 歷程；同一 head 範圍曾改 base 會保守拒絕。
+`main` push 使用提交本身的 evaluator；手動執行使用所選 workflow ref，檢查名稱為 `manual-security-evaluation`。手動成功不等於正式必要檢查。手動評估各自成一組，同一 commit 上的多次手動評估不會互相排擠；評估證據與突變報告保留 30 天。專用 App 上線前，合併仍須以 `verify_required_check.py` 核對檢查來源、PR head 分支及完整 base 歷程；同一 head 範圍曾改 base 會保守拒絕。
 
 已合併的 [PR #15](https://github.com/chinchiang/MultiAgentEpsilon/pull/15) 及 [main CI 37737568083](https://github.com/chinchiang/MultiAgentEpsilon/actions/runs/37737568083) 是先前版本的歷史證據：704 項回歸通過，修正版 ALLOW／0 findings、缺陷版 BLOCK／6 findings，清理完成；實際 ZIP 摘要、main 簽章及 run attempt 均已核對。此證據適用於該提交，不自動授權後續版本。
 
@@ -407,7 +407,7 @@ All responses undergo strict JSON/quotes/line/three-findings/verdict validation.
 
 pull_request_target loads evaluator/install/tests/policy/oracle from base SHA and treats head checkout as data. Every path needs trusted write-capable independent exact-head approval. Author, PR commit and first-page activity pusher identities are excluded (a run actor who only edits, reopens or reruns can still approve); writer change requests block. Complete regression, seeded negative, candidate evaluation and publishability checks precede evaluator-owned artifact upload. Fresh signing runner receives ZIP digest only, without candidate checkout/model/deployment secrets. Evaluation failure retains evidence/cleanup and skips signing; final required gate requires evaluation, signing and the separate mutation job all successful.
 
-Main push evaluates its own commit. Manual workflow uses chosen ref and distinct manual-security-evaluation/completion names, not formal acceptance. Until dedicated App deployment, verify_required_check.py checks workflow/event/head/branch/base timelines; any same-scope retargeting conservatively rejects. Historical PR #15/main run 37737568083 verified 704 tests, 18/0 ALLOW, 18/6 BLOCK, cleanup/ZIP/main signature/attempt; those claims apply only to that commit, not later revisions.
+Main push evaluates its own commit. Manual workflow uses chosen ref and distinct manual-security-evaluation/completion names, not formal acceptance. Each manual evaluation is its own concurrency group, so several on one commit never displace each other; the evaluation evidence and the mutation report are kept for 30 days. Until dedicated App deployment, verify_required_check.py checks workflow/event/head/branch/base timelines; any same-scope retargeting conservatively rejects. Historical PR #15/main run 37737568083 verified 704 tests, 18/0 ALLOW, 18/6 BLOCK, cleanup/ZIP/main signature/attempt; those claims apply only to that commit, not later revisions.
 
 ## Components and directory structure
 

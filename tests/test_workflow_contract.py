@@ -65,9 +65,31 @@ def test_main_runs_never_cancel_each_other():
     # 連續合併時，前一個 commit 的 push run 被取消會留下紅燈且沒有證據。 / Back-to-back merges used to cancel the
     # previous commit's push run, leaving it red with no evidence.
     settings = concurrency()
-    assert settings["group"].endswith("${{ github.event.pull_request.number || github.sha }}")
+    assert settings["group"].endswith("${{ github.event.pull_request.number || (github.event_name == "
+                                      "'workflow_dispatch' && github.run_id) || github.sha }}")
     assert settings["cancel-in-progress"] == ("${{ github.event_name == 'pull_request_target' && "
                                               "github.event.action != 'edited' }}")
+
+
+def test_manual_evaluations_of_one_commit_never_displace_each_other():
+    """手動評估以 run 分組：同一 commit 上排隊中的評估不會被下一次手動評估取代；PR 仍以編號、其餘事件仍以 commit 分組。
+
+    A manual evaluation groups by run, so a queued one on the same commit is never replaced by the next; pull
+    requests still group by number and every other event by commit."""
+    group = concurrency()["group"]
+    order = [group.index(part) for part in ("github.event.pull_request.number", "github.event_name == "
+                                            "'workflow_dispatch' && github.run_id", "|| github.sha }}")]
+    assert order == sorted(order)
+    assert group.count("github.run_id") == 1 and "run_attempt" not in group
+
+
+def test_evidence_artifacts_are_kept_for_thirty_days():
+    """評估證據與突變報告都保留 30 天，與規則集監看的證據一致。
+
+    The evaluation evidence and the mutation report are both kept for 30 days, like the ruleset monitor evidence."""
+    assert re.findall(r"^ +retention-days: (\d+)$", WORKFLOW, re.MULTILINE) == ["30", "30"]
+    monitor = (Path(__file__).resolve().parents[1] / ".github/workflows/ruleset-monitor.yml").read_text()
+    assert re.findall(r"^ +retention-days: (\d+)$", monitor, re.MULTILINE) == ["30"]
 
 
 def completion_job():

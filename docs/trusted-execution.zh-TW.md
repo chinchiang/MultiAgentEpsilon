@@ -27,7 +27,7 @@ host 端的 worker 與操作者使用同一個 uid。supervisor 只把白名單�
 - Gitleaks 使用重新命名的快照，映射回原始檔名；原始 `.git` 等名字不能觸發工具的隱含略過，候選 inline allow 與 ignore file 不能自行抑制可信掃描。壓縮檔除了展開成員，也掃描容器本身的可讀字串（註解、檔名、extra 欄位、gzip 標頭）；zip 中不屬於任何列出成員的位元組、帶資料的目錄項目，以及 tar 結尾之後的非零資料一律阻擋。成員以外的位元組須逐一對應已知結構：zip 註解須為文字、extra 欄位只接受有長度上限的已知紀錄、結尾紀錄後不得有資料；gzip 只接受單一成員，不接受標頭 extra 欄位，檔名與註解須為可讀 ASCII。
 - 對候選儲存庫 的 git 呼叫一律經 `security_harness/candidate_git.py`：以命令列 `-c` 停用 fsmonitor、hooks、任何 transport 與 commit-graph（其中記錄的父 commit 不與 commit 物件核對，偽造後可讓歷史掃描漏掉舊提交），清除繼承的 `GIT_*` 環境變數，不讀取系統／全域設定，並以明確的 `--git-dir` 指向候選自己的 `.git` 目錄（gitfile 或 symlink 拒絕）。候選的 `.git/config` 是資料，不能讓 host 執行程式。
 - Audit envelope 在設定解析之前寫出，subject／policy 尚不可得時保留 null。錯誤只記錄階段與例外型別。報告採原子替換，初始 RUNNING 報告一律 BLOCK；沒有成功完成的證據不得放行。
-- `artifacts/latest.txt` 僅索引 security run；其他入口各有 `<operation>-latest.txt`。本機 artifact 未簽章；CI 另以獨立工作簽署上傳 ZIP，保存 7 天，仍不是長期不可竄改證據庫。
+- `artifacts/latest.txt` 僅索引 security run；其他入口各有 `<operation>-latest.txt`。本機 artifact 未簽章；CI 另以獨立工作簽署上傳 ZIP，保存 30 天，仍不是長期不可竄改證據庫。
 
 ## 合法基準更新
 
@@ -131,7 +131,7 @@ Scanning and subject hashing share inputs.py. Generated directories are excluded
 
 Candidate Git calls use candidate_git.py, disabling fsmonitor/hooks/transports and the commit-graph with -c (its recorded parents are not checked against the commit objects, so a forged one would hide earlier commits from the history scan), clearing inherited GIT_*, ignoring system/global config, and explicitly selecting a real candidate .git directory. Gitfiles/symlinks are rejected. Candidate configuration is data, never host execution authority.
 
-An audit envelope exists before settings parsing, with null subject/policy when unavailable. Errors retain phase/type only. Atomic initial RUNNING reports stay BLOCK. artifacts/latest.txt indexes security only; other operations have separate indexes. Local artifacts are unsigned; CI separately signs the uploaded ZIP and retains it seven days, not a permanent immutable archive.
+An audit envelope exists before settings parsing, with null subject/policy when unavailable. Errors retain phase/type only. Atomic initial RUNNING reports stay BLOCK. artifacts/latest.txt indexes security only; other operations have separate indexes. Local artifacts are unsigned; CI separately signs the uploaded ZIP and retains it 30 days, not a permanent immutable archive.
 
 ## Legitimate baseline updates
 
