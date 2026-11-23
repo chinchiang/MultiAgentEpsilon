@@ -88,7 +88,7 @@ PR #12 已由 CatGrocery 對最新 head `58d9bc0` 獨立核准，正式 [run 375
 - `<run-id>/report.json`：每次新 run 的 G1、G2、AUTH 結果及 ALLOW／BLOCK；本輪候選缺陷版預期恰好 9 個政策指定的 AUTH findings，修正版預期 0。
 - `latest.txt`：最新 run 的索引。檢查 report 的 subject／policy digest 與當次原始碼，不能將舊報告當成本次結果。
 
-`expect_block.py` 要求整個 run 的 `execution` 為 COMPLETED、沒有任何 errors、清理完成、variant 為 vulnerable、三項 gate 都確實完成、G1／G2 無 findings，且 54 個授權案例中失敗的恰好是政策 `seeded_defect_case_ids` 列出的 9 個；工具 ERROR、清理失敗、來源在執行中變動、沒有案例或換成其他案例失敗都會使驗收失敗。
+`expect_block.py` 要求整個 run 的 `execution` 為 COMPLETED、沒有任何 errors、清理完成、variant 為 vulnerable、三項 gate 都確實完成、G1／G2 無 findings，且 60 個授權案例中失敗的恰好是政策 `seeded_defect_case_ids` 列出的 9 個；工具 ERROR、清理失敗、來源在執行中變動、沒有案例或換成其他案例失敗都會使驗收失敗。
 
 測試數量以 pytest 收集的項目計算（含 parametrize 展開），不是 `def test_` 的函式數。
 
@@ -102,7 +102,7 @@ W 編號與 G0–G6 閘門編號都來自本地保留的原始規劃。依公開
 | W02 | 公開程式碼與操作文件已發布 | 內部參考資料保留本地。 |
 | W03 | 固定 checksum／digest、wheel-only、DB 限權、候選 git 強化 | 不受信 PR／惡意套件的強隔離（VM／microVM）尚未驗證。 |
 | W04 | 嚴格狀態、必要 coverage 與歷史、subject／policy 綁定；main 真實簽章已驗證 | 專用 App 消費與正式發布。 |
-| W05、W09 | 10-10 擴為 44 案例／九種變體；11-07 加入契約外探測擴為 48 案例（另有三種後門變體）；11-14 加入 `/health` 回應契約與租戶欄位不可改寫，擴為 50 案例；11-22 加入別人的密碼、請求自稱的角色與租戶、第二租戶允許路徑，擴為 54 案例（RoE 上限調為 60） | 完整 G5。 |
+| W05、W09 | 10-10 擴為 44 案例／九種變體；11-07 加入契約外探測擴為 48 案例（另有三種後門變體）；11-14 加入 `/health` 回應契約與租戶欄位不可改寫，擴為 50 案例；11-22 加入別人的密碼、請求自稱的角色與租戶、第二租戶允許路徑，擴為 54 案例（RoE 上限調為 60）；11-23 加入未簽章權杖、session 以外的身分來源、管理員改寫租戶、方法覆寫、不存在與無權讀取不可區分、刪除後的匯出，擴為 60 案例（用滿上限） | 完整 G5。 |
 | W06、W20 | G1 metadata、鎖定檔 SBOM／OSV SCA 與 G2 | G1 行為分析、安裝映像及其他生態系、G3。 |
 | W08 | main 規則集 active、遠端正反例、run 與 PR base 綁定、全 commit 核准排除 | 專用可信檢查來源與普通開發者繞過驗收；main artifact attestation 已驗證。 |
 | W10–W14 | gateway、模型 adapter、盲測與多輪框架；Gemini／Claude 真實小樣本驗收；LM Studio 文字介接器 | GLM 已完成小樣本真實推論（見上方模型面）；地端 Nemotron、Qwen 的 GPU 真實推論、GLM 較大樣本、B15 與多輪穩定性及偏誤實驗仍待完成；DeepSeek 已停用。 |
@@ -192,7 +192,7 @@ python3 -I scripts/dev_db.py start
 python3 -I scripts/dev_db.py stop
 ```
 
-pytest.xml records collected parametrized items, not test-function count. http-smoke.json verifies real loopback health/login/allowed and cross-owner reads. Each run report binds current subject/policy; latest.txt is only an index. expect_block requires COMPLETED/no errors/cleanup/vulnerable variant/all gates complete/G1-G2 clean/exact nine seeded IDs among 54 AUTH cases. Tool errors, source drift, empty/different cases, or cleanup failure are failed negative acceptance.
+pytest.xml records collected parametrized items, not test-function count. http-smoke.json verifies real loopback health/login/allowed and cross-owner reads. Each run report binds current subject/policy; latest.txt is only an index. expect_block requires COMPLETED/no errors/cleanup/vulnerable variant/all gates complete/G1-G2 clean/exact nine seeded IDs among 60 AUTH cases. Tool errors, source drift, empty/different cases, or cleanup failure are failed negative acceptance.
 
 | Roadmap item | Implemented scope | Remaining |
 |---|---|---|
@@ -200,7 +200,7 @@ pytest.xml records collected parametrized items, not test-function count. http-s
 | W02 | Public code/docs | Private references stay local |
 | W03 | Checksums, wheel-only, DB least privilege, Git hardening | Hostile multi-tenant VM/microVM isolation |
 | W04 | Strict state/coverage/history/digest and main signatures | Dedicated publisher operation |
-| W05/W09 | 44 cases/nine variants from October 10; 48 cases with out-of-contract probes (plus three backdoor variants) from November 7; 50 cases with the `/health` response contract and the tenant-field write refusal from November 14; 54 cases with another user's password, a role and tenant the request claims for itself and the allowed path in the second tenant from November 22 (RoE cap raised to 60) | Full G5 |
+| W05/W09 | 44 cases/nine variants from October 10; 48 cases with out-of-contract probes (plus three backdoor variants) from November 7; 50 cases with the `/health` response contract and the tenant-field write refusal from November 14; 54 cases with another user's password, a role and tenant the request claims for itself and the allowed path in the second tenant from November 22 (RoE cap raised to 60); 60 cases, filling the cap, with an unsigned token, identity sources outside the session, an admin rewriting the tenant, a method override, a missing item indistinguishable from a forbidden one and an export after deletes from November 23 | Full G5 |
 | W06/W20 | G1 provenance/lock SBOM/OSV and G2 | Behavior/installed images/other ecosystems/G3 |
 | W08 | Active rules, remote positive/negative CI, run/base binding, all-commit exclusions | Dedicated source and actual non-admin anti-bypass probes |
 | W10–W14 | Gateway/adapters/blind/repeated framework; small Gemini/Claude live samples; LM Studio text adapter | Real on-prem inference (Nemotron, Qwen, GLM), larger stability/bias experiments; DeepSeek disabled |
