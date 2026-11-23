@@ -159,8 +159,10 @@ GATE_RELEASE = b'G'
 
 def gated_command(command, gated=True):
     # 擁有者在登記前死亡時，閘門讀到 EOF 即退出。 / The gate exits on EOF if the owner dies before registration.
-    # gated 必須與 release_async_group 的 gated 一致：不加閘門的命令不能被送 G。 / gated must match release_async_group's:
-    # a command without the gate must not be sent G.
+    # gated 必須與放行時（release_gated_group／release_async_group）的 gated 一致：不加閘門的命令不能被送 G。模型層沒有
+    # 執行清冊時以 gated=False 直接執行命令。 / gated must match the value given at release (release_gated_group or
+    # release_async_group): a command without the gate must not be sent G. The model layer runs the command directly
+    # with gated=False when it has no run inventory.
     if not gated:
         return list(command)
     return [sys.executable, '-I', str(SOURCE_ROOT / 'scripts/model_process.py'), *command]

@@ -12,7 +12,7 @@ from scripts import verify_required_check as verifier
 from security_harness import trust_scope, workflow_contract
 from security_harness.github_http import Denied
 from security_harness.github_trust import (GitHubTrust, HeadPush, ReviewEvidence, load_trust_policy, load_trust_scope,
-                                           parse_time, ruleset_protections, trusted_run)
+                                           parse_time, review_decision, ruleset_protections, trusted_run)
 
 ROOT = Path(__file__).resolve().parents[1]
 HEAD = "b" * 40
@@ -75,7 +75,8 @@ def test_trust_policy_and_ruleset_seam_centralized():
           'user': {'login': 'reviewer'}}],
         {'reviewer': 'write'}, {'author'}, push)
     pr = {'draft': False, 'user': {'login': 'author'}, 'head': {'sha': HEAD}}
-    assert evidence.decide(pr, ['reviewer']) == [9]
+    assert review_decision(pr, evidence.reviews, evidence.permissions, ['reviewer'], evidence.commit_identities,
+                           evidence.push) == [9]
     protections, active, _, _ = ruleset_protections({'protected': False}, [])
     assert not protections['main_protected'] and active == []
 

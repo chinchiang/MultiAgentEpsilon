@@ -79,9 +79,26 @@ def related_pull_path(prefix, pr):
     return prefix + "/pulls?state=all&head=" + urllib.parse.quote(owner + ":" + pr["head"]["ref"], safe="")
 
 
-def run_base_history(reader, pr, pulls):
-    return {p["number"]: reader.items(f"issues/{p['number']}/timeline")
-            for p in pulls if head_scope(p) == head_scope(pr)}
+def closed_before(pull, run):
+    """這個 PR 是否確定在 run 建立前就已關閉。只有開啟中的 PR 會觸發 pull_request_target，所以這樣的 PR 不可能是該 run
+    的來源；任一時間讀不到或格式不符都視為「不確定」。 / Whether this PR provably closed before the run was created.
+    Only an open PR triggers pull_request_target, so such a PR cannot be the run's source; a missing or malformed time
+    counts as not proven."""
+    try:
+        return parse_time(pull["closed_at"]) < parse_time(run["created_at"])
+    except (KeyError, TypeError, ValueError):
+        return False
+
+
+def base_relevant(pull, pr, run):
+    """這個 PR 是否可能是該 run 的來源：與此 PR 同一 head 儲存庫與分支，且 head 相同，或無法證明它在 run 建立前已關閉。
+    只比對目前的 head 不夠：PR 關閉前把分支移到別的 commit，它記錄的 head 就不再是 run 的 commit。 / Whether this PR
+    could be the run's source: the same head repository and branch as this PR, and either the same head or not provably
+    closed before the run was created. Comparing only the current head is not enough: a PR whose branch moved to another
+    commit before it closed no longer records the run's commit as its head."""
+    if head_scope(pull)[1:] != head_scope(pr)[1:]:
+        return False
+    return head_scope(pull) == head_scope(pr) or not closed_before(pull, run)
 
 
 def validate_run_base(run, pr, pull_requests, base_branch, histories=None):
@@ -102,8 +119,9 @@ Bind a pull_request_target run to this PR's base without trusting run evidence.
          and (run.get("head_repository") or {}).get("id") == head_repo, "RUN_HEAD_BRANCH")
     need(isinstance(pull_requests, list) and any(p.get("number") == pr["number"] for p in pull_requests),
          "PR_LISTING_INCOMPLETE")
-    relevant = [p for p in pull_requests if head_scope(p) == head_scope(pr)]
-    need(any(p["number"] == pr["number"] for p in relevant), "PR_LISTING_INCOMPLETE")
+    relevant = [p for p in pull_requests if base_relevant(p, pr, run)]
+    need(any(p["number"] == pr["number"] and head_scope(p) == head_scope(pr) for p in relevant),
+         "PR_LISTING_INCOMPLETE")
     need(all(p["base"]["ref"] == base_branch and p["base"]["repo"]["id"] == pr["base"]["repo"]["id"]
              for p in relevant), "FOREIGN_BASE_PR")
     need(isinstance(histories, dict), "BASE_HISTORY_MISSING")
@@ -185,19 +203,20 @@ class ReviewEvidence:
     commit_identities: set
     push: HeadPush
 
-    def decide(self, pr, reviewers):
-        """依已蒐集的審查證據套用共同審查規則。 / Apply the shared review rule to the collected review evidence."""
-        return review_decision(pr, self.reviews, self.permissions, reviewers, self.commit_identities, self.push)
-
 
 class RunBaseEvidence:
     """單次命令內重用的來源證據，不是跨請求原子快照。 / Source evidence reused within one command, not an atomic snapshot."""
 
-    def __init__(self, pr, pulls, base_branch, histories):
+    def __init__(self, pr, pulls, base_branch, history):
         self._pr, self._pulls = pr, pulls
-        self._base_branch, self._histories = base_branch, histories
+        self._base_branch, self._history, self._histories = base_branch, history, {}
 
     def validate(self, run):
+        # 哪些 PR 可能是來源取決於 run 的建立時間，所以逐一 run 補讀 timeline，同一 PR 只讀一次。 / Which PRs could be
+        # the source depends on the run's creation time, so timelines are read per run, each PR only once.
+        for p in self._pulls if isinstance(self._pulls, list) else ():
+            if isinstance(p, dict) and p.get("number") not in self._histories and base_relevant(p, self._pr, run):
+                self._histories[p["number"]] = self._history(p["number"])
         validate_run_base(run, self._pr, self._pulls, self._base_branch, self._histories)
 
 
@@ -224,7 +243,7 @@ class GitHubTrust:
 
     def run_base(self, pr, base_branch):
         pulls = self._related_pulls(pr)
-        return RunBaseEvidence(pr, pulls, base_branch, run_base_history(self._reader, pr, pulls))
+        return RunBaseEvidence(pr, pulls, base_branch, lambda number: self._reader.items(f"issues/{number}/timeline"))
 
     def head_push(self, number, pr, base_branch):
         """讀出 head 的推送時間與推送者，並拒絕 fork、共用 head、規則集未要求最後推送核准與無法確認的推送。

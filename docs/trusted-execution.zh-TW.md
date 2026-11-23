@@ -27,7 +27,7 @@ host 端的 worker 與操作者使用同一個 uid。supervisor 只把白名單�
 - Gitleaks 使用重新命名的快照，映射回原始檔名；原始 `.git` 等名字不能觸發工具的隱含略過，候選 inline allow 與 ignore file 不能自行抑制可信掃描。壓縮檔除了展開成員，也掃描容器本身的可讀字串（註解、檔名、extra 欄位、gzip 標頭）；zip 中不屬於任何列出成員的位元組、帶資料的目錄項目，以及 tar 結尾之後的非零資料一律阻擋。成員以外的位元組須逐一對應已知結構：zip 註解須為文字、extra 欄位只接受有長度上限的已知紀錄、結尾紀錄後不得有資料；gzip 只接受單一成員，不接受標頭 extra 欄位，檔名與註解須為可讀 ASCII。
 - 對候選儲存庫 的 git 呼叫一律經 `security_harness/candidate_git.py`：以命令列 `-c` 停用 fsmonitor、hooks、任何 transport 與 commit-graph（其中記錄的父 commit 不與 commit 物件核對，偽造後可讓歷史掃描漏掉舊提交），清除繼承的 `GIT_*` 環境變數，不讀取系統／全域設定，並以明確的 `--git-dir` 指向候選自己的 `.git` 目錄（gitfile 或 symlink 拒絕）。候選的 `.git/config` 是資料，不能讓 host 執行程式。
 - Audit envelope 在設定解析之前寫出，subject／policy 尚不可得時保留 null。錯誤只記錄階段與例外型別。報告採原子替換，初始 RUNNING 報告一律 BLOCK；沒有成功完成的證據不得放行。
-- `artifacts/latest.txt` 僅索引 security run；其他入口各有 `<operation>-latest.txt`。本機 artifact 未簽章；CI 另以獨立工作簽署上傳 ZIP，保存 7 天，仍不是長期不可竄改證據庫。
+- `artifacts/latest.txt` 僅索引 security run；其他入口各有 `<operation>-latest.txt`。本機 artifact 未簽章；CI 另以獨立工作簽署上傳 ZIP，保存 30 天，仍不是長期不可竄改證據庫。
 
 ## 合法基準更新
 
@@ -93,7 +93,7 @@ python3 -I scripts/dev_db.py start
 python3 -I scripts/dev_db.py stop
 ```
 
-隔離回歸會執行缺陷版、修正版，以及在候選匯入時嘗試寫入唯讀來源／入口、讀取 evaluator／Docker socket／權杖、建立 IP 出向連線的探測。必要結果為：完整 50 案例、缺陷版恰好政策 `seeded_defect_case_ids` 的 9 個 findings／BLOCK、修正版 0 findings／ALLOW。另有錯誤密碼登入、404 洩漏、匯出夾帶跨租戶資料、其他資料列被非法修改、admin 寫入條件越過租戶邊界、過期工作階段、跨租戶刪除、寫入端點較弱的工作階段檢查、回應後才排程的跨租戶寫入、拒絕讀取時以回應標頭外洩資料、租戶欄位改寫、`/health` 外洩項目，以及候選終止後仍在資料庫執行的跨租戶寫入共十三種變體（另含四種契約外與後門變體），必須產生指定 AUTH findings；評估前也會核對兩個容器的網路、唯讀根目錄、權限、記憶體、程序數、使用者與映像；socket 改指向 host 測試端點必須失敗且端點不得收到連線。
+隔離回歸會執行缺陷版、修正版，以及在候選匯入時嘗試寫入唯讀來源／入口、讀取 evaluator／Docker socket／權杖、建立 IP 出向連線的探測。必要結果為：完整 54 案例、缺陷版恰好政策 `seeded_defect_case_ids` 的 9 個 findings／BLOCK、修正版 0 findings／ALLOW。另有錯誤密碼登入、404 洩漏、匯出夾帶跨租戶資料、其他資料列被非法修改、admin 寫入條件越過租戶邊界、過期工作階段、跨租戶刪除、寫入端點較弱的工作階段檢查、回應後才排程的跨租戶寫入、拒絕讀取時以回應標頭外洩資料、租戶欄位改寫、`/health` 外洩項目，以及候選終止後仍在資料庫執行的跨租戶寫入共十三種變體（另含四種契約外與後門變體），必須產生指定 AUTH findings；評估前也會核對兩個容器的網路、唯讀根目錄、權限、記憶體、程序數、使用者與映像；socket 改指向 host 測試端點必須失敗且端點不得收到連線。
 
 候選 lock digest 必須等於已驗證 runtime lock digest；尚不支援任意候選依賴映像建置。受保護變更使用禁用 rename 折疊的 diff，同時判斷刪除與新增路徑。結果 schema 3 使用版本化逐檔 manifest，不能沿用 schema 2 的 gate 證據。
 
@@ -131,7 +131,7 @@ Scanning and subject hashing share inputs.py. Generated directories are excluded
 
 Candidate Git calls use candidate_git.py, disabling fsmonitor/hooks/transports and the commit-graph with -c (its recorded parents are not checked against the commit objects, so a forged one would hide earlier commits from the history scan), clearing inherited GIT_*, ignoring system/global config, and explicitly selecting a real candidate .git directory. Gitfiles/symlinks are rejected. Candidate configuration is data, never host execution authority.
 
-An audit envelope exists before settings parsing, with null subject/policy when unavailable. Errors retain phase/type only. Atomic initial RUNNING reports stay BLOCK. artifacts/latest.txt indexes security only; other operations have separate indexes. Local artifacts are unsigned; CI separately signs the uploaded ZIP and retains it seven days, not a permanent immutable archive.
+An audit envelope exists before settings parsing, with null subject/policy when unavailable. Errors retain phase/type only. Atomic initial RUNNING reports stay BLOCK. artifacts/latest.txt indexes security only; other operations have separate indexes. Local artifacts are unsigned; CI separately signs the uploaded ZIP and retains it 30 days, not a permanent immutable archive.
 
 ## Legitimate baseline updates
 
@@ -191,7 +191,7 @@ python3 -I scripts/dev_db.py start
 python3 -I scripts/dev_db.py stop
 ```
 
-Isolation regressions attempt writes to read-only source/entrypoint, reads of evaluator/Docker socket/tokens, and IP egress. Required results: exact 50 cases; fixed zero findings/ALLOW; seeded exact nine policy IDs/BLOCK. Thirteen additional real-container variants (plus four out-of-contract and backdoor variants) cover wrong-password login, 404 disclosure, cross-tenant export, hidden unrelated-row mutation, admin cross-tenant writes, expired sessions, cross-tenant deletion, a weaker write-endpoint session check, a cross-tenant write scheduled after the response, a denied read that leaks the row through a response header, tenant-field reassignment, `/health` item leakage, and a cross-tenant write that keeps running in PostgreSQL after the candidate is killed. Both containers' network, read-only root, privileges, memory, process, user and image settings are verified before evaluation. Redirecting the HTTP socket to a host endpoint must fail without contacting that endpoint.
+Isolation regressions attempt writes to read-only source/entrypoint, reads of evaluator/Docker socket/tokens, and IP egress. Required results: exact 54 cases; fixed zero findings/ALLOW; seeded exact nine policy IDs/BLOCK. Thirteen additional real-container variants (plus four out-of-contract and backdoor variants) cover wrong-password login, 404 disclosure, cross-tenant export, hidden unrelated-row mutation, admin cross-tenant writes, expired sessions, cross-tenant deletion, a weaker write-endpoint session check, a cross-tenant write scheduled after the response, a denied read that leaks the row through a response header, tenant-field reassignment, `/health` item leakage, and a cross-tenant write that keeps running in PostgreSQL after the candidate is killed. Both containers' network, read-only root, privileges, memory, process, user and image settings are verified before evaluation. Redirecting the HTTP socket to a host endpoint must fail without contacting that endpoint.
 
 Candidate lock must match verified runtime lock; arbitrary candidate dependency images are unsupported. Protected diffs disable rename collapsing and check both old/new paths. Schema 3 uses versioned per-file manifests. See [remote gaps](remote-merge-protection.zh-TW.md#en).
 

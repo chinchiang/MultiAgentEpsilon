@@ -9,8 +9,7 @@ import re
 import secrets
 import time
 
-from .fixture_database import (FixtureDatabase, TABLES as TABLES, connect as default_connect,
-                               restore as restore, seeded_items, snapshot as snapshot)
+from .fixture_database import FixtureDatabase, connect as default_connect, seeded_items
 
 # 最後一個案例後的靜置時間，用來攔截延遲寫入。 / Quiet period after the last case, so delayed writes are observed.
 SETTLE_SECONDS = 1.0
@@ -121,6 +120,10 @@ flight when it was stopped and counts as a delayed side effect."""
           json={"username": "bob", "password": secrets.token_urlsafe(32)})
     check("unknown user denied without session", "post", "/login", 401, {"detail": "invalid credentials"},
           json={"username": "absent-" + secrets.token_hex(8), "password": secrets.token_urlsafe(32)})
+    # 別人的密碼也是錯誤密碼：只用隨機密碼測，看不出「任一使用者的密碼都能登入」。 / Someone else's password is a
+    # wrong password too; random passwords alone cannot reveal a login that accepts any user's password.
+    check("another user's password denied without session", "post", "/login", 401, {"detail": "invalid credentials"},
+          json={"username": "bob", "password": passwords["alice"]})
     headers = {}
     for name, password in passwords.items():
         before = observe()
@@ -152,6 +155,8 @@ flight when it was stopped and counts as a delayed side effect."""
     check("health exposes only readiness", "get", "/health", 200,
           {"ready": True, "synthetic_fixture": True, "fixture_id": schema})
     check("owner reads own data", "get", "/items/1", 200, initial_items[0], headers=headers["alice"])
+    # 允許路徑不能只在第一個租戶成立。 / The allowed path must hold outside the first tenant too.
+    check("second-tenant owner reads own data", "get", "/items/3", 200, initial_items[2], headers=headers["carol"])
     updated = {**initial_items[0], "value": "owner-updated"}
     expected = expect(lambda state: state["items"].__setitem__(0, updated))
     check("owner updates own data", "patch", "/items/1", 200, updated, expected=expected,
@@ -165,6 +170,12 @@ flight when it was stopped and counts as a delayed side effect."""
     check("admin cross-tenant denied", "get", "/items/3", 404, {"detail": "item not found"}, headers=headers["admin"])
     check("member export denied", "get", "/admin/export", 403, {"detail": "admin required"}, headers=headers["alice"])
     check("admin export tenant-scoped", "get", "/admin/export", 200, [updated, initial_items[1]], headers=headers["admin"])
+    # 身分與範圍只能來自 session：請求自稱的角色或租戶一律不採計。 / Identity and scope come from the session only;
+    # a role or tenant the request claims for itself never counts.
+    check("role header cannot grant admin", "get", "/admin/export", 403, {"detail": "admin required"},
+          headers={**headers["alice"], "X-Role": "admin"})
+    check("tenant query cannot widen admin export", "get", "/admin/export?tenant=t2", 200,
+          [updated, initial_items[1]], headers=headers["admin"])
     # 管理員委派也是寫入權限：同租戶須成功，跨租戶須阻擋。 / Admin delegation is a write privilege too: it must work in-tenant and stop at the tenant boundary.
     admin_updated = {**initial_items[1], "value": "admin-updated"}
     expected = expect(lambda state: state["items"].__setitem__(1, admin_updated))

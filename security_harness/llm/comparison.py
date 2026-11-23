@@ -21,6 +21,15 @@ def wilson(successes, total, z=1.959963984540054):
     return {'low': round(max(0.0, centre - half), 4), 'high': round(min(1.0, centre + half), 4), 'n': total}
 
 
+def case_interval(successes, observations, repeats):
+    """以不重複案例數為樣本的 95% Wilson 區間。同一案例重複 repeats 輪不是獨立樣本，所以樣本數取觀測數除以輪數，比率不變；
+    n 仍回報觀測數，effective_n 是計算區間用的樣本數。 / The 95% Wilson interval with distinct cases as the sample.
+    Repeating a case for several rounds does not make independent samples, so the sample size is the observations divided
+    by the rounds while the rate is unchanged; n still reports the observations and effective_n the size the interval used."""
+    interval = wilson(successes / repeats, observations / repeats)
+    return interval and {**interval, 'n': observations, 'effective_n': round(observations / repeats, 4)}
+
+
 def compare(paths):
     """拒絕重播與混版；Reject replayed reports and incompatible experiment versions."""
     if not 1 <= len(paths) <= 32:
@@ -76,6 +85,7 @@ def compare(paths):
     truth = reference(inputs['oracle.json'], load_cases(inputs['catalog.json']))
     positives = sum(n for case, n in case_rounds.items() if truth[case]['verdict'] == 'VULNERABLE')
     metrics = {}
+    repeats = next(iter(case_rounds.values()))
     for provider in pins[1]:
         rows = [a['provider_metrics'][provider] for _, a in reports]
         fields = ('tp', 'tn', 'fp', 'fn', 'abstained', 'unavailable', 'planned', 'classified')
@@ -84,17 +94,19 @@ def compare(paths):
                  false_positive_rate_valid=ratio(m['fp'], m['fp'] + m['tn']),
                  false_negative_rate_valid=ratio(m['fn'], m['fn'] + m['tp']),
                  positive_miss_rate_all=ratio(positives - m['tp'], positives))
-        # 每個比率附 95% Wilson 區間與分母；小樣本的點估計不能單獨解讀。 / Each rate carries a 95% Wilson interval and
-        # its denominator; a point estimate from a small sample cannot be read alone.
+        # 每個比率附 95% Wilson 區間與分母；小樣本的點估計不能單獨解讀。區間以不重複案例數計算，重複輪次不會讓區間
+        # 變窄。 / Each rate carries a 95% Wilson interval and its denominator; a point estimate from a small sample
+        # cannot be read alone. The interval counts distinct cases, so repeated rounds do not narrow it.
         m['intervals_95'] = {
-            'coverage': wilson(m['classified'], m['planned']),
-            'false_positive_rate_valid': wilson(m['fp'], m['fp'] + m['tn']),
-            'false_negative_rate_valid': wilson(m['fn'], m['fn'] + m['tp']),
-            'positive_miss_rate_all': wilson(positives - m['tp'], positives)}
+            'coverage': case_interval(m['classified'], m['planned'], repeats),
+            'false_positive_rate_valid': case_interval(m['fp'], m['fp'] + m['tn'], repeats),
+            'false_negative_rate_valid': case_interval(m['fn'], m['fn'] + m['tp'], repeats),
+            'positive_miss_rate_all': case_interval(positives - m['tp'], positives, repeats)}
         metrics[provider] = m
     return {'schema_version': 1, 'advisory_only': True, 'security_gate_effect': 'NONE',
             'bias_reduction': 'NOT_ESTABLISHED', 'identity_verified': False,
             'serving_revision_consistency': 'NOT_VERIFIED_ACROSS_RUNS',
-            'limitations': 'Unsigned reports; repeated observations are not independent samples. / 未簽章報告；重複觀測不是獨立樣本。',
+            'limitations': ('Unsigned reports; repeated observations are not independent samples, so intervals count '
+                            'distinct cases. / 未簽章報告；重複觀測不是獨立樣本，區間以不重複案例數計算。'),
             'reports': proofs, 'case_rounds': dict(sorted(case_rounds.items())),
             'configured_model_labels': labels, 'provider_metrics': metrics}
