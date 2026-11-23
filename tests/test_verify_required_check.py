@@ -177,22 +177,39 @@ def test_same_head_pr_into_another_base_cannot_vouch_for_the_check(twin, branch,
         verify(github)
 
 
-@pytest.mark.parametrize("closed_at,allowed", [("2026-11-01T10:00:01Z", False), ("2026-11-01T09:59:59Z", True)])
-def test_same_branch_pr_into_another_base_whose_head_moved_before_it_closed(closed_at, allowed):
+@pytest.mark.parametrize("closed_at", ["2026-11-01T10:00:01Z", "2026-11-01T09:59:59Z", "2026-10-01T00:00:00Z"])
+def test_same_branch_pr_into_another_base_whose_head_moved_before_it_closed(closed_at):
     """假說實測：同分支 PR 指向帶有改過 workflow 的 base，跑出同名綠燈後把分支移到別的 commit 再關閉，之後分支移回原
-    commit 另開 PR。舊判斷只比對目前的 head，會放行；現在只要它不是確定在 run 建立前關閉，就拒絕。
+    commit 另開 PR。只比對目前 head 的舊判斷會放行；PR #107 的「run 建立前已關閉就排除」也可被搶先關閉繞過
+    （run 建立比事件晚幾秒）。現在不論何時關閉都拒絕。
 
     The hypothesis, reproduced: a same-branch PR into a base carrying a modified workflow earns a same-named green
     check, moves the branch to another commit and closes; the branch then returns to the original commit under a new
-    PR. Comparing only current heads allowed it; now it is refused unless it provably closed before the run."""
+    PR. Comparing only current heads allowed it, and PR #107's "closed before the run was created" exemption could be
+    raced by closing first, since a run is created seconds after its event. It is now refused whenever it closed."""
     twin = {**pull(number=6, base="evil", head="c" * 40, state="closed"), "closed_at": closed_at}
     github = scenario(twin)
     evaluate(github, trusted_run(github, created_at="2026-11-01T10:00:00Z"))
-    if allowed:
-        assert verify(github)["decision"] == "ALLOW"
-    else:
-        with pytest.raises(checker.Denied, match="^FOREIGN_BASE_PR$"):
-            verify(github)
+    with pytest.raises(checker.Denied, match="^FOREIGN_BASE_PR$"):
+        verify(github)
+    # 對照：同一筆檢查，列表中沒有那個 PR 時是放行的，所以擋下它的就是那個 PR。 / Control: the same check is allowed
+    # once that PR is absent from the listing, so that PR is what blocks it.
+    github.add("pulls?state=all&head=owner:feature", [pull()])
+    assert verify(github)["decision"] == "ALLOW"
+
+
+def test_moved_same_branch_pr_into_main_is_allowed_only_without_a_recent_retarget():
+    """base 為 main、head 已移走的同分支 PR：7 天內關閉的要讀改 base 紀錄，曾改 base 就拒絕；沒有改過就放行。
+
+    A same-branch PR into main whose head moved: one closed within seven days has its retarget history read and
+    blocks if it was retargeted; without a retarget the check is allowed."""
+    twin = {**pull(number=6, head="c" * 40, state="closed"), "closed_at": "2026-11-01T09:59:59Z"}
+    github = scenario(twin)
+    evaluate(github, trusted_run(github, created_at="2026-11-01T10:00:00Z"))
+    assert verify(github)["decision"] == "ALLOW"
+    github.add("issues/6/timeline", [{"event": "base_ref_changed"}])
+    with pytest.raises(checker.Denied, match="^BASE_RETARGETED_UNVERIFIABLE$"):
+        verify(github)
 
 
 def test_unrelated_prs_into_other_bases_do_not_block():
