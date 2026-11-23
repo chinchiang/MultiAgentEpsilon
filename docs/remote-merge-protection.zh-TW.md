@@ -92,7 +92,7 @@ App 身分與執行位置尚未提供；已準備受控主機的發布程式與�
      ```bash
      uv pip compile requirements.in --generate-hashes --only-binary :all: --output-file requirements.lock --upgrade-package '<套件>==<修正版>'
      ```
-     確認只有這個套件的版本與雜湊改變，而且雜湊與 PyPI 公布的一致。
+     確認只有這個套件的版本與雜湊改變，而且雜湊與 PyPI 公布的一致。`requirements.in` 與 lock 必須一起改：回歸測試會核對每個直接依賴在 lock 中版本相同，且 lock 的每個套件都能沿 `# via` 追到某個直接依賴，只改其中一個檔案會失敗。
    - **決策：不縮短冷卻期。** 改政策是受保護變更，那個 PR 一樣會被舊 lock 擋住，還會削弱供應鏈防線。
    - 不手動放 wheel 來重建隔離執行映像；它要等冷卻期結束後經由 `scripts/bootstrap.py` 重建。
    - 在受影響的 PR 留言，說明阻擋原因與最早可處理時間。
@@ -189,7 +189,7 @@ So no PR can merge until the fixed version has cleared the cooling period. Lifti
      ```bash
      uv pip compile requirements.in --generate-hashes --only-binary :all: --output-file requirements.lock --upgrade-package '<package>==<fixed version>'
      ```
-     Confirm that only that package's version and hashes change, and that the hashes match what PyPI publishes.
+     Confirm that only that package's version and hashes change, and that the hashes match what PyPI publishes. Change `requirements.in` and the lock together: a regression test checks that every direct dependency has the same version in the lock and that every locked package traces through `# via` to a direct dependency, so editing only one of the two files fails.
    - **Decision: keep the cooling period.** The policy is a protected change whose PR is blocked by the old lock too, and shortening it weakens the supply-chain defence.
    - Do not place wheels by hand to rebuild the isolation runtime image; it waits until `scripts/bootstrap.py` can rebuild it after the cooling period.
    - Comment on each affected PR with the reason and the earliest time to act.
