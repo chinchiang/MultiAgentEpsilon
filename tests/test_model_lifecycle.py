@@ -519,3 +519,38 @@ def test_deepened_model_run_handle_and_script_import_boundaries(tmp_path):
     assert review_data['status'] == 'COMPLETE' and review_data['analysis'] is not None
     assert asyncio.run(life.run_worker(tmp_path, review_run.run_id, review_run.digest, mode='smoke')) == 2
 
+
+def test_worker_drops_a_pending_decision_planted_on_disk(tmp_path, monkeypatch):
+    """pending_status 不在計畫摘要內：磁碟上預先放好 COMPLETE 時，worker 必須丟掉它，判定只由這次執行寫入。
+
+    pending_status is outside the plan digest: a COMPLETE planted on disk must be dropped, so only this run writes
+    the decision."""
+    import asyncio
+    import scripts.model_smoke as smoke
+    from security_harness.llm import config
+    run_id = str(uuid.uuid4())
+    report = initial_report(['mock'], run_id)
+    path = tmp_path / 'artifacts' / run_id / 'report.json'
+    life.persist(path, {**report, 'pending_status': 'COMPLETE'})
+    prepare_run(tmp_path, run_id, operation='model-smoke')
+    # 計畫後實作被改：這次執行的檢查全部是 ERROR。 / The implementation changed after planning, so every check of this
+    # run is an ERROR.
+    monkeypatch.setattr(config, 'implementation_digest', lambda: '0' * 64)
+    code = asyncio.run(smoke.run_worker(tmp_path, run_id, life.smoke_plan_digest(report)))
+    data = json.loads(path.read_text())
+    assert [(c['status'], c['code']) for c in data['checks']] == [('ERROR', 'CONFIGURATION')]
+    assert (code, data['status'], data['pending_status']) == (1, 'AWAITING_CLEANUP', 'INCOMPLETE')
+
+
+@pytest.mark.parametrize('field,value', [('schema_version', 2), ('task', 'smoke'), ('task', None)])
+def test_blind_review_plan_digest_binds_the_schema_version_and_the_task(field, value):
+    """盲審計畫摘要綁定 schema_version 與 task：改寫磁碟上的版本或任務會讓摘要不符，worker 不發任何呼叫。
+
+    The blind-review plan digest binds schema_version and task: rewriting either on disk changes the digest, so the
+    worker makes no call."""
+    from security_harness.llm import benchmark as bench, benchmark_runner as runner
+    report = runner.initial_report(['mock-review-a'], list(bench.SUITES['injection'])[:1], str(uuid.uuid4()))
+    assert report['task'] == 'blind-review' and report[field] != value
+    assert {'schema_version', 'task'} <= set(life.BLIND_REVIEW_IMMUTABLE)
+    assert life.plan_digest({**report, field: value}) != life.plan_digest(report)
+

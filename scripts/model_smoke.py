@@ -15,11 +15,8 @@ from security_harness.llm import config
 from security_harness.llm.lifecycle import (FIXTURE as FIXTURE, initial_smoke_report,
                                             plan_smoke, require_model_roe, run_worker as run_worker)
 
-# 設定、摘要與計畫生命週期位於函式庫；此處保留名稱供 CLI 與既有匯入使用。 / Configuration, digest and lifecycle
-# live in the library; names are re-exported for the CLI and existing imports.
-PLACEHOLDER_HOSTS = config.PLACEHOLDER_HOSTS
-setting = config.setting
-implementation_digest = config.implementation_digest
+# 計畫生命週期位於函式庫；此處保留名稱供 CLI 與既有匯入使用。 / The plan lifecycle lives in the library; the name
+# is re-exported for the CLI and existing imports.
 initial_report = initial_smoke_report
 
 

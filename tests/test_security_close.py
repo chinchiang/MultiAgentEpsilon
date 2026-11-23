@@ -1,7 +1,7 @@
-"""SecurityRun.close 與 worker 交接的直接測試：supervisor 把 worker 報告關成發布用證據時，每一個條件都必須有測試。
+"""SecurityRun.close 與 worker 清理交接的直接測試：supervisor 把 worker 報告關成發布用證據時，每一個條件都必須有測試。
 不啟動子程序，可在突變快照內執行。
 
-Direct tests of SecurityRun.close and the worker handoff: every condition under which the supervisor closes a
+Direct tests of SecurityRun.close and the worker's cleanup handoff: every condition under which the supervisor closes a
 worker's report into published evidence needs a test. No subprocess is started, so they run in the mutation
 snapshot."""
 import copy
@@ -181,7 +181,7 @@ def test_a_run_stopped_outside_any_gate_adds_no_record_for_that_stage(tmp_path):
 
 
 def test_a_stop_wins_over_a_finished_handoff(tmp_path):
-    # 即使 worker 已交接 ALLOW，被 supervisor 停止的執行仍是 BLOCK。 / Even with an ALLOW handed off, a run the
+    # 即使 worker 已在清理交接中留下 ALLOW，被 supervisor 停止的執行仍是 BLOCK。 / Even with an ALLOW handed off, a run the
     # supervisor stopped is still BLOCK.
     audit, role = handed_off(tmp_path)
     assert close(role, audit, 0, stop='TIMEOUT') == 1

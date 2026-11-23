@@ -6,11 +6,8 @@ from .lifecycle import (archived_cases, deadline_policy, digest_bytes, implement
                         implementation_unchanged, initial_review_report as initial_report,
                         record, run_worker, snapshot_inputs)
 
-INPUT_FILES = {'catalog.json': CASES_PATH, 'oracle.json': ORACLE_PATH}
-
 __all__ = (
     'CASES_PATH',
-    'INPUT_FILES',
     'ORACLE_PATH',
     'archived_cases',
     'deadline_policy',
