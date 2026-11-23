@@ -100,7 +100,13 @@
         "another user's password denied without session",
         "second-tenant owner reads own data",
         "role header cannot grant admin",
-        "tenant query cannot widen admin export"
+        "tenant query cannot widen admin export",
+      "unsigned self-describing token denied",
+      "identity outside the session cannot authenticate",
+      "admin cannot reassign tenant",
+      "method override header cannot delete",
+      "missing item indistinguishable from forbidden",
+      "admin export reflects deletions"
       ],
       "seeded_defect_case_ids": [
         "bob: unauthorized read denied without data",

@@ -179,13 +179,88 @@ MUTATIONS.update({
         '        return row and row["tenant"] == user["tenant"] == "t1" and ('),
 })
 
+MUTATIONS.update({
+    # 接受自帶身分宣告的未簽章權杖（JWT 的 alg none 類型）。 / Accepts an unsigned token carrying its own claims (the
+    # JWT "alg none" class).
+    'unsigned_token_accepted': (
+        '        token_hash = hashlib.sha256(authorization[7:].encode()).hexdigest()\n'
+        '        with connect(dsn, schema) as conn:\n            user = conn.execute("SELECT u.id',
+        '        if authorization.count(".") == 2:\n'
+        '            import base64\n'
+        '            try:\n'
+        '                claims = json.loads(base64.urlsafe_b64decode(authorization[7:].split(".")[1] + "=="))\n'
+        '                return {"id": claims["sub"], "tenant": claims["tenant"], "role": claims["role"]}\n'
+        '            except Exception:\n'
+        '                pass\n'
+        '        token_hash = hashlib.sha256(authorization[7:].encode()).hexdigest()\n'
+        '        with connect(dsn, schema) as conn:\n            user = conn.execute("SELECT u.id'),
+    # 沒有權杖時改信任請求標頭自稱的使用者。 / Without a token it trusts the user a request header claims.
+    'header_identity_fallback': [(
+        '    def principal(authorization: str | None = Header(default=None)):',
+        '    def principal(authorization: str | None = Header(default=None), x_user: str | None = Header(default=None)):\n'
+        '        if not authorization and x_user:\n'
+        '            with connect(dsn, schema) as conn:\n'
+        '                claimed = conn.execute("SELECT id,tenant,role FROM users WHERE id=%s", (x_user,)).fetchone()\n'
+        '            if claimed:\n'
+        '                return claimed')],
+    # 管理員可以改寫租戶欄位；一般使用者仍得到與原本相同的輸入錯誤。 / An admin may rewrite the tenant field while
+    # a member still gets the same input error as before.
+    'admin_tenant_reassignment': [(
+        '    value: str = Field(min_length=1, max_length=128, pattern=NO_NUL)\n',
+        '    value: str = Field(min_length=1, max_length=128, pattern=NO_NUL)\n'
+        '    tenant: str | None = None\n'), (
+        '        with connect(dsn, schema) as conn:\n            if variant == "vulnerable":\n'
+        '                # 刻意植入',
+        '        if body.tenant is not None and user["role"] != "admin":\n'
+        '            raise HTTPException(422, [{"type": "extra_forbidden", "loc": ["body", "tenant"],\n'
+        '                                       "msg": "Extra inputs are not permitted", "input": body.tenant}])\n'
+        '        with connect(dsn, schema) as conn:\n            if variant == "vulnerable":\n'
+        '                # 刻意植入'), (
+        "UPDATE items SET value=%s WHERE id=%s AND tenant=%s AND (owner=%s OR %s='admin') RETURNING *\", (body.value, item_id,",
+        "UPDATE items SET value=%s, tenant=COALESCE(%s, tenant) WHERE id=%s AND tenant=%s AND (owner=%s OR %s='admin') "
+        "RETURNING *\", (body.value, body.tenant, item_id,")],
+    # 依覆寫標頭改變請求方法。 / Rewrites the request method from an override header.
+    'method_override_honored': (
+        '    @app.get("/health")\n',
+        '    @app.middleware("http")\n'
+        '    async def method_override(request, call_next):\n'
+        '        override = request.headers.get("x-http-method-override")\n'
+        '        if override:\n'
+        '            request.scope["method"] = override.upper()\n'
+        '        return await call_next(request)\n\n'
+        '    @app.get("/health")\n'),
+    # 不存在的項目回應與無權讀取不同，可用來列舉編號。 / A missing item answers differently from a forbidden one, which
+    # enumerates ids.
+    'missing_item_distinguishable': (
+        '        if row is None or (variant == "fixed" and not permitted(row, user)):\n'
+        '            raise HTTPException(404, "item not found")\n        return row',
+        '        if row is None:\n'
+        '            raise HTTPException(404, "no such item")\n'
+        '        if row is None or (variant == "fixed" and not permitted(row, user)):\n'
+        '            raise HTTPException(404, "item not found")\n        return row'),
+    # 匯出結果以租戶為鍵快取，刪除後仍回傳舊資料。 / Export results are cached per tenant and keep serving old data
+    # after deletes.
+    'export_served_from_cache': [(
+        '    @app.get("/admin/export")\n',
+        '    export_cache = {}\n\n    @app.get("/admin/export")\n'), (
+        '            return conn.execute("SELECT * FROM items WHERE tenant=%s ORDER BY id", (user["tenant"],)).fetchall()',
+        '            rows = conn.execute("SELECT * FROM items WHERE tenant=%s ORDER BY id", (user["tenant"],)).fetchall()\n'
+        '        return export_cache.setdefault(user["tenant"], rows)')],
+})
+
 EXPECTED = {
     'cross_user_password_accepted': {"another user's password denied without session"},
+    'unsigned_token_accepted': {'unsigned self-describing token denied'},
+    'header_identity_fallback': {'identity outside the session cannot authenticate'},
+    'admin_tenant_reassignment': {'admin cannot reassign tenant'},
+    'method_override_honored': {'method override header cannot delete'},
+    'missing_item_distinguishable': {'missing item indistinguishable from forbidden'},
+    'export_served_from_cache': {'admin export reflects deletions'},
     'role_header_grants_admin': {'role header cannot grant admin'},
     'tenant_query_widens_export': {'tenant query cannot widen admin export'},
     'first_tenant_only': {'second-tenant owner reads own data'},
     'write_outlives_kill': {'no delayed or out-of-band state changes'},
-    'tenant_mass_assignment': {'tenant field cannot be reassigned'},
+    'tenant_mass_assignment': {'tenant field cannot be reassigned', 'admin cannot reassign tenant'},
     'health_leaks_items': {'health exposes only readiness'},
     'variant_gated_backdoor': seeded_defects(POLICY['gate_contracts']['AUTH']),
     'expired_session_accepted': {'expired session read denied', 'expired session logout denied',
@@ -194,7 +269,7 @@ EXPECTED = {
     'patch_weaker_session_check': {'anonymous write denied', 'forged bearer write denied',
                                    'expired session write denied', 'logged-out session write denied'},
     'delayed_cross_tenant_write': {'no delayed or out-of-band state changes'},
-    'unknown_token_admin_fallback': {'random bearer token denied'},
+    'unknown_token_admin_fallback': {'random bearer token denied', 'unsigned self-describing token denied'},
     'unauthenticated_put_route': {'unlisted item method rejected without side effect'},
     'hidden_create_route': {'unlisted item create not found'},
     'denied_read_header_leak': {'bob: unauthorized read denied without data',

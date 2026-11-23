@@ -15,7 +15,7 @@ def test_identical_oracle_rejects_vulnerable_and_accepts_fixed():
     vulnerable = run_authorization(dsn, "vulnerable")
     fixed = run_authorization(dsn, "fixed")
     contract = json.loads((Path(__file__).resolve().parents[1] / "security/policy.json").read_text())["gate_contracts"]["AUTH"]
-    assert len(vulnerable) == len(fixed) == len(contract["case_ids"]) == 54
+    assert len(vulnerable) == len(fixed) == len(contract["case_ids"]) == 60
     failed = {x["case"] for x in vulnerable if not x["passed"]}
     assert failed == set(contract["seeded_defect_case_ids"]) == {
         "bob: unauthorized read denied without data",
@@ -135,4 +135,21 @@ def test_identity_and_tenant_cases_are_in_the_contract_and_pass_on_both_variants
              "role header cannot grant admin", "tenant query cannot widen admin export"}
     assert added <= set(contract["case_ids"])
     assert not added & set(contract["seeded_defect_case_ids"])
-    assert len(contract["case_ids"]) == 54
+    assert len(contract["case_ids"]) == 60
+
+
+def test_identity_source_and_boundary_cases_fill_the_contract_to_the_roe_cap():
+    """六個身分來源與邊界案例在契約內、不是植入缺陷，且契約正好用滿 RoE 的案例上限。
+
+    The six identity-source and boundary cases are in the contract, are not seeded defects, and the contract exactly
+    fills the RoE case cap."""
+    root = Path(__file__).resolve().parents[1]
+    contract = json.loads((root / "security/policy.json").read_text())["gate_contracts"]["AUTH"]
+    roe = json.loads((root / "security/roe.json").read_text())
+    added = {"unsigned self-describing token denied", "identity outside the session cannot authenticate",
+             "admin cannot reassign tenant", "method override header cannot delete",
+             "missing item indistinguishable from forbidden", "admin export reflects deletions"}
+    assert added <= set(contract["case_ids"])
+    assert not added & set(contract["seeded_defect_case_ids"])
+    assert len(contract["case_ids"]) == len(set(contract["case_ids"])) == roe["max_cases"] == 60
+

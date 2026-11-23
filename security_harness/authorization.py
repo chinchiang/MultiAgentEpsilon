@@ -1,6 +1,7 @@
 """可信 oracle：核對完整合成回應契約與測試資料狀態。
 
 Trusted oracle: exact synthetic response contracts and complete fixture state."""
+import base64
 from copy import deepcopy
 from datetime import datetime, timedelta, timezone
 import hashlib
@@ -150,6 +151,16 @@ flight when it was stopped and counts as a delayed side effect."""
     check("anonymous denied", "get", "/items/1", 401, {"detail": "authentication required"})
     check("forged bearer denied", "get", "/items/1", 401, {"detail": "authentication required"},
           headers={"Authorization": "Bearer invalid"})
+    # 身分只能來自伺服器端的 session：自帶身分宣告的未簽章權杖，以及標頭、cookie、查詢參數自稱的身分，都不算。 /
+    # Identity comes only from a server-side session: neither an unsigned token carrying its own claims nor an
+    # identity asserted through headers, a cookie or the query string counts.
+    claims = base64.urlsafe_b64encode(json.dumps(
+        {"sub": "admin", "tenant": "t1", "role": "admin"}, separators=(",", ":")).encode()).rstrip(b"=").decode()
+    check("unsigned self-describing token denied", "get", "/admin/export", 401,
+          {"detail": "authentication required"}, headers={"Authorization": "Bearer eyJhbGciOiJub25lIn0." + claims + "."})
+    check("identity outside the session cannot authenticate", "get", "/admin/export?access_token=admin&user=admin",
+          401, {"detail": "authentication required"},
+          headers={"X-User": "admin", "X-Tenant": "t1", "X-Forwarded-User": "admin", "Cookie": "session=admin; user=admin"})
     # /health 不需身分，所以也屬於契約：只能回報就緒狀態，不得夾帶其他資料。 / /health needs no identity, so it is
     # part of the contract too: it reports readiness and nothing else.
     check("health exposes only readiness", "get", "/health", 200,
@@ -191,6 +202,12 @@ flight when it was stopped and counts as a delayed side effect."""
           {"detail": [{"type": "extra_forbidden", "loc": ["body", "tenant"],
                        "msg": "Extra inputs are not permitted", "input": "t2"}]},
           headers=headers["alice"], json={"value": "x", "tenant": "t2"})
+    # 管理員的寫入權也只到欄位 value：能改租戶就能把資料搬出租戶邊界。 / An admin's write privilege stops at the value
+    # field too: reassigning the tenant would carry data across the tenant boundary.
+    check("admin cannot reassign tenant", "patch", "/items/2", 422,
+          {"detail": [{"type": "extra_forbidden", "loc": ["body", "tenant"],
+                       "msg": "Extra inputs are not permitted", "input": "t2"}]},
+          headers=headers["admin"], json={"value": "x", "tenant": "t2"})
     before = observe()
     expected = deepcopy(before)
     alice_hash = hashlib.sha256(headers["alice"]["Authorization"][7:].encode()).hexdigest()
@@ -266,6 +283,14 @@ flight when it was stopped and counts as a delayed side effect."""
     check("unlisted item method rejected without side effect", "put", "/items/3", 405,
           {"detail": "Method Not Allowed"}, allow=b"GET", headers=headers["carol"],
           json={"value": "put-update", "owner": "admin", "tenant": "t1"})
+    # 方法只看請求列：覆寫標頭不得把 POST 變成 DELETE。 / The method is the request line's; an override header must
+    # not turn a POST into a DELETE.
+    check("method override header cannot delete", "post", "/items/3", 405, {"detail": "Method Not Allowed"},
+          allow=b"GET", headers={**headers["carol"], "X-HTTP-Method-Override": "DELETE", "X-Method-Override": "DELETE"})
+    # 不存在與無權讀取的回應必須相同，否則可用來列舉其他租戶的項目編號。 / A missing item and a forbidden one must
+    # answer alike, or the difference enumerates other tenants' item ids.
+    check("missing item indistinguishable from forbidden", "get", "/items/999", 404, {"detail": "item not found"},
+          headers=headers["bob"])
     check("unlisted item create not found", "post", "/items", 404, {"detail": "Not Found"},
           headers=headers["carol"], json={"id": 9, "value": "created", "owner": "carol", "tenant": "t1"})
     check("unlisted route not found", "get", "/" + secrets.token_hex(8), 404, {"detail": "Not Found"},
@@ -281,6 +306,9 @@ flight when it was stopped and counts as a delayed side effect."""
     expected = expect(lambda state: state.__setitem__('items', [i for i in state['items'] if i['id'] != 1]))
     check("same-tenant admin delete allowed", "delete", "/items/1", 204, None,
           expected=expected, headers=headers['admin'])
+    # 刪除後的讀取必須反映現況：快取或舊快照不得繼續提供已刪除的資料。 / A read after the deletes must show the current
+    # state: no cache or old snapshot may keep serving deleted data.
+    check("admin export reflects deletions", "get", "/admin/export", 200, [], headers=headers['admin'])
     # 靜置讓排程中的寫入落地，再停止候選做最終比對，之後不會再有任何寫入。 / Settle so scheduled writes land, then
     # stop the candidate for the final comparison, after which no write can arrive.
     time.sleep(settle)
