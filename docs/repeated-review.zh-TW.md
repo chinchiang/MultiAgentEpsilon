@@ -54,7 +54,7 @@
 - `stability` 逐供應商、逐案例呈現有效輪次與不同回答數；任何一輪未完成或棄答，`all_rounds_agree` 就是未知。全部一致也可能全部錯誤，仍須看標準答案比對。
 - 用量是已回報的小計，缺值維持未知；金額成本仍為未知。取消無法保證遠端推論或計費同步停止。
 
-報告記錄取樣政策：Gemini／GLM／LM Studio 使用固定溫度，Bedrock 使用模型預設值。重複觀測不是獨立樣本，也無法證明模型訓練資料彼此獨立。小樣本不提供偏誤降低結論，仍標示 `NOT_ESTABLISHED`。人工案例註記綁定整份報告，涵蓋所有預定輪次，不得挑選最有利的一輪充作整批核准。
+報告記錄取樣政策：Gemini／GLM／LM Studio 使用固定溫度，Bedrock 使用模型預設值。重複觀測不是獨立樣本，也無法證明模型訓練資料彼此獨立；跨批次比較（`scripts/model_compare.py`）的 95% Wilson 區間因此以不重複案例數為樣本（`effective_n`＝觀測數除以輪數，`n` 仍為觀測數），重複輪次不會讓區間變窄。小樣本不提供偏誤降低結論，仍標示 `NOT_ESTABLISHED`。人工案例註記綁定整份報告，涵蓋所有預定輪次，不得挑選最有利的一輪充作整批核准。
 
 ## 2026-10-05 有限真實驗證
 
@@ -107,7 +107,7 @@ Diagnostics use fixed codes, never parser messages, raw failed output, field pat
 
 Aggregate counts before calculating ratios. Planned means case-round observations, not distinct cases. Valid-response rate includes valid ABSTAIN; coverage excludes it. Failures/unrun cases remain in all-positive miss rate and coverage denominators. Pairwise disagreement shows both comparable and planned counts; two failures do not mean agreement. Per-case/provider stability is unknown if any round is incomplete or abstains; unanimous wrong answers remain wrong. Usage is a reported subtotal, absent values and monetary cost stay unknown, and cancellation does not guarantee remote billing stops.
 
-Sampling is recorded: Gemini/GLM/LM Studio temperature=0; Bedrock model default. Repeated observations and model training data are not established as independent. Small samples retain NOT_ESTABLISHED for bias reduction. Human notes bind the entire report, not a favorable selected round.
+Sampling is recorded: Gemini/GLM/LM Studio temperature=0; Bedrock model default. Repeated observations and model training data are not established as independent, so the 95% Wilson intervals of the cross-batch comparison (`scripts/model_compare.py`) take distinct cases as the sample (`effective_n` is the observations divided by the rounds, while `n` stays the observations) and repeated rounds never narrow them. Small samples retain NOT_ESTABLISHED for bias reduction. Human notes bind the entire report, not a favorable selected round.
 
 ## Historical observations
 

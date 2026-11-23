@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""審查者使用的必要 Actions 檢查來源核對工具，暫行且唯讀。專用 App 尚未發布前，其他工作流程也能用共用 App 產生同名 trusted-security-pilot；核准或合併前須從 GitHub 中繼資料確認 head 上每個同名檢查皆來自正確 head 的可信 pull_request_target。任何外來或手動 run，或 head 上的同名 commit status 都阻擋；最新檢查依建立順序判定，且須屬於 run 目前的 attempt（每個檢查的 attempt 由其 job 讀回）。該事件使用 PR base 分支 YAML，而 run 未記錄 base，故另綁定 head 分支，拒絕同 SHA／儲存庫／分支的任何狀態 PR 指向其他 base 或曾改 base。這只是暫行中繼資料查核，專用發布器另需密碼學簽章。
+"""審查者使用的必要 Actions 檢查來源核對工具，暫行且唯讀。專用 App 尚未發布前，其他工作流程也能用共用 App 產生同名 trusted-security-pilot；核准或合併前須從 GitHub 中繼資料確認 head 上每個同名檢查皆來自正確 head 的可信 pull_request_target。任何外來或手動 run，或 head 上的同名 commit status 都阻擋；最新檢查依建立順序判定，且須屬於 run 目前的 attempt（每個檢查的 attempt 由其 job 讀回）。該事件使用 PR base 分支 YAML，而 run 未記錄 base，故另綁定 head 分支，拒絕同儲存庫／分支的任何狀態 PR 指向其他 base 或曾改 base（head 相同者一律檢查；head 已移走者，除非確定在 run 建立前已關閉，也檢查）。這只是暫行中繼資料查核，專用發布器另需密碼學簽章。
 
 Reviewer-side source check for the required Actions check (interim, read-only).
 
@@ -13,8 +13,9 @@ to the run's current attempt, read for each check from its own job.
 
 Such a run executes the workflow file from the PR's base branch, which run metadata
 does not record; each run is therefore also bound to this PR's head branch, and any
-PR in any state with the same SHA, head repository and branch that targets another
-base or has a base-retarget timeline event blocks. This is an interim metadata
+PR in any state from the same head repository and branch that targets another base
+or has a base-retarget timeline event blocks: every one sharing the head, and every
+one whose head has moved unless it provably closed before the run was created. This is an interim metadata
 check; the dedicated publisher additionally requires cryptographic attestations.
 """
 import argparse

@@ -177,6 +177,24 @@ def test_same_head_pr_into_another_base_cannot_vouch_for_the_check(twin, branch,
         verify(github)
 
 
+@pytest.mark.parametrize("closed_at,allowed", [("2026-11-01T10:00:01Z", False), ("2026-11-01T09:59:59Z", True)])
+def test_same_branch_pr_into_another_base_whose_head_moved_before_it_closed(closed_at, allowed):
+    """假說實測：同分支 PR 指向帶有改過 workflow 的 base，跑出同名綠燈後把分支移到別的 commit 再關閉，之後分支移回原
+    commit 另開 PR。舊判斷只比對目前的 head，會放行；現在只要它不是確定在 run 建立前關閉，就拒絕。
+
+    The hypothesis, reproduced: a same-branch PR into a base carrying a modified workflow earns a same-named green
+    check, moves the branch to another commit and closes; the branch then returns to the original commit under a new
+    PR. Comparing only current heads allowed it; now it is refused unless it provably closed before the run."""
+    twin = {**pull(number=6, base="evil", head="c" * 40, state="closed"), "closed_at": closed_at}
+    github = scenario(twin)
+    evaluate(github, trusted_run(github, created_at="2026-11-01T10:00:00Z"))
+    if allowed:
+        assert verify(github)["decision"] == "ALLOW"
+    else:
+        with pytest.raises(checker.Denied, match="^FOREIGN_BASE_PR$"):
+            verify(github)
+
+
 def test_unrelated_prs_into_other_bases_do_not_block():
     github = scenario(pull(number=6, base="release", head="d" * 40, ref="other", state="closed"))
     evaluate(github, trusted_run(github))

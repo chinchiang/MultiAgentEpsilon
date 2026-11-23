@@ -5,6 +5,7 @@ Model provider configuration and destination authorization.
 A remote host that may receive an API key must be listed in the reviewed model
 RoE; only LM Studio's literal loopback HTTP needs no entry.
 """
+import ast
 import hashlib
 import json
 import os
@@ -109,10 +110,48 @@ def configured_adapter(provider, roe_sha256, work=None, http=None):
                           AwsCLI(executable, run_directory=work, timeout_seconds=seconds))
 
 
+def imported_modules(path):
+    """這個檔案匯入的本專案模組檔（security_harness 與 scripts 之下），含函式內的延後匯入。 / This file's imports that
+    are project module files under security_harness and scripts, including imports deferred inside functions."""
+    package = path.parent.relative_to(ROOT).parts
+    found = set()
+    for node in ast.walk(ast.parse(path.read_bytes())):
+        if isinstance(node, ast.Import):
+            names = [alias.name.split('.') for alias in node.names]
+        elif isinstance(node, ast.ImportFrom):
+            base = list(package[:len(package) - node.level + 1]) if node.level else []
+            base += node.module.split('.') if node.module else []
+            # from 套件 import 名稱：名稱可能是子模組。 / from package import name: the name may be a submodule.
+            names = [base, *([*base, alias.name] for alias in node.names)]
+        else:
+            continue
+        for parts in names:
+            if parts and parts[0] in ('security_harness', 'scripts'):
+                for candidate in (ROOT.joinpath(*parts).with_suffix('.py'), ROOT.joinpath(*parts, '__init__.py')):
+                    if candidate.is_file():
+                        found.add(candidate)
+    return found
+
+
+def implementation_files():
+    """模型評測實際用到的程式：模型套件、模型操作入口，以及它們直接或間接匯入的共用模組。與模型評測無關的
+    security_harness 模組不在其中，改動它們不會讓既有報告變成無法比較。 / The code the model benchmark actually uses:
+    the model package, the model entry points and every shared module they import directly or transitively. Modules
+    of security_harness unrelated to the benchmark are left out, so changing them does not make existing reports
+    incomparable."""
+    files = {ROOT / 'scripts/__init__.py', ROOT / 'security_harness/__init__.py',
+             *ROOT.glob('scripts/model_*.py'), *ROOT.glob('security_harness/llm/**/*.py')}
+    pending = list(files)
+    while pending:
+        for module in imported_modules(pending.pop()) - files:
+            files.add(module)
+            pending.append(module)
+    return files
+
+
 def implementation_digest():
-    """綁定模型實作、套件初始化、共用核心、RoE 與 lock。 / Bind model code, package initializers, shared core, RoE and lock."""
-    paths = sorted({ROOT / 'scripts/__init__.py', ROOT / 'security_harness/__init__.py',
-                    ROOT / 'requirements.lock', ROOT / 'security/model-roe.json',
-                    *ROOT.glob('scripts/model_*.py'), *ROOT.glob('security_harness/**/*.py')})
+    """綁定模型實作、套件初始化、實際匯入的共用核心、RoE 與 lock。 / Bind model code, package initializers, the shared
+    core it actually imports, the RoE and the lock."""
+    paths = sorted({ROOT / 'requirements.lock', ROOT / 'security/model-roe.json', *implementation_files()})
     manifest = [(p.relative_to(ROOT).as_posix(), hashlib.sha256(p.read_bytes()).hexdigest()) for p in paths]
     return hashlib.sha256(json.dumps(manifest, separators=(",", ":")).encode()).hexdigest()

@@ -222,3 +222,95 @@ def test_publication_reverification_refuses_reviews_that_changed_since_collectio
     assert seen == [('base', 'main', {'id': 100}), (5, ['reviewer'], {'author'}, 'main')]
     assert trust.reverify_publication(5, {'number': 5}, {'id': 100}, ['reviewer'],
                                       {'excluded_identities': ['author'], 'review_ids': [12]}, 'main') is None
+
+
+def moved_twin(**fields):
+    """同一分支的另一個 PR，head 已移到別的 commit。 / Another PR of the same branch whose head moved to another commit."""
+    return {'number': 6, 'state': 'closed', 'base': {'ref': 'main', 'repo': {'id': 10}},
+            'head': {'sha': 'c' * 40, 'ref': 'feature', 'repo': {'id': 10, 'full_name': 'owner/repo'}}, **fields}
+
+
+RUN_CREATED = '2026-11-01T10:00:00Z'
+
+
+@pytest.mark.parametrize('twin,histories,code', [
+    # 指向別的 base，在 run 建立之後才關閉：可能就是這個 run 的來源。 / Targets another base and closed only after the
+    # run was created: it may be this run's source.
+    (moved_twin(base={'ref': 'evil', 'repo': {'id': 10}}, closed_at='2026-11-01T10:00:01Z'), {5: [], 6: []},
+     'FOREIGN_BASE_PR'),
+    # 與 run 建立同一秒關閉也不算「之前」。 / Closing in the very second the run was created is not before it.
+    (moved_twin(base={'ref': 'evil', 'repo': {'id': 10}}, closed_at=RUN_CREATED), {5: [], 6: []}, 'FOREIGN_BASE_PR'),
+    # 仍開啟、沒有關閉時間或時間格式不符，都不能證明它不是來源。 / Still open, no close time or a malformed one: none
+    # proves it is not the source.
+    (moved_twin(base={'ref': 'evil', 'repo': {'id': 10}}, state='open', closed_at=None), {5: [], 6: []},
+     'FOREIGN_BASE_PR'),
+    (moved_twin(base={'ref': 'evil', 'repo': {'id': 10}}), {5: [], 6: []}, 'FOREIGN_BASE_PR'),
+    (moved_twin(base={'ref': 'evil', 'repo': {'id': 10}}, closed_at='yesterday'), {5: [], 6: []}, 'FOREIGN_BASE_PR'),
+    # base 目前是 main，但曾改過 base；或它的 timeline 沒有讀到。 / Its base is main now but was retargeted, or its
+    # timeline was never read.
+    (moved_twin(closed_at='2026-11-01T10:00:01Z'), {5: [], 6: [{'event': 'base_ref_changed'}]},
+     'BASE_RETARGETED_UNVERIFIABLE'),
+    (moved_twin(closed_at='2026-11-01T10:00:01Z'), {5: []}, 'BASE_HISTORY_MISSING'),
+])
+def test_same_branch_pr_whose_head_moved_can_still_be_the_run_source(twin, histories, code):
+    """PR 關閉前把分支移到別的 commit，就不再記錄 run 的 commit；只要無法證明它在 run 建立前已關閉，仍視為可能的來源。
+
+    A PR whose branch moved to another commit before it closed no longer records the run's commit; unless it provably
+    closed before the run was created it still counts as a possible source."""
+    from security_harness.github_trust import validate_run_base
+    run, pr, pulls, _ = run_base_case()
+    with pytest.raises(Denied, match=f'^{code}$'):
+        validate_run_base({**run, 'created_at': RUN_CREATED}, pr, [*pulls, twin], 'main', histories)
+
+
+@pytest.mark.parametrize('created', [RUN_CREATED, None, 'soon'])
+def test_run_without_a_usable_creation_time_excludes_no_same_branch_pr(created):
+    """run 的建立時間讀不到或格式不符時，不能用它排除任何同分支 PR。
+
+    A run whose creation time is missing or malformed excludes no same-branch PR."""
+    from security_harness.github_trust import validate_run_base
+    run, pr, pulls, histories = run_base_case()
+    twin = moved_twin(base={'ref': 'evil', 'repo': {'id': 10}}, closed_at='2026-11-01T09:59:59Z')
+    run = {**run, 'created_at': created}
+    if created == RUN_CREATED:
+        # 確定在 run 建立前關閉：不可能是來源，也不需要它的 timeline。 / Provably closed before the run was created: it
+        # cannot be the source and its timeline is not needed.
+        validate_run_base(run, pr, [*pulls, twin], 'main', histories)
+    else:
+        with pytest.raises(Denied, match='^FOREIGN_BASE_PR$'):
+            validate_run_base(run, pr, [*pulls, twin], 'main', histories)
+
+
+@pytest.mark.parametrize('field,value', [('ref', 'other'), ('repo', {'id': 20, 'full_name': 'fork/repo'})])
+def test_pr_of_another_branch_or_repository_is_never_a_possible_source(field, value):
+    """另一個分支或 fork 的 PR 不可能產生回報此分支的 run；它指向別的 base 也不阻擋。
+
+    A PR of another branch or fork cannot produce a run that reports this branch; its other base does not block."""
+    from security_harness.github_trust import validate_run_base
+    run, pr, pulls, histories = run_base_case()
+    twin = moved_twin(base={'ref': 'evil', 'repo': {'id': 10}}, state='open', closed_at=None)
+    twin['head'] = {**twin['head'], field: value}
+    validate_run_base({**run, 'created_at': RUN_CREATED}, pr, [*pulls, twin], 'main', histories)
+
+
+def test_run_base_reads_each_possible_source_timeline_once_and_skips_ruled_out_prs():
+    """timeline 只為可能的來源讀取，同一 PR 在多個 run 之間只讀一次；已排除的 PR 不讀。
+
+    Timelines are read only for possible sources, once per PR across runs; a ruled-out PR is never read."""
+    from security_harness.github_trust import GitHubTrust
+    github, pr, run = repository()
+    live = moved_twin(number=6, closed_at='2026-11-01T10:00:01Z')
+    gone = moved_twin(number=7, base={'ref': 'evil', 'repo': {'id': 10}}, closed_at='2026-11-01T09:59:59Z')
+    github.add('pulls?state=all&head=owner:feature', [pr, live, gone])
+    github.add('issues/6/timeline', [])
+    evidence = GitHubTrust(GitHubReader(github, 'owner/repo')).run_base(pr, 'main')
+    evidence.validate({**run, 'created_at': RUN_CREATED})
+    evidence.validate({**run, 'created_at': RUN_CREATED})
+    read = [path for _, path, _ in github.requests if path.endswith('/timeline')]
+    assert sorted(read) == ['/repos/owner/repo/issues/5/timeline', '/repos/owner/repo/issues/6/timeline']
+    # 較早建立的 run 無法排除 #7；它指向別的 base，所以拒絕。 / An earlier run cannot rule out #7, which targets
+    # another base, so it is refused.
+    github.add('issues/7/timeline', [])
+    with pytest.raises(Denied, match='^FOREIGN_BASE_PR$'):
+        evidence.validate({**run, 'created_at': '2026-11-01T09:00:00Z'})
+
