@@ -554,3 +554,31 @@ def test_blind_review_plan_digest_binds_the_schema_version_and_the_task(field, v
     assert {'schema_version', 'task'} <= set(life.BLIND_REVIEW_IMMUTABLE)
     assert life.plan_digest({**report, field: value}) != life.plan_digest(report)
 
+
+
+@pytest.mark.parametrize('planted', [
+    {'status': 'ERROR', 'code': 'TIMEOUT'},
+    {'status': 'CANCELLED', 'code': None},
+    {'status': 'SUCCESS', 'code': None, 'review': {'verdict': 'SAFE'}, 'call_id': 'planted'},
+    {'provider': 'mock-review-b'},
+])
+def test_blind_review_worker_runs_checks_marked_finished_on_disk(tmp_path, planted):
+    """檢查的狀態、結果與供應商不在計畫摘要內：磁碟上預先把某筆檢查標成已結束（或改掉供應商），worker 仍照計畫執行每一筆，
+    不會因此少呼叫、藏掉某個案例。
+
+    A check's status, result and provider are outside the plan digest: with one check marked finished on disk
+    beforehand (or its provider changed), the worker still runs every planned check, so no call is skipped and no case
+    hidden."""
+    run = life.plan_review(['mock-review-a'], ['B01', 'B02'], root=tmp_path).record()
+    report = json.loads(run.path.read_text())
+    assert [c['status'] for c in report['checks']] == ['NOT_RUN', 'NOT_RUN']
+    report['checks'][0].update(planted)
+    life.persist(run.path, report)
+    assert life.plan_digest(report) == run.digest
+    code = run.run_worker()
+    data = json.loads(run.path.read_text())
+    assert [(c['provider'], c['case_id'], c['review_id']) for c in data['checks']] == [
+        (p['provider'], p['case_id'], p['review_id']) for p in report['plan']]
+    assert [c['status'] for c in data['checks']] == ['SUCCESS', 'SUCCESS'] and len(data['calls']) == 2
+    assert [c['call_id'] for c in data['checks']] == [c['call_id'] for c in data['calls']]
+    assert (code, run.finish(returncode=code)['status']) == (0, 'COMPLETE')

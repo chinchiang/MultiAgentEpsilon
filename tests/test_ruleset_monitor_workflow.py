@@ -68,3 +68,28 @@ def test_a_failed_monitor_opens_one_issue_without_running_third_party_code():
 
 def test_the_monitor_workflow_comments_do_not_promise_an_owner_notification():
     assert 'notifies the owner' not in WORKFLOW and '通知擁有者' not in WORKFLOW
+
+
+def test_the_alert_cannot_be_silenced_by_ignoring_the_monitor_result_or_the_open_alarm():
+    """示警的兩個前提都綁定：監看步驟的失敗必須成為 job 的結果（不可 continue-on-error），且只有在「標題完全相同、由
+    Actions 開的」既有 issue 數為 0 時才開新的。只比對子字串的話，拿掉任一項測試仍會通過。
+
+    Both premises of the alarm are pinned: a failed monitor step must become the job's result (no continue-on-error),
+    and a new issue opens only when the count of open issues by Actions with exactly this title is 0. Substring checks
+    alone would still pass with either removed."""
+    assert 'continue-on-error' not in WORKFLOW
+    monitor, notify = job('monitor'), job('notify')
+    # 監看指令是該步驟唯一的內容：不接 `|| true` 之類把失敗吃掉的寫法。 / The monitor command is the whole step:
+    # nothing like `|| true` swallows its failure.
+    assert re.search(r'^        run: python -I scripts/monitor_ruleset\.py --output artifacts/ruleset-monitor\.json$',
+                     monitor, re.M)
+    assert 'if:' not in monitor.replace('if: always()', '', 1) and monitor.count('if: always()') == 1
+    script = [line.strip() for line in notify[notify.index('        run: |'):].splitlines()[1:]
+              if line.strip() and not line.strip().startswith('#')]
+    assert script[0] == "title='Ruleset monitor failed: main protection drift or read error'"
+    assert script[1:3] == [
+        'open=$(gh issue list --state open --search "author:app/github-actions in:title \\"$title\\"" --json title \\',
+        '--jq "map(select(.title == \\"$title\\")) | length")']
+    assert script[3] == 'if [ "$open" -eq 0 ]; then' and script[-1] == 'fi'
+    assert script[4].startswith('gh issue create --title "$title" --body "')
+    assert sum(line.startswith(('gh ', 'if ', 'fi', 'open=')) for line in script) == 4

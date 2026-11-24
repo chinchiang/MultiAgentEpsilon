@@ -315,6 +315,13 @@ async def run_worker(root, run_id, plan_digest, mode=None):
     # 判定只由這次執行寫入：磁碟上預先放好的 pending_status 不在計畫摘要內，先丟掉。 / Only this run writes the
     # decision: a pending_status planted on disk is outside the plan digest, so it is dropped first.
     report.pop('pending_status', None)
+    if task == 'blind-review':
+        # 檢查的狀態、結果與所屬呼叫同樣不在計畫摘要內：一律由計畫重建為尚未執行，磁碟上預先標成已結束的檢查不會因此
+        # 被略過。 / A check's status, result and call are outside the plan digest too: every check is rebuilt from the
+        # plan as not run, so one marked finished on disk beforehand is never skipped.
+        report['checks'] = [{**planned, 'status': 'NOT_RUN', 'code': None, 'review': None, 'call_id': None,
+                             'request_sha256': check['request_sha256']}
+                            for planned, check in zip(report['plan'], report['checks'], strict=True)]
     # 限額只取自計畫，不另行重算。 / The limits come from the plan only and are never recomputed.
     gateway = Gateway(Limits(**report['limits']))
     report['calls'] = gateway.evidence

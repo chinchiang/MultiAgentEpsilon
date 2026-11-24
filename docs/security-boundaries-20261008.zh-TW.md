@@ -33,7 +33,7 @@
 | GLM 缺少完整離線路徑 | 模擬 HTTP 走實際 adapter、盲審 worker、評分與清理 | 完整離線驗收；依使用者指示不連線內網 |
 | 固定 Actions／工具版本 | checkout 7.0.1、setup-python 7.0.0、upload-artifact 7.0.2、attest 4.2.2、cache 6.1.0（2026-11-09 加入）固定 SHA；CLI 固定雜湊 | AWS CLI 2.37.10 官方 PGP 驗證後鎖定；簽章驗證 CLI 2.102.0 |
 
-`base_ref_changed` 採保守拒絕，包含主分支來回切換後的重跑。若要重新評估，使用新的 head 分支建立 PR；不以時間戳推測已排隊事件的 workflow 來源。共用 Actions 同名必要檢查的人工驗證仍採保守阻擋；專用 App 來源正式綁定後，才可消除共用來源的限制。
+`base_ref_changed` 採保守拒絕，包含主分支來回切換後的重跑；base 分支被合併刪除後 GitHub 自動改 base 的 `automatic_base_change_succeeded` 同樣拒絕。timeline 讀到空頁才停，不把不足額的一頁當成最後一頁。若要重新評估，使用新的 head 分支建立 PR；不以時間戳推測已排隊事件的 workflow 來源。共用 Actions 同名必要檢查的人工驗證仍採保守阻擋；專用 App 來源正式綁定後，才可消除共用來源的限制。
 
 ## 本機驗收
 
@@ -87,7 +87,7 @@ This historical round started from main ba05e1c and inherited only public histor
 | GLM missing full offline path | Mock HTTP exercises adapter, worker, scoring, cleanup; no internal live connection |
 | Tool/Action pinning | checkout 7.0.1, setup-python 7.0.0, upload-artifact 7.0.2, attest 4.2.2 and cache 6.1.0 (added 2026-11-09) pinned to SHAs; AWS CLI 2.37.10 verified by official PGP, verifier CLI 2.102.0 by hashes |
 
-base_ref_changed is conservatively rejected even after retargeting back and rerunning. Use a new head branch/PR; timestamps cannot establish queued workflow source. Shared-Actions same-name checks remain conservatively blocked until dedicated source binding.
+base_ref_changed is conservatively rejected even after retargeting back and rerunning, and so is automatic_base_change_succeeded, which GitHub records when it retargets a PR after its base branch was merged and deleted. Timelines are read up to an empty page, so a short page is never taken as the last. Use a new head branch/PR; timestamps cannot establish queued workflow source. Shared-Actions same-name checks remain conservatively blocked until dedicated source binding.
 
 ## Historical local acceptance
 
