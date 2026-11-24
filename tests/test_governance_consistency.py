@@ -6,6 +6,8 @@ import json
 import re
 from pathlib import Path
 
+import pytest
+
 ROOT = Path(__file__).resolve().parents[1]
 
 
@@ -83,33 +85,49 @@ def test_ruleset_monitor_docs_name_the_issue_alert_instead_of_an_owner_notificat
     assert "60 天" in text and "60 days" in text
 
 
-def declared_requirements():
-    """requirements.in 的直接依賴：套件名（正規化、去掉 extras）對應釘住的版本。 / Direct dependencies in requirements.in:
-    normalized name without extras mapped to its pinned version."""
-    declared = {}
-    for line in (ROOT / "requirements.in").read_text().splitlines():
+REQUIREMENT = re.compile(r"([A-Za-z0-9_.-]+)(?:\[([A-Za-z0-9_.,-]+)\])?==([0-9][A-Za-z0-9_.+-]*)")
+
+
+def normalized(name):
+    return re.sub(r"[-_.]+", "-", name).lower()
+
+
+def declared_lines(text=None):
+    """requirements.in 的每一行：（正規化套件名、extras、釘住的版本）。 / Every line of requirements.in: (normalized
+    name, extras, pinned version)."""
+    text = (ROOT / "requirements.in").read_text() if text is None else text
+    rows = []
+    for line in text.splitlines():
         line = line.split("#", 1)[0].strip()
         if not line:
             continue
-        match = re.fullmatch(r"([A-Za-z0-9_.-]+)(?:\[[A-Za-z0-9_.,-]+\])?==([0-9][A-Za-z0-9_.+-]*)", line)
+        match = REQUIREMENT.fullmatch(line)
         assert match, f"requirements.in must hold only exact pins: {line}"
-        name = re.sub(r"[-_.]+", "-", match.group(1)).lower()
-        assert name not in declared, f"duplicate requirement: {name}"
-        declared[name] = match.group(2)
-    return declared
+        rows.append((normalized(match.group(1)), set(filter(None, (match.group(2) or "").split(","))), match.group(3)))
+    assert len({name for name, _, _ in rows}) == len(rows), "duplicate requirement"
+    return rows
 
 
-def locked_requirements():
-    """requirements.lock 的每個套件：版本，以及 uv 在 `# via` 註解記下的來源。 / Every package in requirements.lock: its
-    version and the origins uv recorded in the `# via` comment."""
-    locked, current, in_via = {}, None, False
-    for line in (ROOT / "requirements.lock").read_text().splitlines():
-        pin = re.match(r"([A-Za-z0-9_.-]+)==([0-9][A-Za-z0-9_.+-]*)", line)
+def declared_requirements(text=None):
+    """requirements.in 的直接依賴：套件名（正規化、去掉 extras）對應釘住的版本。 / Direct dependencies in requirements.in:
+    normalized name without extras mapped to its pinned version."""
+    return {name: version for name, _, version in declared_lines(text)}
+
+
+def locked_requirements(text=None):
+    """requirements.lock 的每個套件：版本，以及 uv 在 `# via` 註解記下的來源。每個項目只能是「名稱==版本」（不帶 marker、
+    extras），且至少附一個 sha256 雜湊。 / Every package in requirements.lock: its version and the origins uv recorded
+    in the `# via` comment. Each entry is exactly name==version (no marker, no extras) with at least one sha256 hash."""
+    text = (ROOT / "requirements.lock").read_text() if text is None else text
+    locked, hashes, current, in_via = {}, {}, None, False
+    for line in text.splitlines():
         stripped = line.strip()
-        if pin:
-            current, in_via = re.sub(r"[-_.]+", "-", pin.group(1)).lower(), False
+        if line[:1].isalnum():
+            pin = re.fullmatch(r"([A-Za-z0-9_.-]+)==([0-9][A-Za-z0-9_.+-]*) \\", line)
+            assert pin, f"lock entry must be exactly name==version with hashes: {line}"
+            current, in_via = normalized(pin.group(1)), False
             assert current not in locked, f"duplicate lock entry: {current}"
-            locked[current] = {"version": pin.group(2), "via": set()}
+            locked[current], hashes[current] = {"version": pin.group(2), "via": set()}, 0
         elif current and stripped.startswith("# via"):
             in_via = True
             origin = stripped.removeprefix("# via").strip()
@@ -117,9 +135,40 @@ def locked_requirements():
                 locked[current]["via"].add(origin)
         elif current and in_via and stripped.startswith("#"):
             locked[current]["via"].add(stripped.removeprefix("#").strip())
-        elif stripped and not stripped.startswith(("--hash=", "#")):
+        elif current and not in_via and re.fullmatch(r"--hash=sha256:[0-9a-f]{64}(?: \\)?", stripped):
+            hashes[current] += 1
+        elif stripped and not stripped.startswith("#"):
             raise AssertionError(f"unexpected lock line: {line}")
+    assert all(hashes.values()), f"lock entry without a hash: {sorted(n for n, count in hashes.items() if not count)}"
     return locked
+
+
+def extra_mismatches(declared, locked, requires):
+    """直接依賴的 extras 與 lock 是否一致。requires(name) 回傳該套件 metadata 的依賴宣告。宣告的 extra 所需的套件必須在
+    lock 裡並標示來自該依賴；lock 裡標示來自某直接依賴、卻只有未宣告的 extra 才需要的套件，代表 lock 沒有跟著重新產生。
+
+    Whether direct dependencies' extras agree with the lock. requires(name) returns that package's metadata
+    requirements. A package a declared extra needs must be locked and marked as coming from that dependency; a locked
+    package marked as coming from a direct dependency that only an undeclared extra needs means the lock was not
+    recompiled."""
+    from packaging.requirements import Requirement
+    problems = []
+    for name, extras, _ in declared:
+        needed = {}
+        for raw in requires(name) or ():
+            requirement = Requirement(raw)
+            child = normalized(requirement.name)
+            needed.setdefault(child, set())
+            for extra in ("", *sorted(extras)):
+                if requirement.marker is None or requirement.marker.evaluate({"extra": extra}):
+                    needed[child].add(extra)
+        for child, wanted in needed.items():
+            via = name in locked.get(child, {}).get("via", ())
+            if wanted - {""} and not via:
+                problems.append(f"{name}[{','.join(sorted(wanted - {''}))}] needs {child}, absent from the lock")
+            if via and not wanted:
+                problems.append(f"{child} is locked via {name} but no declared extra needs it")
+    return problems
 
 
 def test_lock_is_compiled_from_requirements_in():
@@ -161,3 +210,53 @@ def test_every_locked_package_is_reachable_from_a_declared_requirement():
             pending.extend(child for child, entry in locked.items() if name in entry["via"])
     assert reachable == set(locked)
 
+
+
+def test_declared_extras_match_the_lock():
+    """requirements.in 宣告的 extras 與 lock 一致：拿掉或加上 extra 而沒有重新產生 lock，會在這裡失敗。以已安裝套件的
+    metadata 判斷每個 extra 需要哪些套件。
+
+    The extras declared in requirements.in agree with the lock: dropping or adding an extra without recompiling the
+    lock fails here. Installed package metadata tells which packages each extra needs."""
+    from importlib import metadata
+    declared, locked = declared_lines(), locked_requirements()
+    assert any(extras for _, extras, _ in declared), "requirements.in declares at least one extra"
+    assert extra_mismatches(declared, locked, metadata.requires) == []
+    # 拿掉 extra 而不重新產生 lock：psycopg-binary 仍在 lock 裡，卻沒有任何宣告的 extra 需要它。 / Dropping the extra
+    # without recompiling: psycopg-binary stays locked though no declared extra needs it.
+    stale = declared_lines((ROOT / "requirements.in").read_text().replace("psycopg[binary]", "psycopg"))
+    assert extra_mismatches(stale, locked, metadata.requires) == [
+        "psycopg-binary is locked via psycopg but no declared extra needs it"]
+    # 加上 extra 而不重新產生 lock：該 extra 需要的套件不在 lock 裡。 / Adding an extra without recompiling: what it
+    # needs is missing from the lock.
+    widened = declared_lines((ROOT / "requirements.in").read_text().replace("psycopg[binary]", "psycopg[binary,pool]"))
+    assert extra_mismatches(widened, locked, metadata.requires) == [
+        "psycopg[pool] needs psycopg-pool, absent from the lock"]
+
+
+@pytest.mark.parametrize("old,new,message", [
+    ("psycopg==3.3.6 \\", 'psycopg==3.3.6 ; sys_platform == "linux" \\', "exactly name==version"),
+    ("psycopg==3.3.6 \\", "psycopg[binary]==3.3.6 \\", "exactly name==version"),
+    ("psycopg==3.3.6 \\", "psycopg>=3.3.6 \\", "exactly name==version"),
+])
+def test_a_lock_entry_with_a_marker_extra_or_range_is_refused(old, new, message):
+    """lock 的每個項目只能是「名稱==版本」：帶環境 marker、extras 或版本範圍的手改項目都拒絕。
+
+    Every lock entry is exactly name==version: a hand-edited entry with an environment marker, extras or a version
+    range is refused."""
+    text = (ROOT / "requirements.lock").read_text()
+    assert text.count(old) == 1 and locked_requirements(text)["psycopg"]["version"] == "3.3.6"
+    with pytest.raises(AssertionError, match=message):
+        locked_requirements(text.replace(old, new))
+
+
+def test_a_lock_entry_without_a_hash_is_refused():
+    """lock 的每個項目至少附一個 sha256 雜湊：手動加入、沒有雜湊的項目拒絕；雜湊格式不符也拒絕。
+
+    Every lock entry carries at least one sha256 hash: a hand-added entry without one is refused, and so is a
+    malformed hash."""
+    text = (ROOT / "requirements.lock").read_text()
+    with pytest.raises(AssertionError, match=r"lock entry without a hash: \['extra-package'\]"):
+        locked_requirements(text + "extra-package==1.0 \\\n    # via psycopg\n")
+    with pytest.raises(AssertionError, match="unexpected lock line"):
+        locked_requirements(text + "extra-package==1.0 \\\n    --hash=sha256:abc\n    # via psycopg\n")

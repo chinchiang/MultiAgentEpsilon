@@ -50,9 +50,12 @@ relative to it."""
     def get(self, path):
         return strict_json(self._transport.raw(self._url(path)))
 
-    def items(self, path, key=None):
-        """讀完所有分頁。給 key 時是帶 total_count 的物件列表，每一頁宣稱的總數都必須等於實際讀到的筆數。 / Read
-        every page. With key, the response is an object listing whose total_count on every page must equal the items read."""
+    def items(self, path, key=None, exhaustive=False):
+        """讀完所有分頁。給 key 時是帶 total_count 的物件列表，每一頁宣稱的總數都必須等於實際讀到的筆數。沒有總數可核對的
+        陣列以「不足一頁」判定結尾；exhaustive 時改為讀到空頁才停，不假設不足額的一頁就是最後一頁。 / Read every page.
+        With key, the response is an object listing whose total_count on every page must equal the items read. An array
+        has no total to check and ends at the first short page; with exhaustive it ends only at an empty page, so a short
+        page is never assumed to be the last."""
         url, result, totals = self._url(path), [], []
         for page in range(1, 102):
             separator = "&" if "?" in path else "?"
@@ -64,7 +67,7 @@ relative to it."""
             need(isinstance(items, list), "PAGINATION_TYPE")
             need(len(result) + len(items) <= 10000, "PAGINATION_LIMIT")
             result.extend(items)
-            if len(items) < 100:
+            if not items if exhaustive else len(items) < 100:
                 need(all(total == len(result) for total in totals), "LISTING_TOTAL")
                 return result
         raise Denied("PAGINATION_LIMIT")

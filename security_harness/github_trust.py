@@ -85,6 +85,10 @@ def related_pull_path(prefix, pr):
 # triggered it (seconds, normally), so a PR closing before the run was created does not prove it is not the source; its
 # timeline is skipped only when it closed earlier than this bound. This assumes a bounded delay; it is not a proof.
 SOURCE_DELAY_LIMIT = timedelta(days=7)
+# timeline 上代表 PR 的 base 已被改動的事件：手動改 base，以及 base 分支被合併刪除後 GitHub 自動改到別的分支。 / Timeline
+# events that mean a PR's base changed: a manual retarget, and GitHub retargeting it automatically after its base
+# branch was merged and deleted.
+RETARGET_EVENTS = ("base_ref_changed", "automatic_base_change_succeeded")
 
 
 def same_branch(pull, pr):
@@ -143,7 +147,7 @@ Bind a pull_request_target run to this PR's base without trusting run evidence.
         events = histories.get(p["number"])
         need(isinstance(events, list) and all(isinstance(e, dict) and isinstance(e.get("event"), str)
                                              for e in events), "BASE_HISTORY_MISSING")
-        need(not any(e["event"] == "base_ref_changed" for e in events), "BASE_RETARGETED_UNVERIFIABLE")
+        need(not any(e["event"] in RETARGET_EVENTS for e in events), "BASE_RETARGETED_UNVERIFIABLE")
     # 關聯 PR 快照若存在，只能進一步限縮信任。 / Associated PR snapshots, when present, may only constrain trust further.
     for linked in run.get("pull_requests", []):
         if linked.get("number") == pr["number"] and linked.get("base"):
@@ -258,7 +262,7 @@ class GitHubTrust:
 
     def run_base(self, pr, base_branch):
         pulls = self._related_pulls(pr)
-        return RunBaseEvidence(pr, pulls, base_branch, lambda number: self._reader.items(f"issues/{number}/timeline"))
+        return RunBaseEvidence(pr, pulls, base_branch, lambda number: self._reader.items(f"issues/{number}/timeline", exhaustive=True))
 
     def head_push(self, number, pr, base_branch):
         """讀出 head 的推送時間與推送者，並拒絕 fork、共用 head、規則集未要求最後推送核准與無法確認的推送。

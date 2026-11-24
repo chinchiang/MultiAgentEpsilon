@@ -71,6 +71,9 @@ def test_run_base_can_be_checked_without_review_permissions_and_rereads_next_tim
     evidence = trust.run_base(pr, 'main')
     evidence.validate(run)
     evidence.validate({**run, 'run_attempt': 2})
+    # PR 列表一次、timeline 一次：空的 timeline 第一頁就是空頁，不必再讀。 / One read of the PR listing and one of the
+    # timeline: an empty timeline ends at its first, empty page.
+    assert [query.get('page') for _, path, query in github.requests if path.endswith('/timeline')] == ['1']
     assert len(github.requests) == 2
     assert all('/reviews' not in path and '/permission' not in path for _, path, _ in github.requests)
     github.add('issues/5/timeline', [{'event': 'base_ref_changed'}])
@@ -350,14 +353,73 @@ def test_run_base_reads_each_possible_source_timeline_once_and_skips_ruled_out_p
     evidence = GitHubTrust(GitHubReader(github, 'owner/repo')).run_base(pr, 'main')
     evidence.validate({**run, 'created_at': RUN_CREATED})
     evidence.validate({**run, 'created_at': RUN_CREATED})
-    read = [path for _, path, _ in github.requests if path.endswith('/timeline')]
+    read = [path for _, path, query in github.requests if path.endswith('/timeline') and query['page'] == '1']
     assert sorted(read) == ['/repos/owner/repo/issues/5/timeline', '/repos/owner/repo/issues/6/timeline']
     # 較早建立的 run 離 #7 的關閉不到 7 天，必須讀它的 timeline；它曾改 base，所以拒絕。 / An earlier run is within
     # seven days of #7 closing, so its timeline must be read; it was retargeted, so it is refused.
     github.add('issues/7/timeline', [{'event': 'base_ref_changed'}])
     with pytest.raises(Denied, match='^BASE_RETARGETED_UNVERIFIABLE$'):
         evidence.validate({**run, 'created_at': '2026-11-01T09:00:00Z'})
-    read = [path for _, path, _ in github.requests if path.endswith('/timeline')]
+    read = [path for _, path, query in github.requests if path.endswith('/timeline') and query['page'] == '1']
     assert sorted(read) == ['/repos/owner/repo/issues/5/timeline', '/repos/owner/repo/issues/6/timeline',
                             '/repos/owner/repo/issues/7/timeline']
 
+
+
+@pytest.mark.parametrize('event,code', [
+    ('base_ref_changed', 'BASE_RETARGETED_UNVERIFIABLE'),
+    ('automatic_base_change_succeeded', 'BASE_RETARGETED_UNVERIFIABLE'),
+    ('automatic_base_change_failed', None),
+    ('renamed', None),
+])
+def test_an_automatic_retarget_counts_as_a_changed_base(event, code):
+    """base 分支被合併刪除後 GitHub 自動改 base，timeline 記的是 automatic_base_change_succeeded，不是
+    base_ref_changed；兩者都代表 run 可能取自另一個 base 的 workflow。沒有改成的嘗試與無關事件不算。
+
+    When a base branch is merged and deleted GitHub retargets the PR itself and records
+    automatic_base_change_succeeded, not base_ref_changed; either means a run may have used another base's workflow.
+    A failed attempt and an unrelated event do not count."""
+    from security_harness.github_trust import RETARGET_EVENTS, GitHubTrust
+    github, pr, run = repository()
+    github.add('issues/5/timeline', [{'event': 'labeled'}, {'event': event}])
+    evidence = GitHubTrust(GitHubReader(github, 'owner/repo')).run_base(pr, 'main')
+    assert (event in RETARGET_EVENTS) == (code is not None)
+    if code is None:
+        evidence.validate(run)
+    else:
+        with pytest.raises(Denied, match=f'^{code}$'):
+            evidence.validate(run)
+
+
+class ShortPages:
+    """每頁筆數由測試指定的傳輸層：模擬 GitHub 過濾事件後回傳不足額、但不是最後一頁的分頁。 / A transport whose page
+    sizes the test chooses: a page GitHub filtered below the page size that is still not the last."""
+
+    def __init__(self, pages):
+        self.pages, self.read = pages, []
+
+    def raw(self, url, method='GET', payload=None, authenticated=True, limit=0):
+        import json
+        import urllib.parse
+        parts = urllib.parse.urlsplit(url)
+        query = dict(urllib.parse.parse_qsl(parts.query))
+        self.read.append((parts.path, int(query['page'])))
+        if parts.path.endswith('/pulls'):
+            return json.dumps(self.pages['pulls'] if query['page'] == '1' else []).encode()
+        return json.dumps(self.pages['timeline'].get(int(query['page']), [])).encode()
+
+
+def test_a_retarget_behind_a_short_timeline_page_is_still_read():
+    """timeline 的一頁不足額不代表後面沒有事件：讀到空頁才停，藏在後面分頁的改 base 紀錄仍會被讀到。
+
+    A short timeline page does not mean no events follow: reading stops only at an empty page, so a retarget on a
+    later page is still seen."""
+    from security_harness.github_trust import GitHubTrust
+    _, pr, run = repository()
+    transport = ShortPages({'pulls': [pr], 'timeline': {1: [{'event': 'labeled'}], 2: [{'event': 'base_ref_changed'}]}})
+    reader = GitHubReader(transport, 'owner/repo')
+    assert reader.items('issues/5/timeline') == [{'event': 'labeled'}]
+    assert reader.items('issues/5/timeline', exhaustive=True) == [{'event': 'labeled'}, {'event': 'base_ref_changed'}]
+    with pytest.raises(Denied, match='^BASE_RETARGETED_UNVERIFIABLE$'):
+        GitHubTrust(reader).run_base(pr, 'main').validate(run)
+    assert transport.read[-3:] == [('/repos/owner/repo/issues/5/timeline', page) for page in (1, 2, 3)]
