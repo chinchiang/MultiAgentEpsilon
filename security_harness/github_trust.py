@@ -97,10 +97,12 @@ def same_branch(pull, pr):
 
 
 def closed_before(pull, run):
-    """這個 PR 是否在 run 建立前超過延遲上限就已關閉。任一時間讀不到或格式不符都視為「不是」。 / Whether this PR closed
-    earlier than the delay bound before the run was created. A missing or malformed time counts as no."""
+    """這個 PR 是否在 run 建立前超過延遲上限就已關閉。狀態不是 closed、任一時間讀不到或格式不符都視為「不是」。 /
+    Whether this PR closed earlier than the delay bound before the run was created. A state other than closed, or a
+    missing or malformed time, counts as no."""
     try:
-        return parse_time(run["created_at"]) - parse_time(pull["closed_at"]) > SOURCE_DELAY_LIMIT
+        return (pull.get("state") == "closed"
+                and parse_time(run["created_at"]) - parse_time(pull["closed_at"]) > SOURCE_DELAY_LIMIT)
     except (KeyError, TypeError, ValueError):
         return False
 
