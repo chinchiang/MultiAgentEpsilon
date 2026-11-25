@@ -88,7 +88,7 @@ PR #12 已由 CatGrocery 對最新 head `58d9bc0` 獨立核准，正式 [run 375
 - `<run-id>/report.json`：每次新 run 的 G1、G2、AUTH 結果及 ALLOW／BLOCK；本輪候選缺陷版預期恰好 9 個政策指定的 AUTH findings，修正版預期 0。
 - `latest.txt`：最新 run 的索引。檢查 report 的 subject／policy digest 與當次原始碼，不能將舊報告當成本次結果。
 
-`expect_block.py` 要求整個 run 的 `execution` 為 COMPLETED、沒有任何 errors、清理完成、variant 為 vulnerable、三項 gate 都確實完成、G1／G2 無 findings，且 60 個授權案例中失敗的恰好是政策 `seeded_defect_case_ids` 列出的 9 個；工具 ERROR、清理失敗、來源在執行中變動、沒有案例或換成其他案例失敗都會使驗收失敗。
+`expect_block.py` 要求整個 run 的 `execution` 為 COMPLETED、沒有任何 errors、清理完成、variant 為 vulnerable、三項 gate 都確實完成、G1／G2 無 findings，且 62 個授權案例中失敗的恰好是政策 `seeded_defect_case_ids` 列出的 9 個；工具 ERROR、清理失敗、來源在執行中變動、沒有案例或換成其他案例失敗都會使驗收失敗。
 
 測試數量以 pytest 收集的項目計算（含 parametrize 展開），不是 `def test_` 的函式數。
 
@@ -192,7 +192,7 @@ python3 -I scripts/dev_db.py start
 python3 -I scripts/dev_db.py stop
 ```
 
-pytest.xml records collected parametrized items, not test-function count. http-smoke.json verifies real loopback health/login/allowed and cross-owner reads. Each run report binds current subject/policy; latest.txt is only an index. expect_block requires COMPLETED/no errors/cleanup/vulnerable variant/all gates complete/G1-G2 clean/exact nine seeded IDs among 60 AUTH cases. Tool errors, source drift, empty/different cases, or cleanup failure are failed negative acceptance.
+pytest.xml records collected parametrized items, not test-function count. http-smoke.json verifies real loopback health/login/allowed and cross-owner reads. Each run report binds current subject/policy; latest.txt is only an index. expect_block requires COMPLETED/no errors/cleanup/vulnerable variant/all gates complete/G1-G2 clean/exact nine seeded IDs among 62 AUTH cases. Tool errors, source drift, empty/different cases, or cleanup failure are failed negative acceptance.
 
 | Roadmap item | Implemented scope | Remaining |
 |---|---|---|

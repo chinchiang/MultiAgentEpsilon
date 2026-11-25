@@ -7,7 +7,7 @@
     "::1"
   ],
   "database_name": "epsilon_fixture",
-  "max_cases": 60,
+  "max_cases": 70,
   "max_seconds": 120,
   "max_total_seconds": 600,
   "allow_redirects": false,
