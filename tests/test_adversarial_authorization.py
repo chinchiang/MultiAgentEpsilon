@@ -195,6 +195,21 @@ MUTATIONS.update({
         '        token_hash = hashlib.sha256(authorization[7:].encode()).hexdigest()\n'
         '        with connect(dsn, schema) as conn:\n            user = conn.execute("SELECT u.id'),
     # 沒有權杖時改信任請求標頭自稱的使用者。 / Without a token it trusts the user a request header claims.
+    # 權杖就是使用者名稱：知道帳號就等於已登入。 / The token is the username: knowing an account is being signed in.
+    'token_is_user_id': (
+        '            token = secrets.token_urlsafe(32)\n',
+        '            token = user["id"]\n'),
+    # 權杖由使用者名稱與固定字串算出，夠長但每次登入都相同。 / The token derives from the username and a constant: long
+    # enough, yet the same at every login.
+    'deterministic_token': (
+        '            token = secrets.token_urlsafe(32)\n',
+        '            token = hashlib.sha256((user["id"] + "-fixed-pepper").encode()).hexdigest()\n'),
+    # 權杖是遞增計數器：各不相同，但短到可以猜。 / The token is a counter: distinct, but short enough to guess.
+    'counter_token': [(
+        '            token = secrets.token_urlsafe(32)\n',
+        '            sequence.append(1)\n            token = str(len(sequence))\n'), (
+        '    def principal(',
+        '    sequence = []\n\n    def principal(')],
     'header_identity_fallback': [(
         '    def principal(authorization: str | None = Header(default=None)):',
         '    def principal(authorization: str | None = Header(default=None), x_user: str | None = Header(default=None)):\n'
@@ -251,6 +266,9 @@ MUTATIONS.update({
 EXPECTED = {
     'cross_user_password_accepted': {"another user's password denied without session"},
     'unsigned_token_accepted': {'unsigned self-describing token denied'},
+    'token_is_user_id': {'bearer naming a user denied', 'login tokens are distinct and at least 32 characters'},
+    'deterministic_token': {'login tokens are distinct and at least 32 characters'},
+    'counter_token': {'login tokens are distinct and at least 32 characters'},
     'header_identity_fallback': {'identity outside the session cannot authenticate'},
     'admin_tenant_reassignment': {'admin cannot reassign tenant'},
     'method_override_honored': {'method override header cannot delete'},
@@ -269,7 +287,8 @@ EXPECTED = {
     'patch_weaker_session_check': {'anonymous write denied', 'forged bearer write denied',
                                    'expired session write denied', 'logged-out session write denied'},
     'delayed_cross_tenant_write': {'no delayed or out-of-band state changes'},
-    'unknown_token_admin_fallback': {'random bearer token denied', 'unsigned self-describing token denied'},
+    'unknown_token_admin_fallback': {'random bearer token denied', 'unsigned self-describing token denied',
+                                     'bearer naming a user denied'},
     'unauthenticated_put_route': {'unlisted item method rejected without side effect'},
     'hidden_create_route': {'unlisted item create not found'},
     'denied_read_header_leak': {'bob: unauthorized read denied without data',

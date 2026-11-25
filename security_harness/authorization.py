@@ -151,6 +151,10 @@ flight when it was stopped and counts as a delayed side effect."""
     check("anonymous denied", "get", "/items/1", 401, {"detail": "authentication required"})
     check("forged bearer denied", "get", "/items/1", 401, {"detail": "authentication required"},
           headers={"Authorization": "Bearer invalid"})
+    # 權杖不能就是身分本身：以使用者名稱當權杖的登入，知道帳號就等於已登入。 / A token must not be the identity
+    # itself: a login that issues the username as the token makes knowing an account the same as being signed in.
+    check("bearer naming a user denied", "get", "/admin/export", 401, {"detail": "authentication required"},
+          headers={"Authorization": "Bearer admin"})
     # 身分只能來自伺服器端的 session：自帶身分宣告的未簽章權杖，以及標頭、cookie、查詢參數自稱的身分，都不算。 /
     # Identity comes only from a server-side session: neither an unsigned token carrying its own claims nor an
     # identity asserted through headers, a cookie or the query string counts.
@@ -227,6 +231,29 @@ flight when it was stopped and counts as a delayed side effect."""
     model["state"] = expected
     if not logged_out:
         db.restore(expected)
+    # 同一位使用者再登入一次：權杖必須是新的，且所有權杖都夠長。黑箱無法證明權杖是隨機的，這裡只擋下可重現（固定
+    # 雜湊）、等於身分與過短（計數器）三類。之後移除這筆 session，後面的案例不受影響。 / The same user signs in once
+    # more: the token must be new and every token long enough. A black box cannot prove tokens are random; this rules
+    # out the reproducible (a fixed hash), the identity itself and the short (a counter). The session is then removed,
+    # so later cases are unaffected.
+    before = observe()
+    issued = [value["Authorization"][7:] for value in headers.values()]
+    response = client.post("/login", json={"username": "alice", "password": passwords["alice"]})
+    after = db.snapshot()
+    try:
+        body = response_body(response)
+    except ValueError:
+        body = None
+    again = body.get("access_token") if isinstance(body, dict) and set(body) == {"access_token"} else None
+    new = [row for row in after["sessions"] if row not in before["sessions"]]
+    expected = deepcopy(before)
+    expected["sessions"] = sorted(before["sessions"] + new, key=lambda row: row["token_hash"])
+    fresh = (response.status_code == 200 and isinstance(again, str) and headers_match(response)
+             and again not in issued and all(32 <= len(token) <= 256 for token in (*issued, again))
+             and len(new) == 1 and new[0]["user_id"] == "alice"
+             and new[0]["token_hash"] == hashlib.sha256(again.encode()).hexdigest() and after == expected)
+    cases.append({"case": "login tokens are distinct and at least 32 characters", "passed": fresh})
+    db.restore(before)
     denied_body = {"detail": "authentication required"}
     # 撤銷後的權杖對每個需要身分的端點都必須失效。 / A revoked token must fail on every authenticated endpoint.
     check("logged-out session write denied", "patch", "/items/1", 401, denied_body,

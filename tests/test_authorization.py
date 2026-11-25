@@ -15,7 +15,7 @@ def test_identical_oracle_rejects_vulnerable_and_accepts_fixed():
     vulnerable = run_authorization(dsn, "vulnerable")
     fixed = run_authorization(dsn, "fixed")
     contract = json.loads((Path(__file__).resolve().parents[1] / "security/policy.json").read_text())["gate_contracts"]["AUTH"]
-    assert len(vulnerable) == len(fixed) == len(contract["case_ids"]) == 60
+    assert len(vulnerable) == len(fixed) == len(contract["case_ids"]) == 62
     failed = {x["case"] for x in vulnerable if not x["passed"]}
     assert failed == set(contract["seeded_defect_case_ids"]) == {
         "bob: unauthorized read denied without data",
@@ -135,14 +135,14 @@ def test_identity_and_tenant_cases_are_in_the_contract_and_pass_on_both_variants
              "role header cannot grant admin", "tenant query cannot widen admin export"}
     assert added <= set(contract["case_ids"])
     assert not added & set(contract["seeded_defect_case_ids"])
-    assert len(contract["case_ids"]) == 60
+    assert len(contract["case_ids"]) >= 60
 
 
 def test_identity_source_and_boundary_cases_fill_the_contract_to_the_roe_cap():
-    """六個身分來源與邊界案例在契約內、不是植入缺陷，且契約正好用滿 RoE 的案例上限。
+    """六個身分來源與邊界案例在契約內、不是植入缺陷。加入時契約正好用滿當時的上限 60；上限其後調高，契約仍須在上限內。
 
-    The six identity-source and boundary cases are in the contract, are not seeded defects, and the contract exactly
-    fills the RoE case cap."""
+    The six identity-source and boundary cases are in the contract and are not seeded defects. They filled the cap of
+    60 when added; the cap has since risen and the contract must still fit it."""
     root = Path(__file__).resolve().parents[1]
     contract = json.loads((root / "security/policy.json").read_text())["gate_contracts"]["AUTH"]
     roe = json.loads((root / "security/roe.json").read_text())
@@ -151,5 +151,19 @@ def test_identity_source_and_boundary_cases_fill_the_contract_to_the_roe_cap():
              "missing item indistinguishable from forbidden", "admin export reflects deletions"}
     assert added <= set(contract["case_ids"])
     assert not added & set(contract["seeded_defect_case_ids"])
-    assert len(contract["case_ids"]) == len(set(contract["case_ids"])) == roe["max_cases"] == 60
+    assert 60 <= len(contract["case_ids"]) == len(set(contract["case_ids"])) <= roe["max_cases"]
+
+
+def test_token_cases_are_in_the_contract_and_pass_on_both_variants():
+    """兩個權杖案例屬於契約、不是植入缺陷（缺陷版用同一套登入，兩者都須通過）；契約共 62 案例，RoE 上限 70。
+
+    The two token cases are in the contract and are not seeded defects (the seeded variant shares the login, so both
+    pass); the contract holds 62 cases under an RoE cap of 70."""
+    root = Path(__file__).resolve().parents[1]
+    contract = json.loads((root / "security/policy.json").read_text())["gate_contracts"]["AUTH"]
+    roe = json.loads((root / "security/roe.json").read_text())
+    added = {"bearer naming a user denied", "login tokens are distinct and at least 32 characters"}
+    assert added <= set(contract["case_ids"])
+    assert not added & set(contract["seeded_defect_case_ids"])
+    assert (len(contract["case_ids"]), len(set(contract["case_ids"])), roe["max_cases"]) == (62, 62, 70)
 

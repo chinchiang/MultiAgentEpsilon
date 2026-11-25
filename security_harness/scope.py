@@ -12,7 +12,7 @@ def validate_roe(roe: dict) -> dict:
             or roe.get("allow_redirects") is not False
             or roe.get("external_callback") is not False
             or roe.get("llm_calls") is not False
-            or type(roe.get("max_cases")) is not int or not 1 <= roe["max_cases"] <= 60
+            or type(roe.get("max_cases")) is not int or not 1 <= roe["max_cases"] <= 70
             or type(roe.get("max_seconds")) is not int or not 1 <= roe["max_seconds"] <= 120
             or type(roe.get("max_total_seconds")) is not int or not 1 <= roe["max_total_seconds"] <= 600):
         raise ValueError("RoE exceeds the synthetic loopback pilot's supported scope")
