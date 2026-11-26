@@ -10,7 +10,7 @@
   "evaluator_sha": null,
   "evaluator_digest": null,
   "policy_digest": null,
-  "minimum_regression_tests": 2119,
+  "minimum_regression_tests": 2138,
   "reviewers": [
     "chinchiang",
     "CatGrocery",
