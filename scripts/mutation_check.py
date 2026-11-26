@@ -26,6 +26,12 @@ TARGETS = {
         ('validate_cases', 'seeded_defects', 'decide'), ('tests/test_policy.py', 'tests/test_security_properties.py')),
     'security_harness/github_http.py': (
         ('strict_json',), ('tests/test_trusted_publisher.py', 'tests/test_security_properties.py')),
+    # verifier、guard 與發布程式讀 GitHub 的共同入口：路徑不得跳出儲存庫，分頁必須讀完，總數必須相符。 / The shared
+    # GitHub read path of the verifier, guard and publisher: a path stays inside the repository, every page is read
+    # and totals must agree.
+    'security_harness/github_readonly.py': (
+        ('GitHubReader._url', 'GitHubReader.items', 'GitHubReader.check_source'),
+        ('tests/test_github_readonly.py', 'tests/test_verify_required_check.py')),
     'security_harness/preflight.py': (
         ('validate_package_policy', 'check_metadata'), ('tests/test_preflight.py',)),
     'security_harness/authorization.py': (
@@ -57,7 +63,7 @@ TARGETS = {
     # the publisher; only tests that never call git are selected, since the worker forbids subprocesses.
     'security_harness/github_trust.py': (
         ('validate_review', 'review_decision', 'approved_review', 'pr_commit_identities', 'validate_run_base',
-         'same_branch', 'closed_before', 'base_relevant', 'RunBaseEvidence.validate', 'trusted_run', 'GitHubTrust.head_push', 'GitHubTrust.review_ids', 'GitHubTrust.baseline_approval',
+         'related_pull_path', 'same_branch', 'closed_before', 'base_relevant', 'RunBaseEvidence.validate', 'trusted_run', 'GitHubTrust.head_push', 'GitHubTrust.review_ids', 'GitHubTrust.baseline_approval',
          'GitHubTrust.reverify_publication'),
         ('tests/test_github_trust.py', 'tests/test_trusted_publisher.py', 'tests/test_trust_scope.py',
          'tests/test_trusted_changes.py::test_baseline_approval_binds_independent_reviewer_and_current_head',

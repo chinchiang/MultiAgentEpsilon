@@ -178,3 +178,67 @@ def test_a_check_and_job_that_both_lack_a_head_are_unresolved():
     del check['head_sha'], github.job(check['id'])['head_sha']
     with pytest.raises(Denied, match='^CHECK_ATTEMPT_UNRESOLVED$'):
         GitHubReader(github, 'owner/repo').check_source(check)
+
+
+class Pages:
+    """每頁內容由測試指定的傳輸層。 / A transport whose pages the test chooses."""
+
+    def __init__(self, page):
+        self.page, self.requests = page, []
+
+    def raw(self, url, method='GET', payload=None, authenticated=True, limit=0):
+        import json
+        import urllib.parse
+        parts = urllib.parse.urlsplit(url)
+        query = dict(urllib.parse.parse_qsl(parts.query))
+        self.requests.append((parts.path, query))
+        return json.dumps(self.page(int(query['page']))).encode()
+
+
+def test_exhaustive_reading_stops_only_at_an_empty_page():
+    """exhaustive 時不足額的一頁不是結尾：讀到空頁才停；非 exhaustive 仍在第一個不足額的頁停下。
+
+    With exhaustive a short page is not the end: reading stops only at an empty page, while the default still stops
+    at the first short page."""
+    pages = {1: [{'id': 1}], 2: [{'id': 2}, {'id': 3}], 3: [], 4: [{'id': 4}]}
+    transport = Pages(lambda number: pages.get(number, []))
+    reader = GitHubReader(transport, 'owner/repo')
+    assert reader.items('issues/5/timeline', exhaustive=True) == [{'id': 1}, {'id': 2}, {'id': 3}]
+    assert [query['page'] for _, query in transport.requests] == ['1', '2', '3']
+    assert all(query['per_page'] == '100' for _, query in transport.requests)
+    transport.requests.clear()
+    assert reader.items('issues/5/timeline') == [{'id': 1}]
+    assert [query['page'] for _, query in transport.requests] == ['1']
+
+
+def test_exhaustive_reading_of_full_pages_and_of_nothing():
+    """剛好滿頁之後接空頁：兩種讀法結果相同；空列表只讀一頁。 / Full pages followed by an empty one read the same
+    either way; an empty listing takes one read."""
+    github = FakeGitHub('owner/repo')
+    github.add('issues/5/timeline', [{'id': n} for n in range(200)])
+    github.add('issues/6/timeline', [])
+    reader = GitHubReader(github, 'owner/repo')
+    assert reader.items('issues/5/timeline', exhaustive=True) == reader.items('issues/5/timeline')
+    assert len(reader.items('issues/5/timeline', exhaustive=True)) == 200
+    github.requests.clear()
+    assert reader.items('issues/6/timeline', exhaustive=True) == []
+    assert len(github.requests) == 1
+
+
+def test_reading_that_never_reaches_an_end_is_refused_after_a_bounded_number_of_pages():
+    """每頁都只有一筆、永遠不出現空頁：讀滿固定頁數後以 PAGINATION_LIMIT 拒絕，不會無限讀下去，也不會把讀到的部分當成
+    完整結果回傳。
+
+    One item on every page and never an empty one: after a fixed number of pages it is refused with PAGINATION_LIMIT,
+    neither reading forever nor returning the partial result as complete."""
+    transport = Pages(lambda number: [{'id': number}])
+    with pytest.raises(Denied, match='^PAGINATION_LIMIT$'):
+        GitHubReader(transport, 'owner/repo').items('issues/5/timeline', exhaustive=True)
+    assert [int(query['page']) for _, query in transport.requests] == list(range(1, 102))
+
+
+def test_exhaustive_reading_still_refuses_more_than_ten_thousand_items():
+    github = FakeGitHub('owner/repo')
+    github.add('issues/5/timeline', list(range(10001)))
+    with pytest.raises(Denied, match='^PAGINATION_LIMIT$'):
+        GitHubReader(github, 'owner/repo').items('issues/5/timeline', exhaustive=True)

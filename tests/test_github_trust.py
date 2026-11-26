@@ -423,3 +423,57 @@ def test_a_retarget_behind_a_short_timeline_page_is_still_read():
     with pytest.raises(Denied, match='^BASE_RETARGETED_UNVERIFIABLE$'):
         GitHubTrust(reader).run_base(pr, 'main').validate(run)
     assert transport.read[-3:] == [('/repos/owner/repo/issues/5/timeline', page) for page in (1, 2, 3)]
+
+
+@pytest.mark.parametrize('repo', [None, {}, {'id': 10}, {'id': 10, 'full_name': 'owner'},
+                                  {'id': 10, 'full_name': 'owner/repo/extra'}, {'id': 10, 'full_name': 'owner/re po'}])
+def test_a_pull_request_without_a_usable_head_repository_is_refused_before_any_listing(repo):
+    """head 儲存庫已刪除（null）或名稱不是 owner/name：無法列出同分支的 PR，以固定拒絕碼擋下，且不送出任何請求。
+
+    A deleted head repository (null) or a name that is not owner/name: the same-branch PRs cannot be listed, so it is
+    refused with its fixed code before any request is sent."""
+    from security_harness.github_trust import GitHubTrust, related_pull_path
+    github, pr, _ = repository()
+    broken = {**pr, 'head': {**pr['head'], 'repo': repo}}
+    assert related_pull_path('', pr) == '/pulls?state=all&head=owner%3Afeature'
+    with pytest.raises(Denied, match='^PR_HEAD_REPOSITORY$'):
+        related_pull_path('', broken)
+    with pytest.raises(Denied, match='^PR_HEAD_REPOSITORY$'):
+        GitHubTrust(GitHubReader(github, 'owner/repo')).run_base(broken, 'main')
+    assert github.requests == []
+
+
+@pytest.mark.parametrize('change', [
+    {'head_repository': None}, {'head_repository': {}}, {'head_repository': {'id': 11}}, {'head_branch': 'other'},
+    {'head_branch': None}])
+def test_a_run_from_another_head_repository_or_branch_is_refused(change):
+    """run 的 head 儲存庫（已刪除、缺少 id 或 id 不同）或分支與此 PR 不符：不是這個 PR 的 run。
+
+    A run whose head repository (deleted, without an id, or another id) or branch differs from this PR's is not this
+    PR's run."""
+    from security_harness.github_trust import validate_run_base
+    run, pr, pulls, histories = run_base_case()
+    validate_run_base(run, pr, pulls, 'main', histories)
+    with pytest.raises(Denied, match='^RUN_HEAD_BRANCH$'):
+        validate_run_base({**run, **change}, pr, pulls, 'main', histories)
+    # PR 自己的 head 儲存庫讀不到時，沒有任何 run 可以綁定。 / With the PR's own head repository unreadable, no run
+    # can be bound.
+    orphan = {**pr, 'head': {**pr['head'], 'repo': None}}
+    with pytest.raises(Denied, match='^RUN_HEAD_BRANCH$'):
+        validate_run_base({**run, 'head_repository': None}, orphan, [orphan], 'main', histories)
+
+
+@pytest.mark.parametrize('state,skipped', [('closed', True), ('open', False), (None, False), ('merged', False)])
+def test_only_a_pull_request_marked_closed_can_have_its_timeline_skipped(state, skipped):
+    """省略 timeline 的條件是「已關閉」超過延遲上限：closed_at 有值但狀態不是 closed 的資料不算，仍須讀取。
+
+    A timeline is skipped only for a PR closed longer ago than the delay bound: one with closed_at set but a state
+    other than closed does not count and is still read."""
+    from security_harness.github_trust import base_relevant, closed_before
+    _, pr, run = repository()
+    twin = moved_twin(closed_at='2026-10-20T10:00:00Z', state=state)
+    if state is None:
+        del twin['state']
+    created = {**run, 'created_at': RUN_CREATED}
+    assert closed_before(twin, created) is skipped
+    assert base_relevant(twin, pr, created) is not skipped
