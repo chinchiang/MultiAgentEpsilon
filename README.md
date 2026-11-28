@@ -81,7 +81,7 @@ python3 -I scripts/dev_db.py stop
 | G0／G4 | [試點授權矩陣與威脅](docs/pilot-scope.zh-TW.md) | 真實應用 owner、完整威脅建模及適用性核准 |
 | G1 | PyPI metadata、固定版本／hash、冷卻期、wheel-only；鎖定檔 CycloneDX SBOM、OSV 精確版本漏洞查詢 | 安裝映像清冊、KEV／EPSS、惡意套件行為、其他生態系 |
 | G2 | 真實 Gitleaks、遮罩、工作樹及候選 HEAD 可達 blobs、限額 gzip／zip／tar 展開 | 伺服器端 Push Protection、遠端不可得歷史／快取、金鑰撤銷 |
-| 授權回歸 | 登入負例、同角色、跨租戶、管理者讀寫、欄位限制、登出、各端點身分狀態、輸入邊界、延遲副作用、契約外探測、`/health` 回應契約、租戶欄位不可改寫及完整 fixture 狀態；另含別人的密碼、請求自稱的角色或租戶、第二租戶的允許路徑；54 個案例 | 完整 G5／Web/API 黑箱掃描、TLS／CSRF／JWT／SSRF |
+| 授權回歸 | 登入負例、同角色、跨租戶、管理者讀寫、欄位限制、登出、各端點身分狀態、輸入邊界、延遲副作用、契約外探測、`/health` 回應契約、租戶欄位不可改寫及完整 fixture 狀態；另含別人的密碼、請求自稱的角色或租戶、第二租戶的允許路徑、未簽章權杖、session 以外身分來源、管理員改寫租戶、方法覆寫、不存在與無權讀取不可區分、刪除後匯出及權杖不可預測性；62 個案例 | 完整 G5／Web/API 黑箱掃描、TLS／CSRF／JWT／SSRF |
 | 政策與證據 | 嚴格結果格式、故障阻擋、subject／policy digest、基準變更檢查、CI 簽章與來源驗證 | 專用可信發布器正式部署、例外生命週期、普通開發者的完整遠端繞過驗收 |
 | CI | 遠端 main／PR 正反例、固定 actions SHA、最小權限、早期拒絕證據與清理；main 規則已讀回 | 專用可信來源尚未部署，普通開發者繞過驗收仍未完成 |
 | 多模型 | [受限 gateway 與模型 adapter](docs/model-gateway.zh-TW.md)、[合成盲測與裁決試點](docs/blind-review.zh-TW.md)；地端 LM Studio（Nemotron、Qwen）與公司 LLM 閘道（GLM；DeepSeek 已停用） | 地端模型真實驗收、兩個以上真實家族的多輪穩定性、完整 G6／偏誤驗收 |
