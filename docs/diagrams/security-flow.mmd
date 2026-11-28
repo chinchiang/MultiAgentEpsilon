@@ -6,7 +6,7 @@ flowchart TB
     G2 --> Ready{"掃描完整且零 findings？<br/>Complete and clean scans?"}
     Ready -->|"是 / Yes"| Runtime["建立無網路 app／DB，啟動前核對隔離設定<br/>Isolation verified before containers start"]
     Ready -->|"否 / No"| Skip["AUTH 不執行，保留缺口<br/>NOT_RUN with failure evidence"]
-    Runtime --> Auth["外部 oracle：48 案例／完整回應與 DB 狀態<br/>48 exact authorization and side-effect checks"]
+    Runtime --> Auth["外部 oracle：62 案例／完整回應與 DB 狀態<br/>62 exact authorization and side-effect checks"]
     Auth --> Pending["重查摘要／等待清理<br/>Recheck digests / AWAITING_CLEANUP"]
     Skip --> Pending
     Config -->|"錯誤 / Error"| Error["保留錯誤／BLOCK<br/>Fail closed with evidence"]
