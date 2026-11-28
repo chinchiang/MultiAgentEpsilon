@@ -96,7 +96,9 @@ def create_app(dsn: str, schema: str, *, variant: str = "fixed") -> FastAPI:
     def health():
         with connect(dsn, schema) as conn:
             count = conn.execute("SELECT count(*) AS count FROM users").fetchone()["count"]
-        return {"ready": count == 4, "synthetic_fixture": True, "fixture_id": schema}
+        # 就緒是指種子使用者都已寫入；不綁定恰好的人數，可信端的種子才能增加使用者。 / Ready means the seeded users are
+        # all present; no exact count is bound, so the trusted seed can gain users.
+        return {"ready": count >= 4, "synthetic_fixture": True, "fixture_id": schema}
 
     @app.post("/login")
     def login(body: Login):
