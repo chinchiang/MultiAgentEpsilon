@@ -167,3 +167,29 @@ def test_token_cases_are_in_the_contract_and_pass_on_both_variants():
     assert not added & set(contract["seeded_defect_case_ids"])
     assert (len(contract["case_ids"]), len(set(contract["case_ids"])), roe["max_cases"]) == (62, 62, 70)
 
+
+
+@pytest.mark.integration
+def test_health_readiness_does_not_depend_on_an_exact_user_count():
+    """就緒條件是「種子使用者都在」，不是「恰好四位」：可信端的種子日後多一位使用者時，候選仍須回報就緒；種子不完整
+    （少於四位）則未就緒。回應格式不變。
+
+    Readiness means the seeded users are present, not that there are exactly four: when the trusted seed later gains a
+    user the candidate must still report ready, while an incomplete seed (fewer than four) is not ready. The response
+    shape is unchanged."""
+    from fixture_app.app import create_app
+    from security_harness import fixture_database
+    dsn = database_url()
+    schema, _ = fixture_database.seed(dsn)
+    try:
+        health = next(route.endpoint for route in create_app(dsn, schema).routes if route.path == "/health")
+        assert health() == {"ready": True, "synthetic_fixture": True, "fixture_id": schema}
+        with fixture_database.connect(dsn, schema) as conn:
+            conn.execute("INSERT INTO users VALUES ('dana','t2','admin','00','00')")
+        assert health() == {"ready": True, "synthetic_fixture": True, "fixture_id": schema}
+        with fixture_database.connect(dsn, schema) as conn:
+            conn.execute("DELETE FROM items WHERE owner='carol'")
+            conn.execute("DELETE FROM users WHERE id IN ('carol','dana')")
+        assert health() == {"ready": False, "synthetic_fixture": True, "fixture_id": schema}
+    finally:
+        fixture_database.cleanup(dsn, schema)

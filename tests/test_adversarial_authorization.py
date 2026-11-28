@@ -130,10 +130,10 @@ MUTATIONS.update({
         "RETURNING *\", (body.value, body.tenant, item_id,")],
     # 匿名可呼叫的 /health 多回傳所有租戶的項目。 / The anonymous /health also returns every tenant's items.
     'health_leaks_items': (
-        '        return {"ready": count == 4, "synthetic_fixture": True, "fixture_id": schema}',
+        '        return {"ready": count >= 4, "synthetic_fixture": True, "fixture_id": schema}',
         '        with connect(dsn, schema) as conn:\n'
         '            items = conn.execute("SELECT * FROM items ORDER BY id").fetchall()\n'
-        '        return {"ready": count == 4, "synthetic_fixture": True, "fixture_id": schema, "items": items}'),
+        '        return {"ready": count >= 4, "synthetic_fixture": True, "fixture_id": schema, "items": items}'),
 })
 
 MUTATIONS.update({
